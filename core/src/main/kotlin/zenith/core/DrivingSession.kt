@@ -17,6 +17,8 @@ data class DriveSnapshot(
     val alerts: List<ActiveAlert>,
     val section: SectionStatus?,
     val upcoming: UpcomingRadar?,
+    /** Next limit change on the road ahead, after rain and licence rules. */
+    val limitAhead: LimitAhead?,
     val events: List<AlertEvent>,
 )
 
@@ -26,7 +28,7 @@ data class DriveSnapshot(
  */
 class DrivingSession(
     /** Current road network; may change as road tiles load. */
-    network: () -> RoadNetwork?,
+    private val network: () -> RoadNetwork?,
     radars: List<Radar>,
     profile: DriverProfile = DriverProfile(),
     settings: AlertSettings = AlertSettings(),
@@ -52,9 +54,10 @@ class DrivingSession(
     /** Processes one fix; null when the filter rejected it as an outlier. */
     fun process(fix: GpsFix): DriveSnapshot? {
         val state = filter.update(fix) ?: return null
+        val net = network()
         val road = matcher.update(state)
         val roadLimit = road?.limitKmh
-        val out = engine.step(state, roadLimit)
+        val out = engine.step(state, road, net)
         return DriveSnapshot(
             timeMs = state.timeMs,
             position = state.position,
@@ -67,6 +70,7 @@ class DrivingSession(
             alerts = out.active,
             section = out.section,
             upcoming = out.upcoming,
+            limitAhead = out.limitAhead,
             events = out.events,
         )
     }

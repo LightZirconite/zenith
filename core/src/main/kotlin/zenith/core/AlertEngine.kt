@@ -16,8 +16,21 @@ data class AlertSettings(
     /** Over the limit by more than this many km/h triggers the audible overspeed warning. */
     val overspeedToleranceKmh: Int = 3,
     val mobileMaxAgeMs: Long = 3 * 3_600_000L,
-    /** How far ahead the "next radar" is looked up. */
+    /** How far ahead the "next radar" is looked up along the road. */
     val upcomingRangeM: Double = 15_000.0,
+    /**
+     * A radar on a side branch (not on the most probable road) is announced only this close, so an
+     * exit ramp radar does not alert the whole motorway, yet still alerts before the turn-off.
+     */
+    val branchAlertM: Double = 500.0,
+    /** Without a matched road, the "next radar" is only guessed this close, in a straight line. */
+    val fallbackUpcomingM: Double = 3_000.0,
+    /** Next limit change shown this far ahead along the road. */
+    val limitAheadM: Double = 2_000.0,
+    /** A new spoken overspeed warning needs this long since the last one... */
+    val overspeedRepeatMs: Long = 30_000,
+    /** ...or this long back under the limit. */
+    val overspeedResetMs: Long = 10_000,
 )
 
 enum class OverspeedLevel { NONE, OVER, WARN }
@@ -38,20 +51,26 @@ data class ActiveAlert(val radar: Radar, val distanceM: Double, val limitKmh: In
 
 data class SectionStatus(val limitKmh: Int, val averageKmh: Double, val remainingM: Double, val maxSpeedToFinishKmh: Double?)
 
-/** Closest radar ahead in the travel direction, even before its alert distance. */
-data class UpcomingRadar(val radar: Radar, val distanceM: Double, val limitKmh: Int?)
+/**
+ * Closest radar on the road ahead, even before its alert distance. [distanceM] is along the road
+ * when [roadName] comes from the horizon, else a straight line (no road matched).
+ */
+data class UpcomingRadar(val radar: Radar, val distanceM: Double, val limitKmh: Int?, val roadName: String? = null)
 
 data class AlertOutput(
     val events: List<AlertEvent>,
     val active: List<ActiveAlert>,
     val section: SectionStatus?,
     val upcoming: UpcomingRadar? = null,
+    val limitAhead: LimitAhead? = null,
 )
 
 /**
  * Turns the filtered vehicle state into radar, section and overspeed alerts.
  * Radars are only considered when they are ahead, measure the travel direction and are within
  * the speed-dependent alert distance; each one goes approach → (brake) → passed exactly once.
+ * With a matched road, "ahead" means reachable by road ([RoadHorizon]); radars off every road, or
+ * drives without road data, fall back to a cone in front of the car so no alert is lost.
  */
 class AlertEngine(
     /** Replaced when a newer radar pack is loaded. */
@@ -62,20 +81,43 @@ class AlertEngine(
 ) {
     private class Track(val radar: Radar, var minDistanceM: Double, var speedAtMinMps: Double, var brakeAnnounced: Boolean = false)
 
+    /** Where radars stand on the road ahead, for one step. Null fields: no matched road. */
+    private class Horizon(
+        val snapper: RadarSnapper,
+        val path: List<HorizonStep>,
+        val reachable: Map<Pair<Long, Boolean>, HorizonStep>,
+    ) {
+        /** Snaps of [r]; empty when it stands on no known road. */
+        fun snaps(r: Radar) = snapper.snap(r)
+
+        fun roadDistance(snaps: List<RadarOnRoad>): Double? =
+            snaps.mapNotNull { s -> reachable[s.segment.id to s.forward]?.let { RoadHorizon.distanceTo(listOf(it), s) } }.minOrNull()
+
+        fun pathDistance(snaps: List<RadarOnRoad>): Pair<Double, RadarOnRoad>? =
+            snaps.mapNotNull { s -> RoadHorizon.distanceTo(path, s)?.let { it to s } }.minByOrNull { it.first }
+    }
+
     private val tracked = LinkedHashMap<String, Track>()
     private val recentlyPassed = HashMap<String, Long>()
     private var section: SectionTracker? = null
     private var sectionLimit = 0
     private var lastPosition: LatLon? = null
     private var overspeed = OverspeedLevel.NONE
+    private var lastWarnMs: Long? = null
+    private var underLimitSinceMs: Long? = null
     private var lastLimit: Int? = null
+    private var snapper: RadarSnapper? = null
 
-    fun step(state: KinematicState, roadLimitKmh: Int?): AlertOutput {
+    /**
+     * One step of the drive. [road] is the matched road in [network]; both null without road data,
+     * which keeps the straight-line behaviour.
+     */
+    fun step(state: KinematicState, road: RoadCandidate? = null, network: RoadNetwork? = null): AlertOutput {
         val events = mutableListOf<AlertEvent>()
         val now = state.timeMs
         val v = state.speedMps
         val speedKmh = v * 3.6
-        val limit = roadLimitKmh?.let(effectiveLimit)
+        val limit = road?.limitKmh?.let(effectiveLimit)
 
         if (limit != lastLimit) {
             if (lastPosition != null) events += AlertEvent.LimitChanged(now, lastLimit, limit)
@@ -88,43 +130,67 @@ class AlertEngine(
         val heading = state.headingDeg
         val triggerM = (v * settings.lookaheadS + v * v / (2 * settings.comfortDecelMps2))
             .coerceIn(settings.minAlertM, settings.maxAlertM)
+        val horizon = horizon(road, network)
 
         var upcoming: UpcomingRadar? = null
-        for (r in radars.near(state.position, maxOf(triggerM + 200, settings.upcomingRangeM))) {
+        val searchM = if (horizon != null) settings.upcomingRangeM else maxOf(triggerM + 200, settings.fallbackUpcomingM)
+        for (r in radars.near(state.position, searchM)) {
             if (r.type.mobile && r.reportedAtMs != null && now - r.reportedAtMs > settings.mobileMaxAgeMs) continue
             if (heading == null || r.id in recentlyPassed) continue
-            val d = Geo.distanceM(state.position, r.position)
-            if (!isAhead(state.position, heading, r.position, d)) continue
-            if (r.directionDeg != null && Geo.headingDiffDeg(heading, r.directionDeg) > settings.directionToleranceDeg) continue
-            if (upcoming == null || d < upcoming.distanceM) upcoming = UpcomingRadar(r, d, radarLimit(r, limit))
+            val snaps = horizon?.snaps(r).orEmpty()
+            val d: Double
+            if (horizon != null && snaps.isNotEmpty()) {
+                val onPath = horizon.pathDistance(snaps)
+                if (onPath != null && (upcoming == null || onPath.first < upcoming.distanceM)) {
+                    upcoming = UpcomingRadar(r, onPath.first, radarLimit(r, limit), onPath.second.segment.name)
+                }
+                d = horizon.roadDistance(snaps) ?: continue
+                if (onPath == null && d > settings.branchAlertM) continue
+            } else {
+                d = Geo.distanceM(state.position, r.position)
+                if (!isAhead(state.position, heading, r.position, d)) continue
+                if (r.directionDeg != null && Geo.headingDiffDeg(heading, r.directionDeg) > settings.directionToleranceDeg) continue
+                if (horizon == null && d <= settings.fallbackUpcomingM && (upcoming == null || d < upcoming.distanceM)) {
+                    upcoming = UpcomingRadar(r, d, radarLimit(r, limit))
+                }
+            }
             if (r.id !in tracked && d <= triggerM) {
-                tracked[r.id] = Track(r, d, v)
+                tracked[r.id] = Track(r, Geo.distanceM(state.position, r.position), v)
                 events += AlertEvent.Approach(now, r, d, radarLimit(r, limit))
             }
         }
 
+        val distances = HashMap<String, Double>()
         val iterator = tracked.values.iterator()
         while (iterator.hasNext()) {
             val t = iterator.next()
             val r = t.radar
-            val d = Geo.distanceM(state.position, r.position)
-            if (d < t.minDistanceM) {
-                t.minDistanceM = d
+            val straight = Geo.distanceM(state.position, r.position)
+            if (straight < t.minDistanceM) {
+                t.minDistanceM = straight
                 t.speedAtMinMps = v
             }
-            val ahead = heading != null && isAhead(state.position, heading, r.position, d)
-            val passed = (t.minDistanceM < 120 && d > t.minDistanceM + 25) || (!ahead && d < 60 && t.minDistanceM < 60)
+            val snaps = horizon?.snaps(r).orEmpty()
+            val roadD = if (horizon != null && snaps.isNotEmpty()) horizon.roadDistance(snaps) else null
+            val ahead = if (horizon != null && snaps.isNotEmpty()) {
+                roadD != null
+            } else {
+                heading != null && isAhead(state.position, heading, r.position, straight)
+            }
+            val passed = (t.minDistanceM < 120 && straight > t.minDistanceM + 25) || (!ahead && straight < 60 && t.minDistanceM < 60)
             if (passed) {
                 iterator.remove()
                 recentlyPassed[r.id] = now
                 onPassed(t, now, limit, events)
                 continue
             }
-            if (!ahead && d > 150) {
+            if (!ahead && straight > 150) {
                 // Turned off before reaching it.
                 iterator.remove()
                 continue
             }
+            val d = roadD ?: straight
+            distances[r.id] = d
             val rl = radarLimit(r, limit)
             if (rl != null && !t.brakeAnnounced) {
                 val vl = rl / 3.6
@@ -136,30 +202,59 @@ class AlertEngine(
             }
         }
 
-        if (limit != null) {
-            val level = when {
-                speedKmh > limit + settings.overspeedToleranceKmh -> OverspeedLevel.WARN
-                speedKmh >= limit + 1 -> OverspeedLevel.OVER
-                else -> OverspeedLevel.NONE
-            }
-            if (level > overspeed) events += AlertEvent.Overspeed(now, level, speedKmh.roundToInt(), limit)
-            overspeed = level
-        } else {
-            overspeed = OverspeedLevel.NONE
-        }
+        overspeed(now, speedKmh, limit, events)
 
         lastPosition = state.position
         val active = tracked.values.map { t ->
             val rl = radarLimit(t.radar, limit)
             ActiveAlert(
                 radar = t.radar,
-                distanceM = Geo.distanceM(state.position, t.radar.position),
+                distanceM = distances[t.radar.id] ?: Geo.distanceM(state.position, t.radar.position),
                 limitKmh = rl,
                 overLimit = rl != null && speedKmh >= rl + 1,
                 ageMs = t.radar.reportedAtMs?.let { now - it },
             )
         }.sortedBy { it.distanceM }
-        return AlertOutput(events, active, sectionStatus(), upcoming)
+        val limitAhead = horizon?.let { RoadHorizon.nextLimit(it.path, settings.limitAheadM) }
+            ?.let { it.copy(limitKmh = effectiveLimit(it.limitKmh)) }
+            ?.takeIf { it.limitKmh != limit }
+        return AlertOutput(events, active, sectionStatus(), upcoming, limitAhead)
+    }
+
+    private fun horizon(road: RoadCandidate?, network: RoadNetwork?): Horizon? {
+        if (road == null || network == null) return null
+        val s = snapper?.takeIf { it.network === network } ?: RadarSnapper(network).also { snapper = it }
+        return Horizon(
+            snapper = s,
+            path = RoadHorizon.mostProbablePath(network, road, settings.upcomingRangeM),
+            // Constant range: a tracked radar must stay reachable when the car slows down.
+            reachable = RoadHorizon.reachable(network, road, settings.maxAlertM + 200),
+        )
+    }
+
+    /** Silent "over" state, spoken warning past the tolerance, not repeated while hovering around it. */
+    private fun overspeed(now: Long, speedKmh: Double, limit: Int?, events: MutableList<AlertEvent>) {
+        val level = when {
+            limit == null -> OverspeedLevel.NONE
+            speedKmh > limit + settings.overspeedToleranceKmh -> OverspeedLevel.WARN
+            speedKmh >= limit + 1 -> OverspeedLevel.OVER
+            else -> OverspeedLevel.NONE
+        }
+        if (level == OverspeedLevel.NONE) {
+            if (underLimitSinceMs == null) underLimitSinceMs = now
+        } else {
+            underLimitSinceMs = null
+        }
+        if (limit != null && level > overspeed) {
+            val warn = level == OverspeedLevel.WARN
+            val last = lastWarnMs
+            val calmedDown = last == null || now - last >= settings.overspeedRepeatMs
+            if (!warn || calmedDown) events += AlertEvent.Overspeed(now, level, speedKmh.roundToInt(), limit)
+            if (warn && calmedDown) lastWarnMs = now
+        }
+        // Long enough back under the limit: the next excess is a new one.
+        if (underLimitSinceMs?.let { now - it >= settings.overspeedResetMs } == true) lastWarnMs = null
+        overspeed = level
     }
 
     private fun isAhead(p: LatLon, heading: Double, target: LatLon, d: Double): Boolean {
