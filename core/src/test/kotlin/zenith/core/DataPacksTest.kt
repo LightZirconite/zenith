@@ -5,7 +5,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class DataPacksTest {
-    private val tileText = javaClass.getResource("/roads_85_19.json")!!.readText()
+    private val tileText = javaClass.getResource("/demo/roads_85_19.json")!!.readText()
 
     @Test
     fun `parses a radar pack and skips unknown types`() {

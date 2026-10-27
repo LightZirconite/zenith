@@ -165,7 +165,7 @@ class RoadHorizonTest {
 
     @Test
     fun `horizon follows a real departmental road`() {
-        val network = RoadNetwork(RoadTiles.parse(javaClass.getResource("/roads_85_19.json")!!.readText()))
+        val network = RoadNetwork(RoadTiles.parse(javaClass.getResource("/demo/roads_85_19.json")!!.readText()))
         val d107 = network.segments.filter { it.name == "D 107" }
         val start = d107.first { s -> network.segmentsAt(s.fromNode).none { it.id != s.id && it.name == "D 107" } }
         val from = network.candidates(start.points.first(), 5.0).single { it.segment.id == start.id && it.forward }
