@@ -147,7 +147,7 @@ class DriveService : Service(), LocationListener {
         val speed = s?.speedKmh?.let { "$it km/h" }
         val text = when {
             speed == null -> "Recherche des satellites…"
-            s?.limitKmh != null -> "$speed · limite ${s.limitKmh}"
+            s.limitKmh != null -> "$speed · limite ${s.limitKmh}"
             else -> speed
         }
         return NotificationCompat.Builder(this, CHANNEL_ID)
