@@ -31,6 +31,7 @@ jobs:
 
       - name: France extract
         run: |
+          mkdir -p out
           curl -sSL --retry 3 -o france.osm.pbf https://download.geofabrik.de/europe/france-latest.osm.pbf
           osmium tags-filter france.osm.pbf w/highway n/highway=speed_camera r/type=enforcement -o drive.osm.pbf
           rm france.osm.pbf
