@@ -22,7 +22,7 @@ Usage personnel de l'auteur, pas grand public. Interface et textes en français.
 - **Aucun serveur, aucune base de données hébergée.** GitHub Actions fabrique les données, publiées comme fichiers de la release `data`. L'app les télécharge et les met en cache. Supabase, Firebase, Cloudflare D1, VPS : écartés.
 - **Dépôt public** (Actions gratuites et illimitées). Rien de secret dans le code : clés en secrets GitHub uniquement.
 - **Radars en position exacte**, toutes sources activées par défaut, le plus de données possible sur la France.
-- **Android Auto plus tard** (Car App Library). Bulle flottante au-dessus de Waze/Maps : prévue, pas faite.
+- **Android Auto plus tard** (Car App Library). Au-dessus de Waze/Maps : picture-in-picture (fait), pas de bulle `SYSTEM_ALERT_WINDOW`.
 - **Sons originaux synthétisés** (`Tones.kt`), jamais ceux de Coyote (protégés).
 
 ## Architecture
@@ -91,12 +91,13 @@ Tester le pipeline en local sur un petit extrait : `https://download.geofabrik.d
 
 ## App : carte, autorisations, mises à jour
 
-- **Carte** (`DriveMap.kt`) : MapLibre Android, tuiles vectorielles OpenFreeMap (gratuites, sans clé), style `dark` retouché (fond noir pour le fondu). Non interactive, inclinée à 55°, cap = sens de marche, zoom selon la vitesse. Toute erreur de carte laisse une boîte noire : la carte ne doit jamais faire planter l'app (une app qui plante au démarrage ne peut plus se mettre à jour). Attribution OSM/OpenFreeMap affichée en petit, obligatoire.
+- **Carte** (`DriveMap.kt`) : MapLibre Android, tuiles vectorielles OpenFreeMap (gratuites, sans clé), style `dark` retouché (fond noir pour le fondu). Caméra détaillée ci-dessous. Toute erreur de carte laisse une boîte noire : la carte ne doit jamais faire planter l'app (une app qui plante au démarrage ne peut plus se mettre à jour). Attribution OSM/OpenFreeMap affichée en petit, obligatoire.
 - **Caméra de la carte** : voiture à 45 % de la hauteur de la carte (le compteur couvre la partie fondue en dessous), vue assez haute (40° environ) pour voir loin devant ; dézoome avec la vitesse et, au besoin, pour cadrer le prochain radar de la route (jusqu'à 4 km), zoom lissé. On peut glisser/pincer la carte pour regarder ailleurs : elle se recadre seule au bout de 8 s. Flèche de position posée à plat sur la route.
 - **Attribution OpenFreeMap / OpenStreetMap** : sur l'écran d'accueil (pas sur la carte, à la demande de l'auteur). Ne pas la supprimer.
 - **Picture-in-picture** : pendant une conduite, quitter Zenith (pour Waze, Maps…) l'ouvre en petite fenêtre carrée (vitesse, limite, radar approché ; fond rouge si trop vite près d'un radar). Auto sur Android 12+, `onUserLeaveHint` avant. Raccourcis « Ouvrir Waze / Maps » pendant la conduite (`<queries>` dans le manifeste).
 - **Notification** : vitesse et limite en titre, prochain radar en texte ; sur Android 16, puce de vitesse dans la barre d'état (`setRequestPromotedOngoing`, `POST_PROMOTED_NOTIFICATIONS`, ne pas la coloriser sinon Android refuse la promotion).
 - **Écran de lancement** : thème `Theme.Zenith` noir, logo sur fond sombre (Android 12+), logo qui respire sur l'écran d'accueil.
+- **Démo cachée** : appui long sur le logo de l'écran d'accueil → `DriveService.startDemo`. `core/DemoDrive.kt` rejoue environ 2 min sur la vraie D 107 (tuile de Corse `core/src/main/resources/demo/roads_85_19.json`, embarquée dans l'APK) : radar 1 passé trop vite, radar 2 à la limite, zone 50 annoncée. Mêmes sons, voix, carte, notification et PiP que la conduite réelle ; ni GPS, ni GPX, ni téléchargement. Puce « Démo » à l'écran. Les limites absentes de la D 107 sont complétées pour la démo seulement.
 - **APK arm64-v8a seulement** (`abiFilters`) : MapLibre embarque du code natif, l'APK universel serait 3 fois plus gros.
 - **Premier lancement** (`Onboarding.kt`) : chaque autorisation est expliquée avant la fenêtre d'Android (position obligatoire ; notifications, installation d'applications inconnues et batterie sans restriction conseillées). Après deux refus, Android n'affiche plus sa fenêtre : le bouton ouvre alors les réglages.
 - **Mises à jour** (`Updater.kt`) : vérification à chaque retour au premier plan (30 min minimum entre deux). À l'arrêt, installation dès le téléchargement fini. La demande de confirmation d'Android passe par l'état (`NeedsConfirmation`) et n'est ouverte que quand l'activité est au premier plan : lancée depuis le `BroadcastReceiver` en arrière-plan, Android la bloquait et la mise à jour restait figée. Après une première auto-mise à jour, Zenith devient l'installateur de l'app et Android 12+ installe les suivantes sans confirmation (`USER_ACTION_NOT_REQUIRED`). L'APK téléchargé est supprimé après l'installation.
@@ -160,5 +161,5 @@ Fait : horizon électronique (radars sur la route suivie, prochaine limite), dat
 7. Feux rouges et passages à niveau : son plus doux, pas de « trop vite ».
 8. Outil de replay GPX en ligne de commande + export du dernier trajet depuis l'app : chaque bug réel devient un test.
 9. Radars mobiles Lufop en direct depuis le téléphone (clé saisie dans des réglages, une requête par ~10 km, quota partagé).
-10. Bulle flottante au-dessus de Waze/Maps, démarrage auto au Bluetooth de la voiture, profils (probatoire, moto).
+10. Démarrage auto au Bluetooth de la voiture, profils (probatoire, moto).
 11. Android Auto (Car App Library).

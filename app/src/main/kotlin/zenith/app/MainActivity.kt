@@ -50,6 +50,7 @@ class MainActivity : ComponentActivity() {
             val update by Updater.state.collectAsStateWithLifecycle()
             val resumeCount by resumes.collectAsStateWithLifecycle()
             val pip by inPip.collectAsStateWithLifecycle()
+            val demo by DriveState.demo.collectAsStateWithLifecycle()
             val navApps = remember(resumeCount) { NavApp.installed(context) }
             var permissionResults by remember { mutableIntStateOf(0) }
             val permissions = remember(resumeCount, permissionResults) { Permissions.read(context) }
@@ -121,6 +122,8 @@ class MainActivity : ComponentActivity() {
                     },
                     navApps = navApps,
                     onOpenNavApp = { it.launch(context) },
+                    demo = demo,
+                    onDemo = { if (permissions.location) DriveService.startDemo(context) },
                 )
             }
         }

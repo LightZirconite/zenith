@@ -13,6 +13,7 @@ object DriveState {
     private val _gps = MutableStateFlow(GpsInfo())
     private val _data = MutableStateFlow(DataStatus())
     private val _nearbyRadars = MutableStateFlow<List<Radar>>(emptyList())
+    private val _demo = MutableStateFlow(false)
 
     val running: StateFlow<Boolean> = _running
     val snapshot: StateFlow<DriveSnapshot?> = _snapshot
@@ -22,9 +23,13 @@ object DriveState {
     /** Radars around the car, for the map. */
     val nearbyRadars: StateFlow<List<Radar>> = _nearbyRadars
 
-    internal fun started() {
+    /** The running drive is the hidden simulated one. */
+    val demo: StateFlow<Boolean> = _demo
+
+    internal fun started(demo: Boolean = false) {
         _snapshot.value = null
         _gps.value = GpsInfo()
+        _demo.value = demo
         _running.value = true
     }
 
@@ -45,6 +50,7 @@ object DriveState {
 
     internal fun stopped() {
         _running.value = false
+        _demo.value = false
         _nearbyRadars.value = emptyList()
     }
 }

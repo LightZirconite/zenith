@@ -22,11 +22,14 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import zenith.core.AlertEvent
 import zenith.core.Announcer
+import zenith.core.DemoDrive
 import zenith.core.DriveSnapshot
 import zenith.core.DrivingSession
+import zenith.core.GpsFix
 import zenith.core.OverspeedLevel
 import zenith.core.RadarIndex
 
@@ -37,11 +40,15 @@ import zenith.core.RadarIndex
 class DriveService : Service(), LocationListener {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private lateinit var session: DrivingSession
-    private lateinit var data: DriveData
-    private lateinit var recorder: TripRecorder
     private lateinit var speaker: Speaker
     private lateinit var tones: TonePlayer
-    private lateinit var gpsStatus: GpsStatusWatcher
+
+    // Live drive only (the demo has no GPS, no downloads and records nothing).
+    private var data: DriveData? = null
+    private var recorder: TripRecorder? = null
+    private var gpsStatus: GpsStatusWatcher? = null
+    private var started = false
+    private var demo = false
     private var lastNotified: Triple<Int?, Int?, String?>? = null
     private var lastNotifiedAtMs = 0L
     private var lastDangerBeepMs = 0L
@@ -56,37 +63,64 @@ class DriveService : Service(), LocationListener {
             stopSelf()
             return START_NOT_STICKY
         }
-        if (::session.isInitialized) return START_STICKY
+        if (started) return START_STICKY
+        // Android requires the location permission for a "location" foreground service, demo included.
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             stopSelf()
             return START_NOT_STICKY
         }
+        started = true
+        demo = intent?.action == ACTION_DEMO
         createChannel()
         ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(null), ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
-
-        data = DriveData(this, scope)
-        session = DrivingSession({ data.network }, emptyList())
-        recorder = TripRecorder(this)
         speaker = Speaker(this)
         tones = TonePlayer()
-        DriveState.started()
-        scope.launch { data.status.collect(DriveState::data) }
-        data.loadRadars { radars ->
+        DriveState.started(demo)
+        if (demo) startDemo() else startLive()
+        return if (demo) START_NOT_STICKY else START_STICKY
+    }
+
+    private fun startLive() {
+        val live = DriveData(this, scope)
+        data = live
+        session = DrivingSession({ live.network }, emptyList())
+        recorder = TripRecorder(this)
+        scope.launch { live.status.collect(DriveState::data) }
+        live.loadRadars { radars ->
             radarIndex = RadarIndex(radars)
             lastNearbyMs = 0L
             scope.launch { session.setRadars(radars) }
         }
-
         val manager = getSystemService(LocationManager::class.java)
         gpsStatus = GpsStatusWatcher(manager, DriveState::satellites).also { it.start() }
         manager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1_000L, 0f, this, Looper.getMainLooper())
-        return START_STICKY
+    }
+
+    /** Hidden demo: replays [DemoDrive] in real time through the same pipeline, then stops. */
+    private fun startDemo() {
+        val scenario = DemoDrive.load()
+        session = DrivingSession(scenario.network, scenario.radars)
+        radarIndex = RadarIndex(scenario.radars)
+        scope.launch {
+            val t0 = System.currentTimeMillis()
+            for (fix in scenario.fixes) {
+                val at = t0 + fix.timeMs
+                delay((at - System.currentTimeMillis()).coerceAtLeast(0))
+                process(fix.copy(timeMs = at))
+            }
+            delay(3_000)
+            stopSelf()
+        }
     }
 
     override fun onLocationChanged(location: Location) {
         val fix = location.toFix()
-        recorder.add(fix)
-        data.ensureTiles(fix.position)
+        recorder?.add(fix)
+        data?.ensureTiles(fix.position)
+        process(fix)
+    }
+
+    private fun process(fix: GpsFix) {
         val snapshot = session.process(fix) ?: return
         DriveState.update(snapshot)
         if (snapshot.timeMs - lastNearbyMs >= 3_000 || lastNearbyMs == 0L) {
@@ -127,11 +161,10 @@ class DriveService : Service(), LocationListener {
     }
 
     override fun onDestroy() {
-        if (::session.isInitialized) {
-            val manager = getSystemService(LocationManager::class.java)
-            manager.removeUpdates(this)
-            gpsStatus.stop()
-            recorder.close()
+        if (started) {
+            if (!demo) getSystemService(LocationManager::class.java).removeUpdates(this)
+            gpsStatus?.stop()
+            recorder?.close()
             speaker.shutdown()
             tones.release()
         }
@@ -160,6 +193,7 @@ class DriveService : Service(), LocationListener {
         val limit = s?.limitKmh
         val next = s?.let(::nextRadarText)
         val title = when {
+            demo && speed == null -> "Zenith · démo"
             speed == null -> "Zenith · recherche des satellites…"
             limit != null -> "$speed km/h · limite $limit"
             else -> "$speed km/h"
@@ -204,9 +238,14 @@ class DriveService : Service(), LocationListener {
         private const val CHANNEL_ID = "drive"
         private const val NOTIFICATION_ID = 1
         private const val ACTION_STOP = "zenith.app.STOP"
+        private const val ACTION_DEMO = "zenith.app.DEMO"
 
         fun start(context: Context) =
             ContextCompat.startForegroundService(context, Intent(context, DriveService::class.java))
+
+        /** Hidden simulated drive, to see and hear the alerts without driving. */
+        fun startDemo(context: Context) =
+            ContextCompat.startForegroundService(context, Intent(context, DriveService::class.java).setAction(ACTION_DEMO))
 
         fun stop(context: Context) {
             context.stopService(Intent(context, DriveService::class.java))

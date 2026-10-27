@@ -15,6 +15,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -48,6 +49,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -85,6 +87,8 @@ fun DriveScreen(
     onInstallUpdate: () -> Unit,
     navApps: List<NavApp> = emptyList(),
     onOpenNavApp: (NavApp) -> Unit = {},
+    demo: Boolean = false,
+    onDemo: () -> Unit = {},
 ) {
     val showMap = running && snapshot != null
     Box(Modifier.fillMaxSize().background(Bg)) {
@@ -96,7 +100,7 @@ fun DriveScreen(
             modifier = Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 20.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            StatusRow(running, gps, data)
+            StatusRow(running, gps, data, demo)
             UpdateBanner(update, canInstall, onInstallUpdate)
             Column(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -104,7 +108,7 @@ fun DriveScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 // A little lower than the middle, so the car arrow on the map stays clear.
-                if (running) Dashboard(snapshot, Modifier.padding(top = if (showMap) 72.dp else 0.dp)) else Idle(data)
+                if (running) Dashboard(snapshot, Modifier.padding(top = if (showMap) 72.dp else 0.dp)) else Idle(data, onDemo)
             }
             AlertArea(snapshot)
             Spacer(Modifier.height(12.dp))
@@ -127,7 +131,7 @@ fun DriveScreen(
 
 /** GPS and data chips; they appear while something is pending and fade once all is fine. */
 @Composable
-private fun StatusRow(running: Boolean, gps: GpsInfo, data: DataStatus) {
+private fun StatusRow(running: Boolean, gps: GpsInfo, data: DataStatus, demo: Boolean) {
     val gpsGood = (gps.accuracyM ?: 99.0) <= 15
     var showGps by remember { mutableStateOf(true) }
     LaunchedEffect(gpsGood, running) {
@@ -139,7 +143,10 @@ private fun StatusRow(running: Boolean, gps: GpsInfo, data: DataStatus) {
         }
     }
     Row(Modifier.fillMaxWidth().height(32.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        AnimatedVisibility(visible = running && showGps, enter = fadeIn(), exit = fadeOut()) {
+        AnimatedVisibility(visible = running && demo, enter = fadeIn(), exit = fadeOut()) {
+            Chip("Démo · trajet simulé", Color(0xFF0A84FF))
+        }
+        AnimatedVisibility(visible = running && !demo && showGps, enter = fadeIn(), exit = fadeOut()) {
             val text = when {
                 gps.accuracyM == null -> "Satellites ${gps.used}/${gps.visible} · recherche"
                 gpsGood -> "GPS ±${gps.accuracyM.roundToInt()} m · ${gps.used} sat."
@@ -190,7 +197,7 @@ private fun UpdateBanner(update: UpdateState, canInstall: Boolean, onInstall: ()
 }
 
 @Composable
-private fun Idle(data: DataStatus) {
+private fun Idle(data: DataStatus, onDemo: () -> Unit) {
     // Logo breathing softly, with a red glow behind the needle.
     val breath = rememberInfiniteTransition(label = "logo")
     val scale by breath.animateFloat(0.96f, 1.04f, infiniteRepeatable(tween(2_200), RepeatMode.Reverse), label = "scale")
@@ -200,7 +207,12 @@ private fun Idle(data: DataStatus) {
             Modifier.size(150.dp).scale(scale)
                 .background(Brush.radialGradient(listOf(Red.copy(alpha = glow), Color.Transparent)), CircleShape),
         )
-        Image(painterResource(R.drawable.ic_logo_foreground), contentDescription = null, modifier = Modifier.size(150.dp).scale(scale))
+        // Hidden: a long press on the logo starts the simulated drive.
+        Image(
+            painterResource(R.drawable.ic_logo_foreground),
+            contentDescription = null,
+            modifier = Modifier.size(150.dp).scale(scale).pointerInput(Unit) { detectTapGestures(onLongPress = { onDemo() }) },
+        )
     }
     Text("Zenith", color = Color.White, fontSize = 44.sp, fontWeight = FontWeight.Bold)
     Spacer(Modifier.height(8.dp))
