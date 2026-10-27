@@ -70,7 +70,7 @@ class DriveData(context: Context, private val scope: CoroutineScope) {
     fun ensureTiles(p: LatLon) {
         val wanted = RoadTiles.keysAround(p, 5_000.0)
         val now = System.currentTimeMillis()
-        val missing = wanted.filter { it !in tiles && it !in pending && now - (failedAtMs[it] ?: 0L) > RETRY_MS }
+        val missing = wanted.filter { !tiles.containsKey(it) && it !in pending && now - (failedAtMs[it] ?: 0L) > RETRY_MS }
         if (missing.isEmpty()) return
         pending += missing
         scope.launch(Dispatchers.IO) {
