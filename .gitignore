@@ -9,3 +9,5 @@ captures/
 *.keystore
 *.jks
 .env
+__pycache__/
+*.pyc
