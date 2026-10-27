@@ -27,6 +27,8 @@ object RadarPack {
                 limitKmh = o.num("limit")?.toInt(),
                 directionDeg = o.num("dir"),
                 sectionLengthM = o.num("len"),
+                // Report time (epoch seconds), only meaningful for mobile radars.
+                reportedAtMs = o.num("at")?.takeIf { type.mobile }?.let { (it * 1000).toLong() },
             )
         }
     }

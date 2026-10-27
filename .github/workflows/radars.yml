@@ -36,6 +36,9 @@ jobs:
           if gh release view data --json assets -q '.assets[].name' 2>/dev/null | grep -qx osm_radars.json; then
             gh release download data -p osm_radars.json -D out
           fi
+          if gh release view data --json assets -q '.assets[].name' 2>/dev/null | grep -qx radars.json; then
+            gh release download data -p radars.json -O out/previous_radars.json
+          fi
           pipeline/lufop_db.sh fetch out/lufop.json
           ls -la out
 
@@ -44,15 +47,8 @@ jobs:
           LUFOP_API_KEY: ${{ secrets.LUFOP_API_KEY }}
         run: python pipeline/harvest_lufop.py out/lufop.json 150
 
-      - name: Merge
-        run: |
-          if [ -f out/osm_radars.json ]; then
-            python pipeline/build_radars.py merge out/osm_radars.json out/lufop.json out/radars.json
-          else
-            echo "::warning::osm_radars.json absent (workflow data pas encore passé) : radars.json non reconstruit"
-          fi
-
-      - name: Publish
+      # Saved before anything else can fail: today's quota is spent, its results must not be lost.
+      - name: Save Lufop base
         env:
           GH_TOKEN: ${{ github.token }}
           LUFOP_DB_KEY: ${{ secrets.LUFOP_DB_KEY }}
@@ -61,5 +57,19 @@ jobs:
             gh release create data --title "Données Zenith" --prerelease --latest=false \
               --notes "Radars (data.gouv.fr, Licence Ouverte + OpenStreetMap, ODbL + Lufop) et limitations de vitesse (OpenStreetMap, ODbL). Mis à jour automatiquement."
           fi
-          if [ -f out/radars.json ]; then gh release upload data out/radars.json --clobber; fi
           pipeline/lufop_db.sh publish out/lufop.json
+
+      - name: Merge
+        run: |
+          if [ -f out/osm_radars.json ]; then
+            python pipeline/build_radars.py merge out/osm_radars.json out/lufop.json out/radars.json
+            python pipeline/build_radars.py check out/previous_radars.json out/radars.json
+          else
+            echo "::warning::osm_radars.json absent (workflow data pas encore passé) : radars.json non reconstruit"
+          fi
+
+      - name: Publish radars
+        if: hashFiles('out/radars.json') != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload data out/radars.json --clobber

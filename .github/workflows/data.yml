@@ -45,6 +45,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           LUFOP_DB_KEY: ${{ secrets.LUFOP_DB_KEY }}
         run: |
+          if gh release view data --json assets -q '.assets[].name' 2>/dev/null | grep -qx radars.json; then
+            gh release download data -p radars.json -O out/previous_radars.json
+          fi
           pipeline/lufop_db.sh fetch out/lufop.json
           python pipeline/build_radars.py merge out/osm_radars.json out/lufop.json out/radars.json
 
@@ -71,6 +74,14 @@ jobs:
             gh release create data --title "Données Zenith" --prerelease --latest=false \
               --notes "Radars (data.gouv.fr, Licence Ouverte + OpenStreetMap, ODbL) et limitations de vitesse (OpenStreetMap, ODbL). Mis à jour chaque semaine."
           fi
-          gh release upload data out/radars.json out/osm_radars.json --clobber
+          gh release upload data out/osm_radars.json --clobber
           ls out/tiles/*.json.gz | xargs -n 50 gh release upload data --clobber
           gh release upload data out/manifest.json --clobber
+
+      # Last, so a refused radars.json never blocks the road tiles.
+      - name: Publish radars
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python pipeline/build_radars.py check out/previous_radars.json out/radars.json
+          gh release upload data out/radars.json --clobber

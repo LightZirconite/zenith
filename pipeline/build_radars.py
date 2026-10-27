@@ -8,6 +8,9 @@
 Usage:
   build_radars.py osm <france.osm.pbf> <osm_radars.json>     weekly, from the OSM extract
   build_radars.py merge <osm_radars.json> <lufop.json|-> <radars.json>
+  build_radars.py check <previous radars.json|-> <radars.json>   fails if more than 10 % of radars vanished
+
+Every mode appends a short report to $GITHUB_STEP_SUMMARY when it is set (CI job summary).
 """
 import csv
 import io
@@ -16,7 +19,10 @@ import math
 import os
 import sys
 import urllib.request
+import re
+from collections import Counter
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 OFFICIAL_DATASET = "https://www.data.gouv.fr/api/1/datasets/liste-des-radars-fixes-en-france/"
 USER_AGENT = "Zenith/0.1 (https://github.com/LightZirconite/zenith)"
@@ -25,6 +31,8 @@ OFFICIAL_TYPES = {
     "ETFR": "RED_LIGHT", "ETPN": "LEVEL_CROSSING", "ETVM": "SECTION_END",
 }
 MERGE_M = 80
+MAX_LOSS = 0.10
+PARIS = ZoneInfo("Europe/Paris")
 
 
 def fetch(url, data=None, timeout=900):
@@ -71,6 +79,24 @@ def official():
             continue
         out.append({"id": f"fr-{rid}", "pos": pos, "type": OFFICIAL_TYPES.get(kind, "FIXED"), "limit": speed(vma), "src": ["gouv"]})
     return out, latest["url"]
+
+
+def summary(lines):
+    """Prints a report and appends it to the CI job summary."""
+    text = "\n".join(lines)
+    print(text)
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if path:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(text + "\n\n")
+
+
+def lufop_time(value):
+    """Lufop "update" (Paris local time, "YYYY-MM-DD hh:mm:ss") as epoch seconds, or None."""
+    try:
+        return int(datetime.strptime(str(value), "%Y-%m-%d %H:%M:%S").replace(tzinfo=PARIS).timestamp())
+    except ValueError:
+        return None
 
 
 def osm_elements(pbf):
@@ -170,7 +196,14 @@ def lufop_items(path):
             pos = (float(r["lat"]), float(r["lng"]))
         except (KeyError, TypeError, ValueError):
             continue
-        items.append({"id": f"lufop-{rid}", "pos": pos, "type": kind, "limit": speed(r.get("vitesse")), "dir": None})
+        item = {"id": f"lufop-{rid}", "pos": pos, "type": kind, "limit": speed(r.get("vitesse")), "dir": None}
+        if kind == "MOBILE":
+            item["at"] = lufop_time(r.get("update"))  # the app ignores stale mobile reports
+        items.append(item)
+    # Names without digits ("Radar Fixe 90" → "Radar Fixe"): shows which kinds Lufop really holds,
+    # without publishing the base itself.
+    kinds = Counter(re.sub(r"\s*\d+.*$", "", r.get("name") or "?").strip() for r in json.load(open(path))["radars"].values())
+    summary(["### Noms Lufop", "| nom | radars |", "|---|---|"] + [f"| {k} | {v} |" for k, v in kinds.most_common(25)])
     return items
 
 
@@ -237,18 +270,36 @@ def write_pack(radars, gouv_url, out):
         "radars": [
             {k: v for k, v in {
                 "id": r["id"], "lat": round(r["pos"][0], 6), "lon": round(r["pos"][1], 6), "type": r["type"],
-                "limit": r.get("limit"), "dir": r.get("dir"), "len": r.get("len"), "src": "+".join(sorted(set(r["src"]))),
+                "limit": r.get("limit"), "dir": r.get("dir"), "len": r.get("len"), "at": r.get("at"),
+                "src": "+".join(sorted(set(r["src"]))),
             }.items() if v is not None}
             for r in radars
         ],
     }
     with open(out, "w", encoding="utf-8") as f:
         json.dump(doc, f, separators=(",", ":"))
-    by_src = {}
-    for r in doc["radars"]:
-        by_src[r["src"]] = by_src.get(r["src"], 0) + 1
+    by_src = Counter(r["src"] for r in doc["radars"])
+    by_type = Counter(r["type"] for r in doc["radars"])
     with_dir = sum(1 for r in doc["radars"] if "dir" in r)
-    print(f"{len(doc['radars'])} radars, {with_dir} avec sens, par source {by_src}")
+    summary(
+        [f"### radars.json : {len(doc['radars'])} radars, {with_dir} avec sens", "| source | radars |", "|---|---|"]
+        + [f"| {k} | {v} |" for k, v in by_src.most_common()]
+        + ["", "| type | radars |", "|---|---|"]
+        + [f"| {k} | {v} |" for k, v in by_type.most_common()]
+    )
+
+
+def check(previous, current):
+    """Refuses a pack that lost more than MAX_LOSS of the previous one (broken source, bad merge)."""
+    new = json.load(open(current))["radars"]
+    if previous == "-" or not os.path.exists(previous):
+        summary([f"Contrôle : pas de version précédente, {len(new)} radars."])
+        return
+    old = json.load(open(previous))["radars"]
+    old_ids, new_ids = {r["id"] for r in old}, {r["id"] for r in new}
+    summary([f"Contrôle : {len(old)} → {len(new)} radars, {len(new_ids - old_ids)} ajoutés, {len(old_ids - new_ids)} retirés."])
+    if len(new) < len(old) * (1 - MAX_LOSS):
+        sys.exit(f"::error::radars.json perd plus de {MAX_LOSS:.0%} des radars ({len(old)} → {len(new)}) : publication refusée")
 
 
 def main():
@@ -264,6 +315,8 @@ def main():
         sections = [{**x, "from": tuple(x["from"]), "to": tuple(x["to"])} for x in osm["sections"]]
         gouv, gouv_url = official()
         write_pack(merge(gouv, items, sections, lufop_items(sys.argv[3])), gouv_url, sys.argv[4])
+    elif mode == "check":
+        check(sys.argv[2], sys.argv[3])
     else:
         sys.exit(__doc__)
 

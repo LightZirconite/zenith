@@ -13,13 +13,17 @@ class DataPacksTest {
             {"v":1,"generated":"2026-10-27T00:00:00+00:00","radars":[
               {"id":"fr-479","lat":42.48027,"lon":9.48094,"type":"FIXED","limit":80,"dir":171.0,"src":"gouv+osm"},
               {"id":"sec-1","lat":45.0,"lon":5.0,"type":"SECTION_START","limit":110,"dir":10.5,"len":4200,"src":"osm"},
-              {"id":"x","lat":45.0,"lon":5.0,"type":"UNKNOWN"}
+              {"id":"x","lat":45.0,"lon":5.0,"type":"UNKNOWN"},
+              {"id":"m","lat":45.1,"lon":5.1,"type":"MOBILE","limit":90,"at":1793107800,"src":"lufop"},
+              {"id":"f","lat":45.2,"lon":5.2,"type":"FIXED","limit":110,"at":1793107800,"src":"lufop"}
             ]}
         """.trimIndent()
         val radars = RadarPack.parse(json)
-        assertEquals(2, radars.size)
+        assertEquals(4, radars.size)
         assertEquals(Radar("fr-479", LatLon(42.48027, 9.48094), RadarType.FIXED, 80, 171.0), radars[0])
         assertEquals(4200.0, radars[1].sectionLengthM)
+        assertEquals(1_793_107_800_000L, radars[2].reportedAtMs)
+        assertEquals(null, radars[3].reportedAtMs) // a date on a fixed radar is not a live report
     }
 
     @Test
