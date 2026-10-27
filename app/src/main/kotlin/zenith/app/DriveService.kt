@@ -15,6 +15,7 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.os.IBinder
 import android.os.Looper
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
@@ -49,6 +50,11 @@ class DriveService : Service(), LocationListener {
     private var gpsStatus: GpsStatusWatcher? = null
     private var started = false
     private var demo = false
+
+    /** Started by the car's Bluetooth: stops when the car disconnects. */
+    private var auto = false
+    private var lastFixTimeMs = 0L
+    private var lastFixWallMs = 0L
     private var lastNotified: Triple<Int?, Int?, String?>? = null
     private var lastNotifiedAtMs = 0L
     private var lastDangerBeepMs = 0L
@@ -69,14 +75,27 @@ class DriveService : Service(), LocationListener {
             stopSelf()
             return START_NOT_STICKY
         }
-        started = true
         demo = intent?.action == ACTION_DEMO
+        auto = intent?.action == ACTION_AUTO
         createChannel()
-        ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(null), ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+        val foreground = runCatching {
+            ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(null), ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+        }
+        if (foreground.isFailure) {
+            // Android refused a start from the background (car connected while the phone was idle).
+            Log.w("Zenith", "foreground start", foreground.exceptionOrNull())
+            if (auto) CarLink.notifyTapToStart(this)
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        started = true
+        CarLink.cancelTapToStart(this)
+        Settings.init(this)
         speaker = Speaker(this)
         tones = TonePlayer()
-        DriveState.started(demo)
+        DriveState.started(demo, auto)
         if (demo) startDemo() else startLive()
+        scope.launch { Settings.state.collect { session.profile = it.profile } }
         return if (demo) START_NOT_STICKY else START_STICKY
     }
 
@@ -94,6 +113,14 @@ class DriveService : Service(), LocationListener {
         val manager = getSystemService(LocationManager::class.java)
         gpsStatus = GpsStatusWatcher(manager, DriveState::satellites).also { it.start() }
         manager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1_000L, 0f, this, Looper.getMainLooper())
+        // Tunnel: no fix for 2.5 s → the car keeps moving along the road (DrivingSession.coast).
+        scope.launch {
+            while (true) {
+                delay(1_000)
+                val lost = System.currentTimeMillis() - lastFixWallMs
+                if (lastFixWallMs > 0 && lost > 2_500) session.coast(lastFixTimeMs + lost)?.let(::show)
+            }
+        }
     }
 
     /** Hidden demo: replays [DemoDrive] in real time through the same pipeline, then stops. */
@@ -117,11 +144,16 @@ class DriveService : Service(), LocationListener {
         val fix = location.toFix()
         recorder?.add(fix)
         data?.ensureTiles(fix.position)
+        lastFixTimeMs = fix.timeMs
+        lastFixWallMs = System.currentTimeMillis()
         process(fix)
     }
 
     private fun process(fix: GpsFix) {
-        val snapshot = session.process(fix) ?: return
+        session.process(fix)?.let(::show)
+    }
+
+    private fun show(snapshot: DriveSnapshot) {
         DriveState.update(snapshot)
         if (snapshot.timeMs - lastNearbyMs >= 3_000 || lastNearbyMs == 0L) {
             lastNearbyMs = snapshot.timeMs
@@ -135,7 +167,8 @@ class DriveService : Service(), LocationListener {
     /** Tone first, then the spoken text right after it. */
     private fun announce(event: AlertEvent) {
         val tone = when (event) {
-            is AlertEvent.Approach, is AlertEvent.SectionStarted -> Tone.APPROACH
+            is AlertEvent.Approach -> if (event.radar.type.measuresSpeed) Tone.APPROACH else Tone.CHIME
+            is AlertEvent.SectionStarted -> Tone.APPROACH
             is AlertEvent.Brake -> Tone.BRAKE
             is AlertEvent.Overspeed -> Tone.OVERSPEED.takeIf { event.level == OverspeedLevel.WARN }
             is AlertEvent.Passed -> Tone.PASSED.takeIf { event.wouldFlash }
@@ -143,6 +176,7 @@ class DriveService : Service(), LocationListener {
             is AlertEvent.LimitChanged -> null
         }
         tone?.let(tones::play)
+        if (!Settings.state.value.voice) return
         Announcer.text(event)?.let { speaker.say(it, delayMs = tone?.let(tones::durationMs)?.plus(80) ?: 0) }
     }
 
@@ -239,9 +273,21 @@ class DriveService : Service(), LocationListener {
         private const val NOTIFICATION_ID = 1
         private const val ACTION_STOP = "zenith.app.STOP"
         private const val ACTION_DEMO = "zenith.app.DEMO"
+        private const val ACTION_AUTO = "zenith.app.AUTO"
 
         fun start(context: Context) =
             ContextCompat.startForegroundService(context, Intent(context, DriveService::class.java))
+
+        /** Car connected (paired Bluetooth): throws when Android forbids the background start. */
+        fun startAuto(context: Context) {
+            if (DriveState.running.value) return
+            context.startForegroundService(Intent(context, DriveService::class.java).setAction(ACTION_AUTO))
+        }
+
+        /** Car disconnected: ends the drive only if the car started it. */
+        fun stopAuto(context: Context) {
+            if (DriveState.autoStarted.value) stop(context)
+        }
 
         /** Hidden simulated drive, to see and hear the alerts without driving. */
         fun startDemo(context: Context) =

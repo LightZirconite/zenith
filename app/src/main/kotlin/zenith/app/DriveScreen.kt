@@ -89,6 +89,9 @@ fun DriveScreen(
     onOpenNavApp: (NavApp) -> Unit = {},
     demo: Boolean = false,
     onDemo: () -> Unit = {},
+    raining: Boolean = false,
+    onToggleRain: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
 ) {
     val showMap = running && snapshot != null
     Box(Modifier.fillMaxSize().background(Bg)) {
@@ -100,7 +103,7 @@ fun DriveScreen(
             modifier = Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 20.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            StatusRow(running, gps, data, demo)
+            StatusRow(running, gps, data, demo, snapshot?.estimated == true, raining, onToggleRain)
             UpdateBanner(update, canInstall, onInstallUpdate)
             Column(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -118,6 +121,17 @@ fun DriveScreen(
             StartStop(running, onStart, onStop)
             AnimatedVisibility(visible = !running, enter = fadeIn(), exit = fadeOut()) {
                 Text(
+                    "Réglages",
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp).clip(RoundedCornerShape(18.dp)).background(Surface)
+                        .clickable(onClick = onOpenSettings).padding(vertical = 14.dp),
+                )
+            }
+            AnimatedVisibility(visible = !running, enter = fadeIn(), exit = fadeOut()) {
+                Text(
                     "Cartes © OpenFreeMap © OpenStreetMap · radars data.gouv.fr, OpenStreetMap, Lufop",
                     color = Dim.copy(alpha = 0.6f),
                     fontSize = 10.sp,
@@ -131,7 +145,15 @@ fun DriveScreen(
 
 /** GPS and data chips; they appear while something is pending and fade once all is fine. */
 @Composable
-private fun StatusRow(running: Boolean, gps: GpsInfo, data: DataStatus, demo: Boolean) {
+private fun StatusRow(
+    running: Boolean,
+    gps: GpsInfo,
+    data: DataStatus,
+    demo: Boolean,
+    estimated: Boolean,
+    raining: Boolean,
+    onToggleRain: () -> Unit,
+) {
     val gpsGood = (gps.accuracyM ?: 99.0) <= 15
     var showGps by remember { mutableStateOf(true) }
     LaunchedEffect(gpsGood, running) {
@@ -146,7 +168,10 @@ private fun StatusRow(running: Boolean, gps: GpsInfo, data: DataStatus, demo: Bo
         AnimatedVisibility(visible = running && demo, enter = fadeIn(), exit = fadeOut()) {
             Chip("Démo · trajet simulé", Color(0xFF0A84FF))
         }
-        AnimatedVisibility(visible = running && !demo && showGps, enter = fadeIn(), exit = fadeOut()) {
+        AnimatedVisibility(visible = running && !demo && estimated, enter = fadeIn(), exit = fadeOut()) {
+            Chip("Tunnel · position estimée", Orange)
+        }
+        AnimatedVisibility(visible = running && !demo && !estimated && showGps, enter = fadeIn(), exit = fadeOut()) {
             val text = when {
                 gps.accuracyM == null -> "Satellites ${gps.used}/${gps.visible} · recherche"
                 gpsGood -> "GPS ±${gps.accuracyM.roundToInt()} m · ${gps.used} sat."
@@ -158,13 +183,22 @@ private fun StatusRow(running: Boolean, gps: GpsInfo, data: DataStatus, demo: Bo
         AnimatedVisibility(visible = data.loading || data.error != null, enter = fadeIn(), exit = fadeOut()) {
             Chip(data.error ?: "Chargement des routes…", if (data.error != null) Orange else Dim)
         }
+        // Rain lowers the limits: one tap while driving.
+        AnimatedVisibility(visible = running, enter = fadeIn(), exit = fadeOut()) {
+            Row {
+                Spacer(Modifier.width(8.dp))
+                Chip(if (raining) "Pluie" else "Sec", if (raining) Color(0xFF0A84FF) else Dim, onClick = onToggleRain)
+            }
+        }
     }
 }
 
 @Composable
-private fun Chip(text: String, dot: Color) {
+private fun Chip(text: String, dot: Color, onClick: (() -> Unit)? = null) {
     Row(
-        Modifier.clip(RoundedCornerShape(50)).background(Surface).padding(horizontal = 12.dp, vertical = 6.dp),
+        Modifier.clip(RoundedCornerShape(50)).background(Surface)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(8.dp).background(dot, CircleShape))

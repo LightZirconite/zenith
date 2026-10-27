@@ -7,12 +7,15 @@ import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.util.Rational
 import android.provider.Settings
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -31,6 +34,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 class MainActivity : ComponentActivity() {
     /** Bumped on every onResume: permissions and updates are re-checked when the user comes back. */
     private val resumes = MutableStateFlow(0)
+
+    /** "Car connected · tap to start" notification was tapped. */
+    private val startRequested = MutableStateFlow(false)
     private val inPip = MutableStateFlow(false)
 
     /** Driving: leaving Zenith (for Waze, Maps…) shrinks it into a picture-in-picture window. */
@@ -40,6 +46,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge(SystemBarStyle.dark(android.graphics.Color.TRANSPARENT), SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
         super.onCreate(savedInstanceState)
         val prefs = getSharedPreferences("zenith", MODE_PRIVATE)
+        Settings.init(this)
+        handleIntent(intent)
         setContent {
             val context = LocalContext.current
             val running by DriveState.running.collectAsStateWithLifecycle()
@@ -51,10 +59,22 @@ class MainActivity : ComponentActivity() {
             val resumeCount by resumes.collectAsStateWithLifecycle()
             val pip by inPip.collectAsStateWithLifecycle()
             val demo by DriveState.demo.collectAsStateWithLifecycle()
+            val settings by Settings.state.collectAsStateWithLifecycle()
+            val startNow by startRequested.collectAsStateWithLifecycle()
+            var showSettings by remember { mutableStateOf(false) }
+            val pairLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { }
+            BackHandler(enabled = showSettings) { showSettings = false }
             val navApps = remember(resumeCount) { NavApp.installed(context) }
             var permissionResults by remember { mutableIntStateOf(0) }
             val permissions = remember(resumeCount, permissionResults) { Permissions.read(context) }
             var onboarded by remember { mutableStateOf(prefs.getBoolean(KEY_ONBOARDED, false)) }
+            // "Car connected · tap to start" notification.
+            LaunchedEffect(startNow, permissions.location) {
+                if (startNow && permissions.location) {
+                    startRequested.value = false
+                    DriveService.start(context)
+                }
+            }
 
             val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
                 permissionResults++
@@ -84,6 +104,30 @@ class MainActivity : ComponentActivity() {
 
             if (pip) {
                 PipScreen(snapshot)
+            } else if (showSettings && onboarded) {
+                SettingsScreen(
+                    settings = settings,
+                    version = remember { runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull().orEmpty() },
+                    onChange = { change -> Settings.update(context, change) },
+                    onPairCar = {
+                        if (CarLink.supported) {
+                            CarLink.pair(
+                                context,
+                                launch = { sender -> pairLauncher.launch(IntentSenderRequest.Builder(sender).build()) },
+                                onPaired = { info ->
+                                    Settings.update(context) { it.copy(carAssociationId = info.id, carName = info.displayName?.toString() ?: "ta voiture") }
+                                },
+                                onError = { Log.w("Zenith", "car pairing: $it") },
+                            )
+                        }
+                    },
+                    onUnpairCar = {
+                        val id = settings.carAssociationId
+                        if (id != null && CarLink.supported) CarLink.unpair(context, id)
+                        Settings.update(context) { it.copy(carAssociationId = null, carName = null) }
+                    },
+                    onBack = { showSettings = false },
+                )
             } else if (!onboarded) {
                 Onboarding(
                     permissions = permissions,
@@ -124,9 +168,21 @@ class MainActivity : ComponentActivity() {
                     onOpenNavApp = { it.launch(context) },
                     demo = demo,
                     onDemo = { if (permissions.location) DriveService.startDemo(context) },
+                    raining = settings.raining,
+                    onToggleRain = { Settings.update(context) { it.copy(raining = !it.raining) } },
+                    onOpenSettings = { showSettings = true },
                 )
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent?) {
+        if (intent?.action == ACTION_START_DRIVE) startRequested.value = true
     }
 
     override fun onResume() {
@@ -180,7 +236,8 @@ class MainActivity : ComponentActivity() {
             .onFailure { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) }
     }
 
-    private companion object {
-        const val KEY_ONBOARDED = "onboarded"
+    companion object {
+        const val ACTION_START_DRIVE = "zenith.app.START_DRIVE"
+        private const val KEY_ONBOARDED = "onboarded"
     }
 }

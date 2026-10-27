@@ -21,6 +21,9 @@ enum class Tone(val notes: List<Note>) {
     /** Strong braking needed: three fast high beeps. */
     BRAKE(listOf(Note(1760.0, 60), Note(0.0, 40), Note(1760.0, 60), Note(0.0, 40), Note(1760.0, 60))),
 
+    /** Red light or level crossing camera ahead: softer, lower chime (speed is not checked). */
+    CHIME(listOf(Note(784.0, 140), Note(988.0, 220))),
+
     /** Radar passed: soft falling pair. */
     PASSED(listOf(Note(1319.0, 110), Note(988.0, 170))),
 }

@@ -14,6 +14,7 @@ object DriveState {
     private val _data = MutableStateFlow(DataStatus())
     private val _nearbyRadars = MutableStateFlow<List<Radar>>(emptyList())
     private val _demo = MutableStateFlow(false)
+    private val _autoStarted = MutableStateFlow(false)
 
     val running: StateFlow<Boolean> = _running
     val snapshot: StateFlow<DriveSnapshot?> = _snapshot
@@ -26,10 +27,14 @@ object DriveState {
     /** The running drive is the hidden simulated one. */
     val demo: StateFlow<Boolean> = _demo
 
-    internal fun started(demo: Boolean = false) {
+    /** The running drive was started by the car's Bluetooth. */
+    val autoStarted: StateFlow<Boolean> = _autoStarted
+
+    internal fun started(demo: Boolean = false, auto: Boolean = false) {
         _snapshot.value = null
         _gps.value = GpsInfo()
         _demo.value = demo
+        _autoStarted.value = auto
         _running.value = true
     }
 
@@ -52,6 +57,7 @@ object DriveState {
         _running.value = false
         _snapshot.value = null
         _demo.value = false
+        _autoStarted.value = false
         _nearbyRadars.value = emptyList()
     }
 }
