@@ -4,7 +4,7 @@ Application Android minimaliste d'alertes de conduite : vitesse, limitation, rad
 
 ## Modules
 
-- `core/` : Kotlin pur (géo, règles françaises de vitesse, radar tronçon). Testé sur JVM.
+- `core/` : Kotlin pur, testé sur JVM. Filtre de Kalman, map-matching HMM, moteur d'alertes radars (approche, freinage, passage, tronçon, excès), règles françaises de vitesse, lecture/écriture GPX et replay (`DrivingSession`).
 - `app/` : application Android (Jetpack Compose).
 
 ## Développement
