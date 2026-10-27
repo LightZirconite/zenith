@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace = "zenith.app"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "zenith.app"
