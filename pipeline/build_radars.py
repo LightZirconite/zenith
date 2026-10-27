@@ -126,17 +126,45 @@ def osm_elements(pbf):
             super().__init__()
             self.refs = refs
             self.nodes = []
+            self.relative = set()  # cameras tagged direction=forward/backward
 
         def node(self, n):
             tags = n.tags
             if tags.get("highway") == "speed_camera" or n.id in self.refs:
                 self.nodes.append({"type": "node", "id": n.id, "lat": n.location.lat, "lon": n.location.lon,
                                    "tags": dict((t.k, t.v) for t in tags)})
+                if tags.get("highway") == "speed_camera" and tags.get("direction") in ("forward", "backward"):
+                    self.relative.add(n.id)
+
+    class WayBearings(osmium.SimpleHandler):
+        """Pass 3: bearing of the road at each camera tagged forward/backward (way order)."""
+
+        def __init__(self, wanted):
+            super().__init__()
+            self.wanted = wanted
+            self.bearings = {}
+
+        def way(self, w):
+            if "highway" not in w.tags:
+                return
+            nodes = [(n.ref, n.location) for n in w.nodes]
+            for k, (ref, _) in enumerate(nodes):
+                if ref not in self.wanted or ref in self.bearings:
+                    continue
+                a, b = nodes[max(k - 1, 0)][1], nodes[min(k + 1, len(nodes) - 1)][1]
+                if a.valid() and b.valid() and (a.lat, a.lon) != (b.lat, b.lon):
+                    self.bearings[ref] = bearing((a.lat, a.lon), (b.lat, b.lon))
 
     rel = Relations()
     rel.apply_file(pbf)
     nodes = Nodes(rel.refs)
     nodes.apply_file(pbf)
+    ways = WayBearings(nodes.relative)
+    if nodes.relative:
+        ways.apply_file(pbf, locations=True, idx="flex_mem")
+    for e in nodes.nodes:
+        if e["id"] in ways.bearings:
+            e["way_bearing"] = ways.bearings[e["id"]]
     return nodes.nodes + rel.relations
 
 
@@ -147,6 +175,9 @@ def osm_items(elements):
         if e["type"] == "node" and e.get("tags", {}).get("highway") == "speed_camera":
             t = e["tags"]
             d = speed(t.get("direction")) if str(t.get("direction", "")).replace(".", "").isdigit() else None
+            # forward / backward: relative to the way the camera stands on.
+            if d is None and "way_bearing" in e and t.get("direction") in ("forward", "backward"):
+                d = round((e["way_bearing"] + (180 if t["direction"] == "backward" else 0)) % 360, 1)
             items[e["id"]] = {"pos": (e["lat"], e["lon"]), "limit": speed(t.get("maxspeed")), "dir": d, "type": "FIXED"}
     sections = []
     for r in (e for e in elements if e["type"] == "relation"):
@@ -196,7 +227,8 @@ def lufop_items(path):
             pos = (float(r["lat"]), float(r["lng"]))
         except (KeyError, TypeError, ValueError):
             continue
-        item = {"id": f"lufop-{rid}", "pos": pos, "type": kind, "limit": speed(r.get("vitesse")), "dir": None}
+        item = {"id": f"lufop-{rid}", "pos": pos, "type": kind, "limit": speed(r.get("vitesse")), "dir": None,
+                "azimut": speed(r.get("azimut"))}
         if kind == "MOBILE":
             item["at"] = lufop_time(r.get("update"))  # the app ignores stale mobile reports
         items.append(item)
@@ -234,6 +266,8 @@ def merge(official_radars, osm, sections, lufop=()):
             extra.append({"id": f"osm-{k}", "pos": item["pos"], "type": item["type"], "limit": item["limit"], "dir": item["dir"], "src": ["osm"]})
 
     # Lufop last: fills limits, confirms, and adds what the others miss (mobile, roadwork…).
+    # Its undocumented "azimut" is compared with known directions (report only, not used yet).
+    azimut_diffs = []
     for item in lufop:
         match = min(nearby(item["pos"], MERGE_M), key=lambda o: distance(o["pos"], item["pos"]), default=None)
         if match is None:
@@ -242,8 +276,15 @@ def merge(official_radars, osm, sections, lufop=()):
         if match:
             match["limit"] = match["limit"] or item["limit"]
             match["src"].append("lufop")
+            if match.get("dir") is not None and item.get("azimut") is not None:
+                azimut_diffs.append(abs((item["azimut"] - match["dir"] + 180) % 360 - 180))
         else:
-            extra.append({**item, "src": ["lufop"]})
+            extra.append({k: v for k, v in item.items() if k != "azimut"} | {"src": ["lufop"]})
+    if azimut_diffs:
+        same = sum(1 for d in azimut_diffs if d <= 30) / len(azimut_diffs)
+        opposite = sum(1 for d in azimut_diffs if d >= 150) / len(azimut_diffs)
+        summary([f"### Azimut Lufop contre sens connus : {len(azimut_diffs)} radars comparés, "
+                 f"{same:.0%} dans le même sens (±30°), {opposite:.0%} à l'opposé. Seuil pour s'en servir : 95 %."])
 
     radars = official_radars + extra
     for k, s in enumerate(sections):

@@ -46,7 +46,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge(SystemBarStyle.dark(android.graphics.Color.TRANSPARENT), SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
         super.onCreate(savedInstanceState)
         val prefs = getSharedPreferences("zenith", MODE_PRIVATE)
-        Settings.init(this)
+        UserSettings.init(this)
         handleIntent(intent)
         setContent {
             val context = LocalContext.current
@@ -59,7 +59,7 @@ class MainActivity : ComponentActivity() {
             val resumeCount by resumes.collectAsStateWithLifecycle()
             val pip by inPip.collectAsStateWithLifecycle()
             val demo by DriveState.demo.collectAsStateWithLifecycle()
-            val settings by Settings.state.collectAsStateWithLifecycle()
+            val settings by UserSettings.state.collectAsStateWithLifecycle()
             val startNow by startRequested.collectAsStateWithLifecycle()
             var showSettings by remember { mutableStateOf(false) }
             val pairLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { }
@@ -108,14 +108,14 @@ class MainActivity : ComponentActivity() {
                 SettingsScreen(
                     settings = settings,
                     version = remember { runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull().orEmpty() },
-                    onChange = { change -> Settings.update(context, change) },
+                    onChange = { change -> UserSettings.update(context, change) },
                     onPairCar = {
                         if (CarLink.supported) {
                             CarLink.pair(
                                 context,
                                 launch = { sender -> pairLauncher.launch(IntentSenderRequest.Builder(sender).build()) },
                                 onPaired = { info ->
-                                    Settings.update(context) { it.copy(carAssociationId = info.id, carName = info.displayName?.toString() ?: "ta voiture") }
+                                    UserSettings.update(context) { it.copy(carAssociationId = info.id, carName = info.displayName?.toString() ?: "ta voiture") }
                                 },
                                 onError = { Log.w("Zenith", "car pairing: $it") },
                             )
@@ -124,7 +124,7 @@ class MainActivity : ComponentActivity() {
                     onUnpairCar = {
                         val id = settings.carAssociationId
                         if (id != null && CarLink.supported) CarLink.unpair(context, id)
-                        Settings.update(context) { it.copy(carAssociationId = null, carName = null) }
+                        UserSettings.update(context) { it.copy(carAssociationId = null, carName = null) }
                     },
                     onBack = { showSettings = false },
                 )
@@ -169,7 +169,7 @@ class MainActivity : ComponentActivity() {
                     demo = demo,
                     onDemo = { if (permissions.location) DriveService.startDemo(context) },
                     raining = settings.raining,
-                    onToggleRain = { Settings.update(context) { it.copy(raining = !it.raining) } },
+                    onToggleRain = { UserSettings.update(context) { it.copy(raining = !it.raining) } },
                     onOpenSettings = { showSettings = true },
                 )
             }

@@ -90,12 +90,12 @@ class DriveService : Service(), LocationListener {
         }
         started = true
         CarLink.cancelTapToStart(this)
-        Settings.init(this)
+        UserSettings.init(this)
         speaker = Speaker(this)
         tones = TonePlayer()
         DriveState.started(demo, auto)
         if (demo) startDemo() else startLive()
-        scope.launch { Settings.state.collect { session.profile = it.profile } }
+        scope.launch { UserSettings.state.collect { session.profile = it.profile } }
         return if (demo) START_NOT_STICKY else START_STICKY
     }
 
@@ -176,7 +176,7 @@ class DriveService : Service(), LocationListener {
             is AlertEvent.LimitChanged -> null
         }
         tone?.let(tones::play)
-        if (!Settings.state.value.voice) return
+        if (!UserSettings.state.value.voice) return
         Announcer.text(event)?.let { speaker.say(it, delayMs = tone?.let(tones::durationMs)?.plus(80) ?: 0) }
     }
 

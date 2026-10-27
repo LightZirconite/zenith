@@ -20,7 +20,7 @@ data class SettingsState(
 }
 
 /** Settings shared by the screen and the drive service; [init] is cheap and idempotent. */
-object Settings {
+object UserSettings {
     private const val PREFS = "zenith_settings"
     private val _state = MutableStateFlow(SettingsState())
     val state: StateFlow<SettingsState> = _state
