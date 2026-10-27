@@ -92,9 +92,11 @@ Tester le pipeline en local sur un petit extrait : `https://download.geofabrik.d
 
 - `GET https://api.lufop.net/api?key=K&format=json&pays=FR&nbr=200&q=LAT,LON&m=M`, où `m` = rayon en km × 10.
 - Plan gratuit : 200 requêtes/jour, 200 résultats par appel, **10 requêtes/minute**, FR/BE/CH, pas de `since=`.
-- Réponse : liste d'objets (`id`, `name`, `lat`, `lng`, `vitesse`, `azimut`, `flash`, `update`, `voie`, `commune`, `pays`) ; `null` quand la zone est vide ; un objet `{message}` en cas d'erreur.
+- Réponse : liste d'objets (`name`, `lat`, `lng`, `vitesse`, `azimut`, `flash`, `update` « AAAA-MM-JJ hh:mm:ss », `voie`, `commune`) ; `null` quand la zone est vide ; un objet `{message}` en cas d'erreur. **Pas de champ `id`** en pratique : `harvest_lufop.py` identifie un radar par `lat,lng` (5 décimales).
+- `pays=FR` renvoie aussi les radars espagnols et italiens proches de la frontière (noms « Radar Fixe ES 120 »…). Ils sont gardés.
+- Premier passage réel (27/10/2026) : 150 requêtes → 3 135 radars ; quadrillage 413 zones → 425 après découpage des zones saturées.
 - Le type se déduit du `name` (« Radar Fixe », « Feu Rouge », « Mobile », « Chantier », « Covoiturage » sans vitesse = à ignorer).
-- `azimut` et `flash` ne sont **pas documentés** : on n'en tire pas de sens de circulation (un sens faux ferait rater l'alerte). À valider sur des radars connus avant de s'en servir.
+- `azimut` (degrés, rempli pour environ 43 % des radars) et `flash` (`D`, `B`, `F`, ou vide ; probablement dos / les deux / face) ne sont **pas documentés** : on n'en tire pas encore de sens de circulation (un sens faux ferait rater l'alerte). À valider en comparant avec les radars OSM qui ont une relation `enforcement` avant de s'en servir.
 
 ## Données : règles
 
