@@ -22,6 +22,8 @@ data class DriveSnapshot(
     /** Road ahead the driver most likely follows, from the car onwards; empty without road data. */
     val ahead: List<LatLon>,
     val events: List<AlertEvent>,
+    /** No GPS (tunnel): position estimated along the road at the last speed. */
+    val estimated: Boolean = false,
 )
 
 /**
@@ -35,6 +37,10 @@ class DrivingSession(
     profile: DriverProfile = DriverProfile(),
     settings: AlertSettings = AlertSettings(),
 ) {
+    /** Licence and weather rules; can change during a drive (rain starting). */
+    @Volatile
+    var profile: DriverProfile = profile
+
     constructor(
         network: RoadNetwork?,
         radars: List<Radar>,
@@ -45,7 +51,7 @@ class DrivingSession(
     private val filter = KalmanFilter()
     private val stabilizer = SpeedStabilizer()
     private val matcher = MapMatcher(network)
-    private val effective: (Int) -> Int = { SpeedRules.effectiveLimit(it, profile.raining, profile.probationary) }
+    private val effective: (Int) -> Int = { SpeedRules.effectiveLimit(it, this.profile.raining, this.profile.probationary) }
     private val engine = AlertEngine(RadarIndex(radars), settings, effective)
 
     /** Swaps in a newer radar list (e.g. after a pack download) without resetting the drive. */
@@ -53,8 +59,36 @@ class DrivingSession(
         engine.radars = RadarIndex(radars)
     }
 
+    private var last: DriveSnapshot? = null
+    private var lastRealFixMs: Long? = null
+    private var lastSpeedMps = 0.0
+
     /** Processes one fix; null when the filter rejected it as an outlier. */
     fun process(fix: GpsFix): DriveSnapshot? {
+        val snapshot = step(fix, estimated = false) ?: return null
+        lastRealFixMs = fix.timeMs
+        lastSpeedMps = fix.speedMps ?: (snapshot.speedKmh ?: 0) / 3.6
+        return snapshot
+    }
+
+    /**
+     * GPS lost (tunnel, trench): keeps the car moving along the road ahead at its last speed, so
+     * radars inside still alert. Null when there is nothing to follow, the car was slow, or the
+     * signal has been lost for more than [MAX_COAST_MS].
+     */
+    fun coast(nowMs: Long): DriveSnapshot? {
+        val prev = last ?: return null
+        val lostSince = lastRealFixMs ?: return null
+        if (nowMs - lostSince > MAX_COAST_MS || lastSpeedMps < MIN_COAST_MPS || prev.ahead.size < 2) return null
+        val dt = (nowMs - prev.timeMs) / 1000.0
+        if (dt <= 0) return null
+        val road = Polyline(prev.ahead)
+        val d = (lastSpeedMps * dt).coerceAtMost(road.lengthM)
+        val fix = GpsFix(nowMs, road.pointAt(d), accuracyM = COAST_ACCURACY_M, speedMps = lastSpeedMps, bearingDeg = road.bearingAt(d))
+        return step(fix, estimated = true)
+    }
+
+    private fun step(fix: GpsFix, estimated: Boolean): DriveSnapshot? {
         val state = filter.update(fix) ?: return null
         val net = network()
         val road = matcher.update(state)
@@ -75,10 +109,15 @@ class DrivingSession(
             limitAhead = out.limitAhead,
             ahead = out.ahead,
             events = out.events,
-        )
+            estimated = estimated,
+        ).also { last = it }
     }
 
     companion object {
+        const val MAX_COAST_MS = 60_000L
+        private const val MIN_COAST_MPS = 3.0
+        private const val COAST_ACCURACY_M = 10.0
+
         /** Replays a recorded trace and returns every snapshot. */
         fun replay(fixes: List<GpsFix>, session: DrivingSession): List<DriveSnapshot> = fixes.mapNotNull(session::process)
     }

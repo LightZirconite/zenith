@@ -1,10 +1,11 @@
 package zenith.core
 
-enum class RadarType(val label: String, val mobile: Boolean = false) {
+/** [measuresSpeed] false: the camera checks a red light, not the speed (no limit, no "too fast"). */
+enum class RadarType(val label: String, val mobile: Boolean = false, val measuresSpeed: Boolean = true) {
     FIXED("Radar fixe"),
     DISCRIMINANT("Radar discriminant"),
-    RED_LIGHT("Radar feu rouge"),
-    LEVEL_CROSSING("Radar passage à niveau"),
+    RED_LIGHT("Radar feu rouge", measuresSpeed = false),
+    LEVEL_CROSSING("Radar passage à niveau", measuresSpeed = false),
     SECTION_START("Début de radar tronçon"),
     SECTION_END("Fin de radar tronçon"),
     WORKZONE("Radar chantier"),

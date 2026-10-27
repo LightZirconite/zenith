@@ -42,7 +42,15 @@ sealed interface AlertEvent {
 
     data class Approach(override val timeMs: Long, val radar: Radar, val distanceM: Double, val limitKmh: Int?) : AlertEvent
     data class Brake(override val timeMs: Long, val radar: Radar, val distanceM: Double, val limitKmh: Int) : AlertEvent
-    data class Passed(override val timeMs: Long, val radar: Radar, val speedKmh: Double, val limitKmh: Int?, val wouldFlash: Boolean) : AlertEvent
+    /** [points]: licence points at stake when [wouldFlash], from the retained speed. */
+    data class Passed(
+        override val timeMs: Long,
+        val radar: Radar,
+        val speedKmh: Double,
+        val limitKmh: Int?,
+        val wouldFlash: Boolean,
+        val points: Int = 0,
+    ) : AlertEvent
     data class SectionStarted(override val timeMs: Long, val radar: Radar, val lengthM: Double, val limitKmh: Int) : AlertEvent
     data class SectionEnded(override val timeMs: Long, val averageKmh: Double, val limitKmh: Int, val wouldFlash: Boolean) : AlertEvent
     data class Overspeed(override val timeMs: Long, val level: OverspeedLevel, val speedKmh: Int, val limitKmh: Int) : AlertEvent
@@ -269,14 +277,17 @@ class AlertEngine(
         return angle <= settings.aheadConeDeg || (angle < 90 && d * sin(Math.toRadians(angle)) < 25)
     }
 
-    private fun radarLimit(r: Radar, roadLimit: Int?): Int? = r.limitKmh?.let(effectiveLimit) ?: roadLimit
+    private fun radarLimit(r: Radar, roadLimit: Int?): Int? =
+        if (!r.type.measuresSpeed) null else r.limitKmh?.let(effectiveLimit) ?: roadLimit
 
     private fun onPassed(t: Track, now: Long, roadLimit: Int?, events: MutableList<AlertEvent>) {
         val r = t.radar
         val rl = radarLimit(r, roadLimit)
         val speedKmh = t.speedAtMinMps * 3.6
         val retained = SpeedRules.retainedSpeed(speedKmh, movingRadar = r.type == RadarType.MOBILE_VEHICLE)
-        events += AlertEvent.Passed(now, r, speedKmh, rl, wouldFlash = rl != null && retained > rl)
+        val flash = rl != null && retained > rl
+        val points = if (flash && rl != null) SpeedRules.pointsLost(retained - rl) else 0
+        events += AlertEvent.Passed(now, r, speedKmh, rl, wouldFlash = flash, points = points)
         when (r.type) {
             RadarType.SECTION_START -> if (r.sectionLengthM != null && rl != null) {
                 section = SectionTracker(r.sectionLengthM, rl, now)
