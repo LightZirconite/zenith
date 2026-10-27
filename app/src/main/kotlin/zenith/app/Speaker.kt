@@ -22,6 +22,7 @@ class Speaker(context: Context) : TextToSpeech.OnInitListener {
     private val tts = TextToSpeech(context, this)
     private val pending = mutableListOf<String>()
     private val speaking = AtomicInteger(0)
+    private val counter = AtomicInteger(0)
     private var ready = false
 
     override fun onInit(status: Int) {
@@ -36,17 +37,19 @@ class Speaker(context: Context) : TextToSpeech.OnInitListener {
             override fun onError(utteranceId: String) = finished()
         })
         ready = true
-        pending.forEach(::say)
+        pending.forEach { say(it) }
         pending.clear()
     }
 
-    fun say(text: String) {
+    /** Speaks [text] after [delayMs] of silence (to let an alert tone finish first). */
+    fun say(text: String, delayMs: Int = 0) {
         if (!ready) {
             pending += text
             return
         }
         if (speaking.getAndIncrement() == 0) audio.requestAudioFocus(focus)
-        tts.speak(text, TextToSpeech.QUEUE_ADD, null, text.hashCode().toString())
+        if (delayMs > 0) tts.playSilentUtterance(delayMs.toLong(), TextToSpeech.QUEUE_ADD, null)
+        tts.speak(text, TextToSpeech.QUEUE_ADD, null, "zenith-${counter.incrementAndGet()}")
     }
 
     fun shutdown() {

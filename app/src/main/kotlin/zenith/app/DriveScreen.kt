@@ -1,118 +1,285 @@
 package zenith.app
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateIntAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 import zenith.core.ActiveAlert
 import zenith.core.DriveSnapshot
 import zenith.core.LimitSource
 import zenith.core.SectionStatus
+import zenith.core.UpcomingRadar
 import kotlin.math.roundToInt
 
-private val Red = Color(0xFFE53935)
-private val Orange = Color(0xFFFFA726)
-private val Dim = Color(0xFF8A8A8A)
-private val Card = Color(0xFF1C1C1C)
+private val Bg = Color(0xFF000000)
+private val Surface = Color(0xFF16161A)
+private val Red = Color(0xFFFF3B30)
+private val Orange = Color(0xFFFF9F0A)
+private val Green = Color(0xFF30D158)
+private val Dim = Color(0xFF8E8E93)
 
 @Composable
-fun DriveScreen(running: Boolean, snapshot: DriveSnapshot?, onStart: () -> Unit, onStop: () -> Unit) {
+fun DriveScreen(
+    running: Boolean,
+    snapshot: DriveSnapshot?,
+    gps: GpsInfo,
+    data: DataStatus,
+    update: UpdateState,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+    onInstallUpdate: () -> Unit,
+) {
     Column(
-        modifier = Modifier.fillMaxSize().background(Color.Black).safeDrawingPadding().padding(16.dp),
+        modifier = Modifier.fillMaxSize().background(Bg).safeDrawingPadding().padding(horizontal = 20.dp, vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.CenterStart) {
-            snapshot?.limitKmh?.let { LimitSign(it, uncertain = snapshot.limitSource == LimitSource.INFERRED) }
-        }
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-            Speed(running, snapshot)
-        }
-        snapshot?.section?.let { SectionCard(it) }
-        snapshot?.alerts?.firstOrNull()?.let { AlertCard(it) }
-        Spacer(Modifier.height(12.dp))
-        Button(
-            onClick = if (running) onStop else onStart,
-            modifier = Modifier.fillMaxWidth().height(56.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = if (running) Card else Color.White, contentColor = if (running) Color.White else Color.Black),
+        StatusRow(running, gps, data)
+        UpdateBanner(update, onInstallUpdate)
+        Column(
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text(if (running) "Arrêter" else "Démarrer", fontSize = 18.sp)
+            if (running) Dashboard(snapshot) else Idle(data)
+        }
+        AlertArea(snapshot)
+        Spacer(Modifier.height(12.dp))
+        StartStop(running, onStart, onStop)
+    }
+}
+
+/** GPS and data chips; they appear while something is pending and fade once all is fine. */
+@Composable
+private fun StatusRow(running: Boolean, gps: GpsInfo, data: DataStatus) {
+    val gpsGood = (gps.accuracyM ?: 99.0) <= 15
+    var showGps by remember { mutableStateOf(true) }
+    LaunchedEffect(gpsGood, running) {
+        if (gpsGood) {
+            delay(3_000)
+            showGps = false
+        } else {
+            showGps = true
+        }
+    }
+    Row(Modifier.fillMaxWidth().height(32.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        AnimatedVisibility(visible = running && showGps, enter = fadeIn(), exit = fadeOut()) {
+            val text = when {
+                gps.accuracyM == null -> "Satellites ${gps.used}/${gps.visible} · recherche"
+                gpsGood -> "GPS ±${gps.accuracyM.roundToInt()} m · ${gps.used} sat."
+                else -> "GPS faible ±${gps.accuracyM.roundToInt()} m · ${gps.used}/${gps.visible}"
+            }
+            Chip(text, if (gpsGood) Green else Orange)
+        }
+        Spacer(Modifier.weight(1f))
+        AnimatedVisibility(visible = data.loading || data.error != null, enter = fadeIn(), exit = fadeOut()) {
+            Chip(data.error ?: "Chargement des routes…", if (data.error != null) Orange else Dim)
         }
     }
 }
 
 @Composable
-private fun Speed(running: Boolean, s: DriveSnapshot?) {
-    val limit = s?.limitKmh
-    val color = when {
-        s == null || limit == null -> Color.White
-        s.speedKmh > limit -> Red
-        s.speedKmh >= limit - 3 -> Orange
-        else -> Color.White
+private fun Chip(text: String, dot: Color) {
+    Row(
+        Modifier.clip(RoundedCornerShape(50)).background(Surface).padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(8.dp).background(dot, CircleShape))
+        Spacer(Modifier.width(8.dp))
+        Text(text, color = Color.White, fontSize = 13.sp)
     }
+}
+
+@Composable
+private fun UpdateBanner(update: UpdateState, onInstall: () -> Unit) {
+    val text = when (update) {
+        is UpdateState.Downloading -> "Téléchargement de la version ${update.version}… ${(update.progress * 100).roundToInt()} %"
+        is UpdateState.Ready -> "Version ${update.version} prête · toucher pour installer"
+        is UpdateState.Installing -> "Installation de la version ${update.version}…"
+        else -> null
+    }
+    AnimatedVisibility(visible = text != null) {
+        Text(
+            text.orEmpty(),
+            color = Color.White,
+            fontSize = 14.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp).clip(RoundedCornerShape(12.dp)).background(Surface)
+                .clickable(enabled = update is UpdateState.Ready, onClick = onInstall).padding(12.dp),
+        )
+    }
+}
+
+@Composable
+private fun Idle(data: DataStatus) {
+    Text("Zenith", color = Color.White, fontSize = 44.sp, fontWeight = FontWeight.Bold)
+    Spacer(Modifier.height(8.dp))
     Text(
-        text = s?.speedKmh?.toString() ?: "--",
-        color = color,
-        fontSize = 160.sp,
-        fontWeight = FontWeight.Bold,
-    )
-    Text(
-        text = when {
-            !running -> "Arrêté"
-            s == null -> "Recherche du GPS…"
-            else -> "km/h"
-        },
+        if (data.radarCount > 0) "${"%,d".format(data.radarCount).replace(',', ' ')} radars en mémoire" else "Radars et limitations chargés au démarrage",
         color = Dim,
-        fontSize = 24.sp,
+        fontSize = 16.sp,
     )
 }
 
-/** Round limit sign; gray border when the limit is only inferred from the road type. */
+@Composable
+private fun Dashboard(s: DriveSnapshot?) {
+    val limit = s?.limitKmh
+    val speed = s?.speedKmh
+    val animatedSpeed by animateIntAsState(speed ?: 0, tween(400), label = "speed")
+    val color by animateColorAsState(
+        when {
+            speed == null || limit == null -> Color.White
+            speed > limit -> Red
+            speed >= limit - 3 -> Orange
+            else -> Color.White
+        },
+        label = "speedColor",
+    )
+    Text(s?.road?.segment?.name ?: " ", color = Dim, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                if (speed == null) "--" else animatedSpeed.toString(),
+                color = color,
+                fontSize = 150.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Text("km/h", color = Dim, fontSize = 20.sp)
+        }
+        AnimatedVisibility(visible = limit != null, enter = fadeIn(), exit = fadeOut()) {
+            Row {
+                Spacer(Modifier.width(20.dp))
+                LimitSign(limit ?: 0, uncertain = s?.limitSource == LimitSource.INFERRED)
+            }
+        }
+    }
+}
+
+/** Round limit sign; gray ring when the limit is only inferred from the road type. */
 @Composable
 private fun LimitSign(limitKmh: Int, uncertain: Boolean) {
     Box(
-        modifier = Modifier.size(110.dp).background(Color.White, CircleShape).border(12.dp, if (uncertain) Dim else Red, CircleShape),
+        modifier = Modifier.size(104.dp).background(Color.White, CircleShape).border(11.dp, if (uncertain) Dim else Red, CircleShape),
         contentAlignment = Alignment.Center,
     ) {
-        Text(limitKmh.toString(), color = Color.Black, fontSize = 40.sp, fontWeight = FontWeight.Bold)
+        Text(limitKmh.toString(), color = Color.Black, fontSize = if (limitKmh >= 100) 34.sp else 40.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun AlertArea(s: DriveSnapshot?) {
+    s?.section?.let { SectionCard(it) }
+    val alert = s?.alerts?.firstOrNull()
+    AnimatedVisibility(
+        visible = alert != null,
+        enter = slideInVertically { it } + fadeIn(),
+        exit = slideOutVertically { it } + fadeOut(),
+    ) {
+        alert?.let { AlertCard(it) }
+    }
+    AnimatedVisibility(visible = alert == null && s?.upcoming != null, enter = fadeIn(), exit = fadeOut()) {
+        s?.upcoming?.let { UpcomingStrip(it) }
     }
 }
 
 @Composable
 private fun AlertCard(a: ActiveAlert) {
+    // Distance at first sight of this radar, to draw the countdown bar.
+    var start by remember(a.radar.id) { mutableFloatStateOf(a.distanceM.toFloat()) }
+    if (a.distanceM > start) start = a.distanceM.toFloat()
+    val progress by animateFloatAsState(1f - (a.distanceM.toFloat() / start).coerceIn(0f, 1f), label = "progress")
+    val pulse = rememberInfiniteTransition(label = "pulse")
+    val alpha by pulse.animateFloat(1f, 0.55f, infiniteRepeatable(tween(450), RepeatMode.Reverse), label = "alpha")
+    val bg = if (a.overLimit) Red else Surface
+
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(bg).alpha(if (a.overLimit) alpha else 1f)) {
+        Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+            a.limitKmh?.let {
+                LimitSignSmall(it)
+                Spacer(Modifier.width(16.dp))
+            }
+            Column(Modifier.weight(1f)) {
+                Text(a.radar.type.label, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                val details = listOfNotNull(
+                    if (a.radar.directionDeg == null) "sens non vérifié" else null,
+                    a.ageMs?.let { "signalé il y a ${(it / 60_000).coerceAtLeast(1)} min" },
+                )
+                if (details.isNotEmpty()) Text(details.joinToString(" · "), color = Color.White.copy(alpha = 0.75f), fontSize = 14.sp)
+            }
+            Text(distanceText(a.distanceM), color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Bold)
+        }
+        Box(Modifier.fillMaxWidth().height(6.dp).background(Color.White.copy(alpha = 0.15f))) {
+            Box(Modifier.fillMaxHeight().fillMaxWidth(progress).background(Color.White))
+        }
+    }
+}
+
+@Composable
+private fun LimitSignSmall(limitKmh: Int) {
+    Box(
+        Modifier.size(54.dp).background(Color.White, CircleShape).border(6.dp, Red, CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(limitKmh.toString(), color = Color.Black, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun UpcomingStrip(u: UpcomingRadar) {
     Row(
-        modifier = Modifier.fillMaxWidth().background(if (a.overLimit) Red else Card, RoundedCornerShape(16.dp)).padding(20.dp),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Surface).padding(horizontal = 18.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(Modifier.weight(1f)) {
-            Text(a.radar.type.label, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-            val details = listOfNotNull(
-                a.limitKmh?.let { "Limite $it" },
-                a.ageMs?.let { "signalé il y a ${(it / 60_000).coerceAtLeast(1)} min" },
-            )
-            if (details.isNotEmpty()) Text(details.joinToString(" · "), color = Color.White.copy(alpha = 0.8f), fontSize = 16.sp)
-        }
-        Text(displayDistance(a.distanceM), color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Bold)
+        Text("Prochain", color = Dim, fontSize = 15.sp)
+        Spacer(Modifier.width(10.dp))
+        Text(u.radar.type.label, color = Color.White, fontSize = 17.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        u.limitKmh?.let { Text("$it · ", color = Dim, fontSize = 17.sp) }
+        Text(distanceText(u.distanceM), color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -120,14 +287,28 @@ private fun AlertCard(a: ActiveAlert) {
 private fun SectionCard(s: SectionStatus) {
     val over = s.averageKmh > s.limitKmh
     Column(
-        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
-            .background(if (over) Red else Card, RoundedCornerShape(16.dp)).padding(20.dp),
+        Modifier.fillMaxWidth().padding(bottom = 12.dp).clip(RoundedCornerShape(22.dp))
+            .background(if (over) Red else Surface).padding(20.dp),
     ) {
         Text("Tronçon · moyenne ${s.averageKmh.roundToInt()} / ${s.limitKmh}", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
         val target = s.maxSpeedToFinishKmh?.let { "max ${it.roundToInt()} km/h jusqu'à la fin" } ?: "aucune contrainte"
-        Text("${displayDistance(s.remainingM)} restants · $target", color = Color.White.copy(alpha = 0.8f), fontSize = 16.sp)
+        Text("${distanceText(s.remainingM)} restants · $target", color = Color.White.copy(alpha = 0.8f), fontSize = 15.sp)
     }
 }
 
-private fun displayDistance(m: Double): String =
+@Composable
+private fun StartStop(running: Boolean, onStart: () -> Unit, onStop: () -> Unit) {
+    val bg by animateColorAsState(if (running) Surface else Color.White, label = "buttonBg")
+    Text(
+        if (running) "Arrêter" else "Démarrer",
+        color = if (running) Color.White else Color.Black,
+        fontSize = 18.sp,
+        fontWeight = FontWeight.SemiBold,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(bg)
+            .clickable(onClick = if (running) onStop else onStart).padding(vertical = 18.dp),
+    )
+}
+
+private fun distanceText(m: Double): String =
     if (m < 1_000) "${(m / 10).roundToInt() * 10} m" else "%.1f km".format(m / 1_000).replace('.', ',')

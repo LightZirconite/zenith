@@ -18,20 +18,32 @@ import android.os.Looper
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import zenith.core.AlertEvent
 import zenith.core.Announcer
 import zenith.core.DriveSnapshot
 import zenith.core.DrivingSession
+import zenith.core.OverspeedLevel
 
 /**
- * Foreground service running a drive: 1 Hz GPS → DrivingSession → shared state, voice and GPX.
- * Keeps alerting with the screen off or another app (Waze, Maps) in front.
+ * Foreground service running a drive: 1 Hz GPS → DrivingSession → shared state, sounds, voice
+ * and GPX. Keeps alerting with the screen off or Waze / Maps in front.
  */
 class DriveService : Service(), LocationListener {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private lateinit var session: DrivingSession
+    private lateinit var data: DriveData
     private lateinit var recorder: TripRecorder
     private lateinit var speaker: Speaker
-    private var lastNotified: Pair<Int, Int?>? = null
+    private lateinit var tones: TonePlayer
+    private lateinit var gpsStatus: GpsStatusWatcher
+    private var lastNotified: Pair<Int?, Int?>? = null
     private var lastNotifiedAtMs = 0L
+    private var lastDangerBeepMs = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -48,30 +60,70 @@ class DriveService : Service(), LocationListener {
         createChannel()
         ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(null), ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
 
-        session = DrivingSession(DriveData.network(this), DriveData.radars(this))
+        data = DriveData(this, scope)
+        session = DrivingSession({ data.network }, emptyList())
         recorder = TripRecorder(this)
         speaker = Speaker(this)
+        tones = TonePlayer()
         DriveState.started()
-        getSystemService(LocationManager::class.java)
-            .requestLocationUpdates(LocationManager.GPS_PROVIDER, 1_000L, 0f, this, Looper.getMainLooper())
+        scope.launch { data.status.collect(DriveState::data) }
+        data.loadRadars { radars -> scope.launch { session.setRadars(radars) } }
+
+        val manager = getSystemService(LocationManager::class.java)
+        gpsStatus = GpsStatusWatcher(manager, DriveState::satellites).also { it.start() }
+        manager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1_000L, 0f, this, Looper.getMainLooper())
         return START_STICKY
     }
 
     override fun onLocationChanged(location: Location) {
         val fix = location.toFix()
         recorder.add(fix)
+        data.ensureTiles(fix.position)
         val snapshot = session.process(fix) ?: return
         DriveState.update(snapshot)
-        snapshot.events.mapNotNull(Announcer::text).forEach(speaker::say)
+        snapshot.events.forEach(::announce)
+        dangerBeep(snapshot)
         refreshNotification(snapshot)
+    }
+
+    /** Tone first, then the spoken text right after it. */
+    private fun announce(event: AlertEvent) {
+        val tone = when (event) {
+            is AlertEvent.Approach, is AlertEvent.SectionStarted -> Tone.APPROACH
+            is AlertEvent.Brake -> Tone.BRAKE
+            is AlertEvent.Overspeed -> Tone.OVERSPEED.takeIf { event.level == OverspeedLevel.WARN }
+            is AlertEvent.Passed -> Tone.PASSED.takeIf { event.wouldFlash }
+            is AlertEvent.SectionEnded -> Tone.PASSED
+            is AlertEvent.LimitChanged -> null
+        }
+        tone?.let(tones::play)
+        Announcer.text(event)?.let { speaker.say(it, delayMs = tone?.let(tones::durationMs)?.plus(80) ?: 0) }
+    }
+
+    /** Like Coyote: while over the limit near a radar, beeps get faster as it gets closer. */
+    private fun dangerBeep(s: DriveSnapshot) {
+        val alert = s.alerts.firstOrNull { it.overLimit } ?: return
+        val interval = when {
+            alert.distanceM < 200 -> 500L
+            alert.distanceM < 500 -> 1_000L
+            else -> 2_000L
+        }
+        if (s.timeMs - lastDangerBeepMs >= interval) {
+            lastDangerBeepMs = s.timeMs
+            tones.play(Tone.DANGER)
+        }
     }
 
     override fun onDestroy() {
         if (::session.isInitialized) {
-            getSystemService(LocationManager::class.java).removeUpdates(this)
+            val manager = getSystemService(LocationManager::class.java)
+            manager.removeUpdates(this)
+            gpsStatus.stop()
             recorder.close()
             speaker.shutdown()
+            tones.release()
         }
+        scope.cancel()
         DriveState.stopped()
         super.onDestroy()
     }
@@ -92,13 +144,14 @@ class DriveService : Service(), LocationListener {
         val stop = PendingIntent.getService(
             this, 1, Intent(this, DriveService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE,
         )
+        val speed = s?.speedKmh?.let { "$it km/h" }
         val text = when {
-            s == null -> "Recherche du GPS…"
-            s.limitKmh != null -> "${s.speedKmh} km/h · limite ${s.limitKmh}"
-            else -> "${s.speedKmh} km/h"
+            speed == null -> "Recherche des satellites…"
+            s?.limitKmh != null -> "$speed · limite ${s.limitKmh}"
+            else -> speed
         }
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("Zenith actif")
             .setContentText(text)
             .setContentIntent(open)
