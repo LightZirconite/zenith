@@ -1,7 +1,8 @@
 name: data
 
-# Weekly: builds radars.json and the speed-limit road tiles for France, published as assets of
-# the "data" release (never marked latest, so the APK link keeps pointing to the app release).
+# Weekly: rebuilds the speed-limit road tiles and the OSM radar extract from the France OSM
+# extract, then radars.json. Everything is an asset of the "data" release (never marked latest,
+# so the APK link keeps pointing to the app release). radars.yml refreshes radars.json daily.
 on:
   schedule:
     - cron: "0 3 * * 1"
@@ -35,8 +36,15 @@ jobs:
           rm france.osm.pbf
           ls -la drive.osm.pbf
 
+      - name: OSM radars
+        run: python pipeline/build_radars.py osm drive.osm.pbf out/osm_radars.json
+
       - name: Radars
-        run: python pipeline/build_radars.py drive.osm.pbf out/radars.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download data -p lufop.json -D out 2>/dev/null || echo "pas encore de base Lufop"
+          python pipeline/build_radars.py merge out/osm_radars.json out/lufop.json out/radars.json
 
       - name: Road tiles
         run: |
@@ -61,6 +69,6 @@ jobs:
             gh release create data --title "Données Zenith" --prerelease --latest=false \
               --notes "Radars (data.gouv.fr, Licence Ouverte + OpenStreetMap, ODbL) et limitations de vitesse (OpenStreetMap, ODbL). Mis à jour chaque semaine."
           fi
-          gh release upload data out/radars.json --clobber
+          gh release upload data out/radars.json out/osm_radars.json --clobber
           ls out/tiles/*.json.gz | xargs -n 50 gh release upload data --clobber
           gh release upload data out/manifest.json --clobber

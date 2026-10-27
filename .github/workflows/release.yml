@@ -1,10 +1,17 @@
 name: release
 
-# Every push on main: tests, signed release APK, GitHub Release.
+# Every push on main touching the app: tests, signed release APK, GitHub Release.
 # Latest APK: https://github.com/LightZirconite/zenith/releases/latest/download/zenith.apk
 on:
   push:
     branches: [main]
+    paths:
+      - "app/**"
+      - "core/**"
+      - "gradle/**"
+      - "*.gradle.kts"
+      - "gradle.properties"
+      - ".github/workflows/release.yml"
   workflow_dispatch:
 
 permissions:

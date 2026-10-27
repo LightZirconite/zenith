@@ -17,3 +17,12 @@ Application Android minimaliste d'alertes de conduite : vitesse, limitation, rad
 Chaque push sur `main` lance les tests, compile l'APK signé et le publie en release (`.github/workflows/release.yml`). Dernier APK : https://github.com/LightZirconite/zenith/releases/latest/download/zenith.apk
 
 La clé de signature se crée une seule fois avec `scripts/setup-signing.sh` (gardée dans `~/.zenith`, à sauvegarder).
+
+## Données (sans serveur ni base de données)
+
+GitHub Actions fabrique les données, publiées comme fichiers de la release [`data`](https://github.com/LightZirconite/zenith/releases/tag/data). L'app les télécharge et les garde en cache.
+
+- `data.yml` (chaque lundi) : extrait OpenStreetMap France (Geofabrik) → tuiles de limitations `roads_*.json.gz` + radars OSM `osm_radars.json`, puis `radars.json`.
+- `radars.yml` (chaque jour) : récolte Lufop sous quota dans `lufop.json` (base qui grossit à chaque passage), puis fusion liste officielle data.gouv + OSM + Lufop → `radars.json`.
+
+La clé Lufop est le secret de dépôt `LUFOP_API_KEY` (Settings → Secrets and variables → Actions). Sans elle, la récolte Lufop est simplement sautée.

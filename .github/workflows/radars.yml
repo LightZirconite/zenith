@@ -1,0 +1,50 @@
+name: radars
+
+# Daily: grows our Lufop database within the free quota (secret LUFOP_API_KEY), then merges
+# official list + OSM extract + Lufop into radars.json on the "data" release.
+on:
+  schedule:
+    - cron: "30 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: data
+  cancel-in-progress: false
+
+jobs:
+  radars:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Current data
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p out
+          gh release download data -p osm_radars.json -p lufop.json -D out || true
+          ls -la out
+          test -f out/osm_radars.json || { echo "::error::osm_radars.json absent : lance d'abord le workflow data"; exit 1; }
+
+      - name: Lufop harvest
+        env:
+          LUFOP_API_KEY: ${{ secrets.LUFOP_API_KEY }}
+        run: python pipeline/harvest_lufop.py out/lufop.json 150
+
+      - name: Merge
+        run: python pipeline/build_radars.py merge out/osm_radars.json out/lufop.json out/radars.json
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          files="out/radars.json"
+          test -f out/lufop.json && files="$files out/lufop.json"
+          gh release upload data $files --clobber

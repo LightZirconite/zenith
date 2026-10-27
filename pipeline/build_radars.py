@@ -1,21 +1,22 @@
 #!/usr/bin/env python3
-"""Builds radars.json by merging the official French list with OpenStreetMap.
+"""Builds radars.json by merging every radar source we have.
 
 - Ministère de l'Intérieur list (data.gouv.fr, Licence Ouverte): authoritative position, type, limit.
-- OSM speed cameras and enforcement relations (ODbL), read from the same extract as the roads:
-  measured direction, sections, extra radars.
+- OSM speed cameras and enforcement relations (ODbL): measured direction, sections, extra radars.
+- Our Lufop database (pipeline/harvest_lufop.py): mobile / roadwork radars and ones missing above.
 
-Usage: build_radars.py <france.osm.pbf> <out.json>
+Usage:
+  build_radars.py osm <france.osm.pbf> <osm_radars.json>     weekly, from the OSM extract
+  build_radars.py merge <osm_radars.json> <lufop.json|-> <radars.json>
 """
 import csv
 import io
 import json
 import math
+import os
 import sys
 import urllib.request
 from datetime import datetime, timezone
-
-import osmium
 
 OFFICIAL_DATASET = "https://www.data.gouv.fr/api/1/datasets/liste-des-radars-fixes-en-france/"
 USER_AGENT = "Zenith/0.1 (https://github.com/LightZirconite/zenith)"
@@ -72,38 +73,40 @@ def official():
     return out, latest["url"]
 
 
-class Relations(osmium.SimpleHandler):
-    """Pass 1: enforcement relations and the node ids they reference."""
-
-    def __init__(self):
-        super().__init__()
-        self.relations = []
-        self.refs = set()
-
-    def relation(self, r):
-        if r.tags.get("type") != "enforcement":
-            return
-        members = [{"type": {"n": "node", "w": "way", "r": "relation"}[m.type], "ref": m.ref, "role": m.role} for m in r.members]
-        self.relations.append({"type": "relation", "id": r.id, "tags": dict((t.k, t.v) for t in r.tags), "members": members})
-        self.refs.update(m["ref"] for m in members if m["type"] == "node")
-
-
-class Nodes(osmium.SimpleHandler):
-    """Pass 2: speed camera nodes and the locations of relation members."""
-
-    def __init__(self, refs):
-        super().__init__()
-        self.refs = refs
-        self.nodes = []
-
-    def node(self, n):
-        tags = n.tags
-        if tags.get("highway") == "speed_camera" or n.id in self.refs:
-            self.nodes.append({"type": "node", "id": n.id, "lat": n.location.lat, "lon": n.location.lon,
-                               "tags": dict((t.k, t.v) for t in tags)})
-
-
 def osm_elements(pbf):
+    """Enforcement relations, speed cameras and member node locations from an OSM extract."""
+    import osmium  # only needed for this weekly step
+
+    class Relations(osmium.SimpleHandler):
+        """Pass 1: enforcement relations and the node ids they reference."""
+
+        def __init__(self):
+            super().__init__()
+            self.relations = []
+            self.refs = set()
+
+        def relation(self, r):
+            if r.tags.get("type") != "enforcement":
+                return
+            members = [{"type": {"n": "node", "w": "way", "r": "relation"}[m.type], "ref": m.ref, "role": m.role} for m in r.members]
+            self.relations.append({"type": "relation", "id": r.id, "tags": dict((t.k, t.v) for t in r.tags), "members": members})
+            self.refs.update(m["ref"] for m in members if m["type"] == "node")
+
+
+    class Nodes(osmium.SimpleHandler):
+        """Pass 2: speed camera nodes and the locations of relation members."""
+
+        def __init__(self, refs):
+            super().__init__()
+            self.refs = refs
+            self.nodes = []
+
+        def node(self, n):
+            tags = n.tags
+            if tags.get("highway") == "speed_camera" or n.id in self.refs:
+                self.nodes.append({"type": "node", "id": n.id, "lat": n.location.lat, "lon": n.location.lon,
+                                   "tags": dict((t.k, t.v) for t in tags)})
+
     rel = Relations()
     rel.apply_file(pbf)
     nodes = Nodes(rel.refs)
@@ -144,7 +147,34 @@ def osm_items(elements):
     return list(items.values()), sections
 
 
-def merge(official_radars, osm, sections):
+def lufop_items(path):
+    """Radars from our Lufop database. Their azimuth meaning is undocumented, so no direction."""
+    if path == "-" or not os.path.exists(path):
+        return []
+    items = []
+    for rid, r in json.load(open(path))["radars"].items():
+        name = (r.get("name") or "").lower()
+        if "covoiturage" in name and not r.get("vitesse"):
+            continue  # lane-occupancy cameras, not speed
+        if "feu" in name:
+            kind = "RED_LIGHT"
+        elif "chantier" in name:
+            kind = "WORKZONE"
+        elif "mobile" in name:
+            kind = "MOBILE"
+        elif "tron" in name:
+            kind = "SECTION_END"
+        else:
+            kind = "FIXED"
+        try:
+            pos = (float(r["lat"]), float(r["lng"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+        items.append({"id": f"lufop-{rid}", "pos": pos, "type": kind, "limit": speed(r.get("vitesse")), "dir": None})
+    return items
+
+
+def merge(official_radars, osm, sections, lufop=()):
     cell = lambda p: (round(p[0] * 100), round(p[1] * 100))  # ~1 km buckets
     grid = {}
     for o in official_radars:
@@ -170,6 +200,18 @@ def merge(official_radars, osm, sections):
         else:
             extra.append({"id": f"osm-{k}", "pos": item["pos"], "type": item["type"], "limit": item["limit"], "dir": item["dir"], "src": ["osm"]})
 
+    # Lufop last: fills limits, confirms, and adds what the others miss (mobile, roadwork…).
+    for item in lufop:
+        match = min(nearby(item["pos"], MERGE_M), key=lambda o: distance(o["pos"], item["pos"]), default=None)
+        if match is None:
+            match = min((e for e in extra if distance(e["pos"], item["pos"]) <= MERGE_M),
+                        key=lambda e: distance(e["pos"], item["pos"]), default=None)
+        if match:
+            match["limit"] = match["limit"] or item["limit"]
+            match["src"].append("lufop")
+        else:
+            extra.append({**item, "src": ["lufop"]})
+
     radars = official_radars + extra
     for k, s in enumerate(sections):
         length = round(distance(s["from"], s["to"]))
@@ -187,15 +229,11 @@ def merge(official_radars, osm, sections):
     return radars
 
 
-def main():
-    pbf, out = sys.argv[1], sys.argv[2]
-    gouv, gouv_url = official()
-    osm, sections = osm_items(osm_elements(pbf))
-    radars = merge(gouv, osm, sections)
+def write_pack(radars, gouv_url, out):
     doc = {
         "v": 1,
         "generated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "sources": {"gouv": gouv_url, "osm": "OpenStreetMap contributors (ODbL)"},
+        "sources": {"gouv": gouv_url, "osm": "OpenStreetMap contributors (ODbL)", "lufop": "Lufop"},
         "radars": [
             {k: v for k, v in {
                 "id": r["id"], "lat": round(r["pos"][0], 6), "lon": round(r["pos"][1], 6), "type": r["type"],
@@ -210,7 +248,24 @@ def main():
     for r in doc["radars"]:
         by_src[r["src"]] = by_src.get(r["src"], 0) + 1
     with_dir = sum(1 for r in doc["radars"] if "dir" in r)
-    print(f"{len(doc['radars'])} radars, {with_dir} with direction, by source {by_src}")
+    print(f"{len(doc['radars'])} radars, {with_dir} avec sens, par source {by_src}")
+
+
+def main():
+    mode = sys.argv[1]
+    if mode == "osm":
+        items, sections = osm_items(osm_elements(sys.argv[2]))
+        with open(sys.argv[3], "w", encoding="utf-8") as f:
+            json.dump({"items": items, "sections": sections}, f, separators=(",", ":"))
+        print(f"OSM : {len(items)} radars, {len(sections)} tronçons")
+    elif mode == "merge":
+        osm = json.load(open(sys.argv[2]))
+        items = [{**i, "pos": tuple(i["pos"])} for i in osm["items"]]
+        sections = [{**x, "from": tuple(x["from"]), "to": tuple(x["to"])} for x in osm["sections"]]
+        gouv, gouv_url = official()
+        write_pack(merge(gouv, items, sections, lufop_items(sys.argv[3])), gouv_url, sys.argv[4])
+    else:
+        sys.exit(__doc__)
 
 
 if __name__ == "__main__":
