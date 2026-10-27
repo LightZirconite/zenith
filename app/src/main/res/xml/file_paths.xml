@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Recorded trips shared from the settings (FileProvider). -->
+<paths>
+    <external-files-path name="trips" path="trips/" />
+    <files-path name="trips_internal" path="trips/" />
+</paths>

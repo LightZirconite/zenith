@@ -98,6 +98,10 @@ Tester le pipeline en local sur un petit extrait : `https://download.geofabrik.d
 - **Notification** : vitesse et limite en titre, prochain radar en texte ; sur Android 16, puce de vitesse dans la barre d'état (`setRequestPromotedOngoing`, `POST_PROMOTED_NOTIFICATIONS`, ne pas la coloriser sinon Android refuse la promotion).
 - **Écran de lancement** : thème `Theme.Zenith` noir, logo sur fond sombre (Android 12+), logo qui respire sur l'écran d'accueil.
 - **Démo cachée** : appui long sur le logo de l'écran d'accueil → `DriveService.startDemo`. `core/DemoDrive.kt` rejoue environ 2 min sur la vraie D 107 (tuile de Corse `core/src/main/resources/demo/roads_85_19.json`, embarquée dans l'APK) : radar 1 passé trop vite, radar 2 à la limite, zone 50 annoncée. Mêmes sons, voix, carte, notification et PiP que la conduite réelle ; ni GPS, ni GPX, ni téléchargement. Puce « Démo » à l'écran. Les limites absentes de la D 107 sont complétées pour la démo seulement.
+- **Réglages** (`SettingsScreen.kt`, `UserSettings.kt` ; ne pas nommer l'objet `Settings`, conflit avec `android.provider.Settings`) : jeune permis, pluie (aussi en puce pendant la conduite, non conservée d'un trajet à l'autre), voix ou bips seuls, voiture pour le démarrage auto, partage du dernier trajet GPX (FileProvider). Le profil est appliqué en direct à `DrivingSession.profile`.
+- **Démarrage auto en voiture** (`CarLink.kt`, Android 13+) : la voiture est choisie par l'écran compagnon d'Android (`CompanionDeviceManager`, sans autorisation Bluetooth), puis `CarPresenceService` reçoit connexion et déconnexion. Si Android refuse le service de premier plan depuis l'arrière-plan, une notification « Voiture connectée · touche pour démarrer » prend le relais. À la déconnexion, seule une conduite démarrée par la voiture s'arrête.
+- **Tunnels** : sans fix depuis 2,5 s, `DrivingSession.coast` avance la voiture le long de la route suivie à sa dernière vitesse (60 s max), puce « Tunnel · position estimée ».
+- **Trajets GPX** : les 10 derniers sont gardés, les plus vieux supprimés.
 - **APK arm64-v8a seulement** (`abiFilters`) : MapLibre embarque du code natif, l'APK universel serait 3 fois plus gros.
 - **Premier lancement** (`Onboarding.kt`) : chaque autorisation est expliquée avant la fenêtre d'Android (position obligatoire ; notifications, installation d'applications inconnues et batterie sans restriction conseillées). Après deux refus, Android n'affiche plus sa fenêtre : le bouton ouvre alors les réglages.
 - **Mises à jour** (`Updater.kt`) : vérification à chaque retour au premier plan (30 min minimum entre deux). À l'arrêt, installation dès le téléchargement fini. La demande de confirmation d'Android passe par l'état (`NeedsConfirmation`) et n'est ouverte que quand l'activité est au premier plan : lancée depuis le `BroadcastReceiver` en arrière-plan, Android la bloquait et la mise à jour restait figée. Après une première auto-mise à jour, Zenith devient l'installateur de l'app et Android 12+ installe les suivantes sans confirmation (`USER_ACTION_NOT_REQUIRED`). L'APK téléchargé est supprimé après l'installation.
@@ -150,16 +154,13 @@ Tester le pipeline en local sur un petit extrait : `https://download.geofabrik.d
 
 ## Prochaines étapes connues
 
-Fait : horizon électronique (radars sur la route suivie, prochaine limite), date des mobiles Lufop, garde-fou CI.
+Fait : horizon électronique, prochaine limite, date des mobiles Lufop, garde-fou CI, carte, PiP, démo, réglages (probatoire, pluie, voix), démarrage auto en voiture, tunnels, feux rouges sans limite, points en jeu, sens OSM forward/backward, rapport d'azimut Lufop, partage GPX.
 
 1. **Zones bâties** (OSM `traffic_sign=city_limit`, `landuse=residential`, `place`) pour déduire 50/80 sur les routes sans tag.
-2. **Sens des radars** : résoudre `direction=forward/backward` des radars OSM avec la voie qui porte le nœud ; valider l'`azimut` Lufop contre les relations `enforcement` (au-dessus de 95 % d'accord, s'en servir).
+2. **Azimut Lufop** : lire le rapport du job `radars` ; au-dessus de 95 % d'accord (direct ou opposé), s'en servir dans `lufop_items`.
 3. **Typage Lufop** : 1 605 radars « fixes » Lufop absents de la liste officielle (frontière, autonomes, leurres ?) ; lire l'histogramme des noms dans le résumé du job `radars` avant de typer plus finement.
-4. **Tunnels** : continuer le long de l'horizon à la dernière vitesse quand le GPS est perdu (60 s maximum).
-5. **Tronçons** : environ 26 fins de tronçon sans début ; reconstruire le début par l'horizon arrière, reprendre un tronçon en cours après redémarrage.
-6. **Réglages minimum** : probatoire, bouton pluie, voix ou bips seulement (`DriverProfile` existe, sans interface).
-7. Feux rouges et passages à niveau : son plus doux, pas de « trop vite ».
-8. Outil de replay GPX en ligne de commande + export du dernier trajet depuis l'app : chaque bug réel devient un test.
-9. Radars mobiles Lufop en direct depuis le téléphone (clé saisie dans des réglages, une requête par ~10 km, quota partagé).
-10. Démarrage auto au Bluetooth de la voiture, profils (probatoire, moto).
-11. Android Auto (Car App Library).
+4. **Tronçons** : environ 26 fins de tronçon sans début ; reconstruire le début par l'horizon arrière, reprendre un tronçon en cours après redémarrage.
+5. Outil de replay GPX en ligne de commande (le partage du trajet depuis l'app est fait) : chaque bug réel devient un test.
+6. Radars mobiles Lufop en direct depuis le téléphone (clé saisie dans des réglages, une requête par ~10 km, quota partagé).
+7. Profil moto.
+8. Android Auto (Car App Library).

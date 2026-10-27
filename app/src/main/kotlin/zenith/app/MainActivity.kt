@@ -26,10 +26,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.FileProvider
 import androidx.core.content.edit
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.MutableStateFlow
+import java.io.File
 
 class MainActivity : ComponentActivity() {
     /** Bumped on every onResume: permissions and updates are re-checked when the user comes back. */
@@ -127,6 +129,7 @@ class MainActivity : ComponentActivity() {
                         UserSettings.update(context) { it.copy(carAssociationId = null, carName = null) }
                     },
                     onBack = { showSettings = false },
+                    onShareTrip = remember(resumeCount) { latestTrip(context) }?.let { trip -> { shareTrip(trip) } },
                 )
             } else if (!onboarded) {
                 Onboarding(
@@ -229,6 +232,15 @@ class MainActivity : ComponentActivity() {
             prefs.edit { putBoolean(key, true) }
             request(permissions)
         }
+    }
+
+    private fun shareTrip(file: File) {
+        runCatching {
+            val uri = FileProvider.getUriForFile(this, "$packageName.files", file)
+            val send = Intent(Intent.ACTION_SEND).setType("application/gpx+xml").putExtra(Intent.EXTRA_STREAM, uri)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            startActivity(Intent.createChooser(send, "Partager le trajet"))
+        }.onFailure { Log.w("Zenith", "share trip", it) }
     }
 
     private fun openSettings(intent: Intent) {

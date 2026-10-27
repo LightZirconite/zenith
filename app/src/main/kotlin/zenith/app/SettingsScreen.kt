@@ -44,6 +44,7 @@ fun SettingsScreen(
     onPairCar: () -> Unit,
     onUnpairCar: () -> Unit,
     onBack: () -> Unit,
+    onShareTrip: (() -> Unit)? = null,
 ) {
     Column(Modifier.fillMaxSize().background(Color.Black).safeDrawingPadding().padding(horizontal = 20.dp, vertical = 12.dp)) {
         Text(
@@ -90,6 +91,26 @@ fun SettingsScreen(
                         modifier = Modifier.clip(RoundedCornerShape(50))
                             .background(if (settings.carName != null) Color(0xFF2C2C30) else Accent)
                             .clickable(onClick = if (settings.carName != null) onUnpairCar else onPairCar)
+                            .padding(horizontal = 16.dp, vertical = 9.dp),
+                    )
+                }
+            }
+            if (onShareTrip != null) {
+                Card {
+                    Text("Dernier trajet", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "Fichier GPX de ton dernier trajet, pour signaler une alerte manquée ou fausse : il se rejoue tel quel.",
+                        color = Color.White.copy(alpha = 0.75f),
+                        fontSize = 14.sp,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        "Partager",
+                        color = Color.White,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.clip(RoundedCornerShape(50)).background(Accent).clickable(onClick = onShareTrip)
                             .padding(horizontal = 16.dp, vertical = 9.dp),
                     )
                 }
