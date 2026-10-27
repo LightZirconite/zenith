@@ -28,6 +28,7 @@ import zenith.core.Announcer
 import zenith.core.DriveSnapshot
 import zenith.core.DrivingSession
 import zenith.core.OverspeedLevel
+import zenith.core.RadarIndex
 
 /**
  * Foreground service running a drive: 1 Hz GPS → DrivingSession → shared state, sounds, voice
@@ -44,6 +45,9 @@ class DriveService : Service(), LocationListener {
     private var lastNotified: Triple<Int?, Int?, String?>? = null
     private var lastNotifiedAtMs = 0L
     private var lastDangerBeepMs = 0L
+    @Volatile
+    private var radarIndex = RadarIndex(emptyList())
+    private var lastNearbyMs = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -67,7 +71,11 @@ class DriveService : Service(), LocationListener {
         tones = TonePlayer()
         DriveState.started()
         scope.launch { data.status.collect(DriveState::data) }
-        data.loadRadars { radars -> scope.launch { session.setRadars(radars) } }
+        data.loadRadars { radars ->
+            radarIndex = RadarIndex(radars)
+            lastNearbyMs = 0L
+            scope.launch { session.setRadars(radars) }
+        }
 
         val manager = getSystemService(LocationManager::class.java)
         gpsStatus = GpsStatusWatcher(manager, DriveState::satellites).also { it.start() }
@@ -81,6 +89,10 @@ class DriveService : Service(), LocationListener {
         data.ensureTiles(fix.position)
         val snapshot = session.process(fix) ?: return
         DriveState.update(snapshot)
+        if (snapshot.timeMs - lastNearbyMs >= 3_000 || lastNearbyMs == 0L) {
+            lastNearbyMs = snapshot.timeMs
+            DriveState.nearbyRadars(radarIndex.near(snapshot.position, 3_000.0))
+        }
         snapshot.events.forEach(::announce)
         dangerBeep(snapshot)
         refreshNotification(snapshot)

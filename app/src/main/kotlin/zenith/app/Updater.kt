@@ -25,24 +25,40 @@ sealed interface UpdateState {
     data class Downloading(val version: String, val progress: Float) : UpdateState
     data class Ready(val version: String, val file: File) : UpdateState
     data class Installing(val version: String) : UpdateState
+
+    /** Android wants a tap on its own install screen; launched as soon as Zenith is in front. */
+    data class NeedsConfirmation(val version: String, val intent: Intent) : UpdateState
     data class Failed(val message: String) : UpdateState
 }
 
 /**
  * Self-update from GitHub releases: when the latest release has a higher build number than the
  * installed app, downloads zenith.apk into the cache, installs it through PackageInstaller and
- * deletes the file afterwards.
+ * deletes the file afterwards. Once Zenith has installed itself once, Android 12+ lets it update
+ * silently (it is then the installer of record); before that, Android asks for one tap.
  */
 object Updater {
     private const val LATEST = "https://api.github.com/repos/LightZirconite/zenith/releases/latest"
     private val _state = MutableStateFlow<UpdateState>(UpdateState.Idle)
     val state: StateFlow<UpdateState> = _state
 
+    private const val CHECK_EVERY_MS = 30 * 60_000L
+
+    @Volatile
+    private var lastCheckMs = 0L
+
     private fun dir(context: Context) = File(context.cacheDir, "update")
+
+    /** Checks GitHub at most every 30 minutes (each time the app comes to the front). */
+    suspend fun checkIfDue(context: Context) {
+        if (System.currentTimeMillis() - lastCheckMs < CHECK_EVERY_MS) return
+        checkAndDownload(context)
+    }
 
     /** Checks GitHub and downloads a newer APK if there is one. */
     suspend fun checkAndDownload(context: Context) = withContext(Dispatchers.IO) {
         if (_state.value !is UpdateState.Idle && _state.value !is UpdateState.Failed) return@withContext
+        lastCheckMs = System.currentTimeMillis()
         runCatching {
             val release = Json.parseToJsonElement(get(LATEST)).jsonObject
             val tag = release.getValue("tag_name").jsonPrimitive.content // v0.1.N
@@ -88,6 +104,17 @@ object Updater {
             Log.w("Zenith", "update install", it)
             _state.value = UpdateState.Failed("Installation impossible : ${it.message}")
         }
+    }
+
+    /** The install screen was shown (or dismissed): wait for the installer result. */
+    fun confirmationShown() {
+        val pending = _state.value as? UpdateState.NeedsConfirmation ?: return
+        _state.value = UpdateState.Installing(pending.version)
+    }
+
+    internal fun needsConfirmation(intent: Intent) {
+        val version = (_state.value as? UpdateState.Installing)?.version ?: return
+        _state.value = UpdateState.NeedsConfirmation(version, intent)
     }
 
     internal fun finished(context: Context, message: String?) {
@@ -142,16 +169,25 @@ object Updater {
     }
 }
 
-/** Receives the installer result; launches the confirmation screen when Android asks for one. */
+/**
+ * Receives the installer result. A confirmation request is handed to [MainActivity] through the
+ * state: Android blocks activity starts from a receiver while the app is in the background, which
+ * used to leave the update hanging with nothing on screen.
+ */
 class UpdateReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)) {
             PackageInstaller.STATUS_PENDING_USER_ACTION -> {
-                @Suppress("DEPRECATION")
-                val confirm = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT) ?: return
-                context.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                val confirm = if (Build.VERSION.SDK_INT >= 33) {
+                    intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)
+                } ?: return
+                Updater.needsConfirmation(confirm)
             }
             PackageInstaller.STATUS_SUCCESS -> Updater.finished(context, null)
+            PackageInstaller.STATUS_FAILURE_ABORTED -> Updater.finished(context, "Mise à jour annulée, nouvel essai plus tard")
             else -> Updater.finished(
                 context,
                 "Installation refusée ($status) : ${intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE).orEmpty()}",

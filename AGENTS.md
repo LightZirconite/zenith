@@ -12,7 +12,7 @@ Lis ce fichier en entier avant de toucher au projet. Le README décrit le projet
 
 ## Ce qu'est Zenith
 
-Application Android **minimaliste** d'alertes de conduite : vitesse, limitation, radars (positions exactes, façon Coyote), contrôles, tronçons. **Pas de carte, pas d'itinéraire.** Elle tourne en fond, en complément de Waze ou Google Maps : un service de premier plan qui alerte par sons et voix même écran éteint.
+Application Android **minimaliste** d'alertes de conduite : vitesse, limitation, radars (positions exactes, façon Coyote), contrôles, tronçons. **Pas d'itinéraire, pas de navigation** : seulement une petite carte inclinée en haut de l'écran de conduite pour se situer (point bleu, route suivie en surbrillance, radars en mini-panneaux), qui se fond dans le fond noir. Elle tourne en fond, en complément de Waze ou Google Maps : un service de premier plan qui alerte par sons et voix même écran éteint.
 
 Usage personnel de l'auteur, pas grand public. Interface et textes en français.
 
@@ -31,7 +31,8 @@ Usage personnel de l'auteur, pas grand public. Interface et textes en français.
 core/      Kotlin pur (JVM), testé : géo, Kalman, map-matching HMM, moteur d'alertes, règles FR,
            lecture des packs, GPX, DrivingSession (pipeline déterministe : replay = direct).
 app/       Android Compose : DriveService (GPS 1 Hz, premier plan), DriveData (téléchargement/cache),
-           DriveScreen, Speaker (TTS FR), Tones, TripRecorder (GPX), Updater (auto-mise à jour).
+           DriveScreen, DriveMap (MapLibre), Onboarding (autorisations expliquées), Speaker (TTS FR),
+           Tones, TripRecorder (GPX), Updater (auto-mise à jour).
            RoadHorizon : radars accrochés aux routes, chemin le plus probable, routes atteignables.
 pipeline/  Python : build_roads.py (tuiles de limitations), build_radars.py (osm | merge | check),
            harvest_lufop.py (base Lufop qui grossit chaque jour), lufop_db.sh (base chiffrée).
@@ -87,6 +88,13 @@ Tester le pipeline en local sur un petit extrait : `https://download.geofabrik.d
 - Style Kotlin : celui du code existant (data classes, `object` pour les utilitaires purs, KDoc courte au-dessus de chaque classe).
 - Toute logique testable va dans `core` avec des tests ; `app` reste une couche mince.
 - `versionCode` = numéro d'exécution de `release.yml`. Ne pas le coder en dur.
+
+## App : carte, autorisations, mises à jour
+
+- **Carte** (`DriveMap.kt`) : MapLibre Android, tuiles vectorielles OpenFreeMap (gratuites, sans clé), style `dark` retouché (fond noir pour le fondu). Non interactive, inclinée à 55°, cap = sens de marche, zoom selon la vitesse. Toute erreur de carte laisse une boîte noire : la carte ne doit jamais faire planter l'app (une app qui plante au démarrage ne peut plus se mettre à jour). Attribution OSM/OpenFreeMap affichée en petit, obligatoire.
+- **APK arm64-v8a seulement** (`abiFilters`) : MapLibre embarque du code natif, l'APK universel serait 3 fois plus gros.
+- **Premier lancement** (`Onboarding.kt`) : chaque autorisation est expliquée avant la fenêtre d'Android (position obligatoire ; notifications, installation d'applications inconnues et batterie sans restriction conseillées). Après deux refus, Android n'affiche plus sa fenêtre : le bouton ouvre alors les réglages.
+- **Mises à jour** (`Updater.kt`) : vérification à chaque retour au premier plan (30 min minimum entre deux). À l'arrêt, installation dès le téléchargement fini. La demande de confirmation d'Android passe par l'état (`NeedsConfirmation`) et n'est ouverte que quand l'activité est au premier plan : lancée depuis le `BroadcastReceiver` en arrière-plan, Android la bloquait et la mise à jour restait figée. Après une première auto-mise à jour, Zenith devient l'installateur de l'app et Android 12+ installe les suivantes sans confirmation (`USER_ACTION_NOT_REQUIRED`). L'APK téléchargé est supprimé après l'installation.
 
 ## Horizon électronique (`core/RoadHorizon.kt`)
 

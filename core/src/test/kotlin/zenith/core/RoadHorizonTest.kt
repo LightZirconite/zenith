@@ -145,6 +145,25 @@ class RoadHorizonTest {
     }
 
     @Test
+    fun `road ahead polyline starts at the car and follows the path`() {
+        val network = RoadNetwork(
+            listOf(
+                named(1, 1, 2, "D 1", "primary", false, 90, 0.0 to 0.0, 0.0 to 1_000.0),
+                named(2, 2, 3, "D 1", "primary", false, 90, 0.0 to 1_000.0, 500.0 to 1_000.0),
+            ),
+        )
+        val from = network.candidates(Sim.ll(0.0, 400.0), 5.0).single { it.forward }
+        val line = RoadHorizon.polyline(RoadHorizon.mostProbablePath(network, from, 5_000.0), 900.0).map(Sim.frame::toXY)
+        assertEquals(400.0, line.first().y, 1.0)
+        assertEquals(0.0, line.first().x, 1.0)
+        // 600 m up to the corner, then 300 m east.
+        assertEquals(300.0, line.last().x, 2.0)
+        assertEquals(1_000.0, line.last().y, 2.0)
+        val length = line.zipWithNext { a, b -> (b - a).length() }.sum()
+        assertEquals(900.0, length, 3.0)
+    }
+
+    @Test
     fun `horizon follows a real departmental road`() {
         val network = RoadNetwork(RoadTiles.parse(javaClass.getResource("/roads_85_19.json")!!.readText()))
         val d107 = network.segments.filter { it.name == "D 107" }

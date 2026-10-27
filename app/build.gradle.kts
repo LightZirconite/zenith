@@ -15,6 +15,8 @@ android {
         val build = System.getenv("ZENITH_BUILD_NUMBER")?.toInt() ?: 1
         versionCode = build
         versionName = "0.1.$build"
+        // MapLibre ships native code: 64-bit ARM only keeps the APK (and each update) small.
+        ndk { abiFilters += "arm64-v8a" }
     }
 
     signingConfigs {
@@ -56,5 +58,6 @@ dependencies {
     implementation(libs.compose.ui)
     implementation(libs.compose.material3)
     implementation(libs.compose.ui.tooling.preview)
+    implementation(libs.maplibre.android)
     debugImplementation(libs.compose.ui.tooling)
 }

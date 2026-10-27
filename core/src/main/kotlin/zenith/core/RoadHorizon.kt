@@ -99,6 +99,28 @@ object RoadHorizon {
         return null
     }
 
+    /** Geometry of [path] from the car onwards, [maxM] meters long at most, in travel order. */
+    fun polyline(path: List<HorizonStep>, maxM: Double): List<LatLon> {
+        val out = mutableListOf<LatLon>()
+        for (step in path) {
+            if (step.startM > maxM) break
+            val pts = if (step.forward) step.segment.points else step.segment.points.reversed()
+            var along = step.startM
+            for ((a, b) in pts.zipWithNext()) {
+                val len = Geo.distanceM(a, b)
+                val end = along + len
+                if (end > 0 && along < maxM) {
+                    if (out.isEmpty()) out += lerp(a, b, ((0 - along) / len).coerceIn(0.0, 1.0))
+                    out += lerp(a, b, ((maxM - along) / len).coerceIn(0.0, 1.0))
+                }
+                along = end
+            }
+        }
+        return out
+    }
+
+    private fun lerp(a: LatLon, b: LatLon, t: Double) = LatLon(a.lat + (b.lat - a.lat) * t, a.lon + (b.lon - a.lon) * t)
+
     private fun exitNode(s: HorizonStep) = if (s.forward) s.segment.toNode else s.segment.fromNode
 
     private fun continuation(network: RoadNetwork, last: HorizonStep): Pair<RoadSegment, Boolean>? {

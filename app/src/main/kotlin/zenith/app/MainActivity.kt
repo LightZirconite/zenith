@@ -2,9 +2,7 @@ package zenith.app
 
 import android.Manifest
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.WindowManager
@@ -16,33 +14,40 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
-import androidx.core.content.ContextCompat
+import androidx.core.content.edit
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.MutableStateFlow
 
 class MainActivity : ComponentActivity() {
+    /** Bumped on every onResume: permissions and updates are re-checked when the user comes back. */
+    private val resumes = MutableStateFlow(0)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(SystemBarStyle.dark(android.graphics.Color.TRANSPARENT), SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
         super.onCreate(savedInstanceState)
+        val prefs = getSharedPreferences("zenith", MODE_PRIVATE)
         setContent {
             val context = LocalContext.current
             val running by DriveState.running.collectAsStateWithLifecycle()
             val snapshot by DriveState.snapshot.collectAsStateWithLifecycle()
             val gps by DriveState.gps.collectAsStateWithLifecycle()
             val data by DriveState.data.collectAsStateWithLifecycle()
+            val radars by DriveState.nearbyRadars.collectAsStateWithLifecycle()
             val update by Updater.state.collectAsStateWithLifecycle()
-            var locationGranted by remember {
-                mutableStateOf(
-                    ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
-                        PackageManager.PERMISSION_GRANTED,
-                )
-            }
+            val resumeCount by resumes.collectAsStateWithLifecycle()
+            var permissionResults by remember { mutableIntStateOf(0) }
+            val permissions = remember(resumeCount, permissionResults) { Permissions.read(context) }
+            var onboarded by remember { mutableStateOf(prefs.getBoolean(KEY_ONBOARDED, false)) }
+
             val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
-                locationGranted = result[Manifest.permission.ACCESS_FINE_LOCATION] == true || locationGranted
-                if (locationGranted) DriveService.start(context)
+                permissionResults++
+                if (onboarded && result[Manifest.permission.ACCESS_FINE_LOCATION] == true) DriveService.start(context)
             }
 
             // Screen stays on while driving only.
@@ -50,39 +55,88 @@ class MainActivity : ComponentActivity() {
                 if (running) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             }
-            LaunchedEffect(Unit) { Updater.checkAndDownload(context) }
-            // Install right away when parked; while driving the banner waits for a tap.
-            LaunchedEffect(update, running) {
-                if (update is UpdateState.Ready && !running) installUpdate()
+            LaunchedEffect(resumeCount) { Updater.checkIfDue(context) }
+            // Parked: install as soon as the update is downloaded (silent once Zenith installed itself once).
+            // Driving: the banner waits for a tap.
+            LaunchedEffect(update, running, permissions.installs) {
+                if (update is UpdateState.Ready && !running && permissions.installs) Updater.install(context)
+            }
+            // Android's own "update?" screen, opened only while Zenith is in front (it would be blocked otherwise).
+            LaunchedEffect(update, resumeCount) {
+                val pending = update as? UpdateState.NeedsConfirmation ?: return@LaunchedEffect
+                if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return@LaunchedEffect
+                runCatching { startActivity(pending.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                Updater.confirmationShown()
             }
 
-            DriveScreen(
-                running = running,
-                snapshot = snapshot,
-                gps = gps,
-                data = data,
-                update = update,
-                onStart = {
-                    if (locationGranted) DriveService.start(context) else launcher.launch(requiredPermissions())
-                },
-                onStop = { DriveService.stop(context) },
-                onInstallUpdate = ::installUpdate,
-            )
+            if (!onboarded) {
+                Onboarding(
+                    permissions = permissions,
+                    onLocation = {
+                        requestOrSettings(Permissions.locationPermissions(), { launcher.launch(it) }) {
+                            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
+                        }
+                    },
+                    onNotifications = {
+                        val permission = Permissions.notificationPermission()
+                        val settings = { Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName) }
+                        if (permission == null) openSettings(settings()) else requestOrSettings(arrayOf(permission), { launcher.launch(it) }, settings)
+                    },
+                    onInstalls = { openSettings(Permissions.installsIntent(context)) },
+                    onBattery = { openSettings(Permissions.batteryIntent(context)) },
+                    onDone = {
+                        prefs.edit { putBoolean(KEY_ONBOARDED, true) }
+                        onboarded = true
+                    },
+                )
+            } else {
+                DriveScreen(
+                    running = running,
+                    snapshot = snapshot,
+                    radars = radars,
+                    gps = gps,
+                    data = data,
+                    update = update,
+                    canInstall = permissions.installs,
+                    onStart = {
+                        if (permissions.location) DriveService.start(context) else launcher.launch(Permissions.locationPermissions())
+                    },
+                    onStop = { DriveService.stop(context) },
+                    onInstallUpdate = {
+                        if (permissions.installs) Updater.install(context) else openSettings(Permissions.installsIntent(context))
+                    },
+                )
+            }
         }
     }
 
-    private fun installUpdate() {
-        if (packageManager.canRequestPackageInstalls()) {
-            Updater.install(this)
+    override fun onResume() {
+        super.onResume()
+        resumes.value++
+    }
+
+    /**
+     * Shows Android's prompt, or its settings screen once the prompt is blocked: after two
+     * refusals Android silently ignores requests, so the button would otherwise do nothing.
+     */
+    private fun requestOrSettings(permissions: Array<String>, request: (Array<String>) -> Unit, settings: () -> Intent) {
+        val prefs = getSharedPreferences("zenith", MODE_PRIVATE)
+        val key = "asked_${permissions.first()}"
+        val blocked = prefs.getBoolean(key, false) && !shouldShowRequestPermissionRationale(permissions.first())
+        if (blocked) {
+            openSettings(settings())
         } else {
-            // One-time: allow Zenith to install its own updates.
-            startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+            prefs.edit { putBoolean(key, true) }
+            request(permissions)
         }
     }
 
-    private fun requiredPermissions(): Array<String> = buildList {
-        add(Manifest.permission.ACCESS_FINE_LOCATION)
-        add(Manifest.permission.ACCESS_COARSE_LOCATION)
-        if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
-    }.toTypedArray()
+    private fun openSettings(intent: Intent) {
+        runCatching { startActivity(intent) }
+            .onFailure { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) }
+    }
+
+    private companion object {
+        const val KEY_ONBOARDED = "onboarded"
+    }
 }

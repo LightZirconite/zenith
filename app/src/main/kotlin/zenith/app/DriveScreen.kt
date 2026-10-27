@@ -53,6 +53,7 @@ import kotlinx.coroutines.delay
 import zenith.core.ActiveAlert
 import zenith.core.DriveSnapshot
 import zenith.core.LimitSource
+import zenith.core.Radar
 import zenith.core.SectionStatus
 import zenith.core.UpcomingRadar
 import kotlin.math.roundToInt
@@ -68,29 +69,38 @@ private val Dim = Color(0xFF8E8E93)
 fun DriveScreen(
     running: Boolean,
     snapshot: DriveSnapshot?,
+    radars: List<Radar>,
     gps: GpsInfo,
     data: DataStatus,
     update: UpdateState,
+    canInstall: Boolean,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onInstallUpdate: () -> Unit,
 ) {
-    Column(
-        modifier = Modifier.fillMaxSize().background(Bg).safeDrawingPadding().padding(horizontal = 20.dp, vertical = 12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        StatusRow(running, gps, data)
-        UpdateBanner(update, onInstallUpdate)
+    val showMap = running && snapshot != null
+    Box(Modifier.fillMaxSize().background(Bg)) {
+        // Small tilted map at the top, melting into the background; the speed sits right under it.
+        AnimatedVisibility(visible = showMap, enter = fadeIn(tween(800)), exit = fadeOut()) {
+            DriveMap(snapshot, radars, Modifier.fillMaxWidth().fillMaxHeight(0.46f))
+        }
         Column(
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-            verticalArrangement = Arrangement.Center,
+            modifier = Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 20.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            if (running) Dashboard(snapshot) else Idle(data)
+            StatusRow(running, gps, data)
+            UpdateBanner(update, canInstall, onInstallUpdate)
+            Column(
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                verticalArrangement = if (showMap) Arrangement.Bottom else Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                if (running) Dashboard(snapshot) else Idle(data)
+            }
+            AlertArea(snapshot)
+            Spacer(Modifier.height(12.dp))
+            StartStop(running, onStart, onStop)
         }
-        AlertArea(snapshot)
-        Spacer(Modifier.height(12.dp))
-        StartStop(running, onStart, onStop)
     }
 }
 
@@ -136,11 +146,14 @@ private fun Chip(text: String, dot: Color) {
 }
 
 @Composable
-private fun UpdateBanner(update: UpdateState, onInstall: () -> Unit) {
+private fun UpdateBanner(update: UpdateState, canInstall: Boolean, onInstall: () -> Unit) {
     val text = when (update) {
         is UpdateState.Downloading -> "Téléchargement de la version ${update.version}… ${(update.progress * 100).roundToInt()} %"
-        is UpdateState.Ready -> "Version ${update.version} prête · toucher pour installer"
+        is UpdateState.Ready ->
+            if (canInstall) "Version ${update.version} prête · toucher pour installer"
+            else "Version ${update.version} prête · toucher pour autoriser les mises à jour"
         is UpdateState.Installing -> "Installation de la version ${update.version}…"
+        is UpdateState.NeedsConfirmation -> "Version ${update.version} · confirme l'installation"
         else -> null
     }
     AnimatedVisibility(visible = text != null) {

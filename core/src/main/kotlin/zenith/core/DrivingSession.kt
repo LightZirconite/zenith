@@ -19,6 +19,8 @@ data class DriveSnapshot(
     val upcoming: UpcomingRadar?,
     /** Next limit change on the road ahead, after rain and licence rules. */
     val limitAhead: LimitAhead?,
+    /** Road ahead the driver most likely follows, from the car onwards; empty without road data. */
+    val ahead: List<LatLon>,
     val events: List<AlertEvent>,
 )
 
@@ -71,6 +73,7 @@ class DrivingSession(
             section = out.section,
             upcoming = out.upcoming,
             limitAhead = out.limitAhead,
+            ahead = out.ahead,
             events = out.events,
         )
     }

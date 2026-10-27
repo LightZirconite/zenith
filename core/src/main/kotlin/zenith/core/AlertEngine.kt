@@ -25,6 +25,8 @@ data class AlertSettings(
     val branchAlertM: Double = 500.0,
     /** Without a matched road, the "next radar" is only guessed this close, in a straight line. */
     val fallbackUpcomingM: Double = 3_000.0,
+    /** Length of the road ahead drawn on the map. */
+    val aheadDrawnM: Double = 1_500.0,
     /** Next limit change shown this far ahead along the road. */
     val limitAheadM: Double = 2_000.0,
     /** A new spoken overspeed warning needs this long since the last one... */
@@ -63,6 +65,8 @@ data class AlertOutput(
     val section: SectionStatus?,
     val upcoming: UpcomingRadar? = null,
     val limitAhead: LimitAhead? = null,
+    /** Road the driver most likely follows, from the car onwards (for the map). */
+    val ahead: List<LatLon> = emptyList(),
 )
 
 /**
@@ -218,7 +222,8 @@ class AlertEngine(
         val limitAhead = horizon?.let { RoadHorizon.nextLimit(it.path, settings.limitAheadM) }
             ?.let { it.copy(limitKmh = effectiveLimit(it.limitKmh)) }
             ?.takeIf { it.limitKmh != limit }
-        return AlertOutput(events, active, sectionStatus(), upcoming, limitAhead)
+        val ahead = horizon?.let { RoadHorizon.polyline(it.path, settings.aheadDrawnM) }.orEmpty()
+        return AlertOutput(events, active, sectionStatus(), upcoming, limitAhead, ahead)
     }
 
     private fun horizon(road: RoadCandidate?, network: RoadNetwork?): Horizon? {
