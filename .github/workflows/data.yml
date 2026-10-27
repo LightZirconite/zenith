@@ -1,0 +1,66 @@
+name: data
+
+# Weekly: builds radars.json and the speed-limit road tiles for France, published as assets of
+# the "data" release (never marked latest, so the APK link keeps pointing to the app release).
+on:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: data
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Tools
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q osmium-tool
+          pip install -q -r pipeline/requirements.txt
+
+      - name: France extract
+        run: |
+          curl -sSL --retry 3 -o france.osm.pbf https://download.geofabrik.de/europe/france-latest.osm.pbf
+          osmium tags-filter france.osm.pbf w/highway n/highway=speed_camera r/type=enforcement -o drive.osm.pbf
+          rm france.osm.pbf
+          ls -la drive.osm.pbf
+
+      - name: Radars
+        run: python pipeline/build_radars.py drive.osm.pbf out/radars.json
+
+      - name: Road tiles
+        run: |
+          python pipeline/build_roads.py drive.osm.pbf out/tiles
+          python - <<'PY'
+          import json, os, datetime
+          tiles = sorted(os.listdir("out/tiles"))
+          manifest = {
+              "v": 1,
+              "generated": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+              "tiles": {t: os.path.getsize(f"out/tiles/{t}") for t in tiles},
+          }
+          json.dump(manifest, open("out/manifest.json", "w"), separators=(",", ":"))
+          print(len(tiles), "tiles,", sum(manifest["tiles"].values()) // 1_000_000, "MB")
+          PY
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view data >/dev/null 2>&1; then
+            gh release create data --title "Données Zenith" --prerelease --latest=false \
+              --notes "Radars (data.gouv.fr, Licence Ouverte + OpenStreetMap, ODbL) et limitations de vitesse (OpenStreetMap, ODbL). Mis à jour chaque semaine."
+          fi
+          gh release upload data out/radars.json --clobber
+          ls out/tiles/*.json.gz | xargs -n 50 gh release upload data --clobber
+          gh release upload data out/manifest.json --clobber

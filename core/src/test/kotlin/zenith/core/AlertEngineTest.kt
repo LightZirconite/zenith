@@ -28,6 +28,15 @@ class AlertEngineTest {
     }
 
     @Test
+    fun `next radar ahead is known long before its alert`() {
+        val far = Radar("far", Sim.ll(0.0, 2_400.0), RadarType.FIXED, 90, directionDeg = 0.0)
+        val first = run(listOf(far), 25.0).first()
+        assertEquals("far", first.upcoming?.radar?.id)
+        assertEquals(2_400.0, first.upcoming!!.distanceM, 5.0)
+        assertTrue(first.alerts.isEmpty())
+    }
+
+    @Test
     fun `ignores radars for the other direction or off the road axis`() {
         val other = listOf(
             Radar("south", Sim.ll(0.0, 1_200.0), RadarType.FIXED, 90, directionDeg = 180.0),

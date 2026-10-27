@@ -16,6 +16,8 @@ data class AlertSettings(
     /** Over the limit by more than this many km/h triggers the audible overspeed warning. */
     val overspeedToleranceKmh: Int = 3,
     val mobileMaxAgeMs: Long = 3 * 3_600_000L,
+    /** How far ahead the "next radar" is looked up. */
+    val upcomingRangeM: Double = 15_000.0,
 )
 
 enum class OverspeedLevel { NONE, OVER, WARN }
@@ -36,7 +38,15 @@ data class ActiveAlert(val radar: Radar, val distanceM: Double, val limitKmh: In
 
 data class SectionStatus(val limitKmh: Int, val averageKmh: Double, val remainingM: Double, val maxSpeedToFinishKmh: Double?)
 
-data class AlertOutput(val events: List<AlertEvent>, val active: List<ActiveAlert>, val section: SectionStatus?)
+/** Closest radar ahead in the travel direction, even before its alert distance. */
+data class UpcomingRadar(val radar: Radar, val distanceM: Double, val limitKmh: Int?)
+
+data class AlertOutput(
+    val events: List<AlertEvent>,
+    val active: List<ActiveAlert>,
+    val section: SectionStatus?,
+    val upcoming: UpcomingRadar? = null,
+)
 
 /**
  * Turns the filtered vehicle state into radar, section and overspeed alerts.
@@ -44,7 +54,8 @@ data class AlertOutput(val events: List<AlertEvent>, val active: List<ActiveAler
  * the speed-dependent alert distance; each one goes approach → (brake) → passed exactly once.
  */
 class AlertEngine(
-    private val radars: RadarIndex,
+    /** Replaced when a newer radar pack is loaded. */
+    var radars: RadarIndex,
     private val settings: AlertSettings = AlertSettings(),
     /** Turns a nominal limit into the one that applies to the driver (rain, probationary licence). */
     private val effectiveLimit: (Int) -> Int = { it },
@@ -78,14 +89,15 @@ class AlertEngine(
         val triggerM = (v * settings.lookaheadS + v * v / (2 * settings.comfortDecelMps2))
             .coerceIn(settings.minAlertM, settings.maxAlertM)
 
-        for (r in radars.near(state.position, triggerM + 200)) {
+        var upcoming: UpcomingRadar? = null
+        for (r in radars.near(state.position, maxOf(triggerM + 200, settings.upcomingRangeM))) {
             if (r.type.mobile && r.reportedAtMs != null && now - r.reportedAtMs > settings.mobileMaxAgeMs) continue
+            if (heading == null || r.id in recentlyPassed) continue
             val d = Geo.distanceM(state.position, r.position)
-            val track = tracked[r.id]
-            val ahead = heading != null && isAhead(state.position, heading, r.position, d)
-            if (track == null) {
-                if (heading == null || r.id in recentlyPassed || d > triggerM || !ahead) continue
-                if (r.directionDeg != null && Geo.headingDiffDeg(heading, r.directionDeg) > settings.directionToleranceDeg) continue
+            if (!isAhead(state.position, heading, r.position, d)) continue
+            if (r.directionDeg != null && Geo.headingDiffDeg(heading, r.directionDeg) > settings.directionToleranceDeg) continue
+            if (upcoming == null || d < upcoming.distanceM) upcoming = UpcomingRadar(r, d, radarLimit(r, limit))
+            if (r.id !in tracked && d <= triggerM) {
                 tracked[r.id] = Track(r, d, v)
                 events += AlertEvent.Approach(now, r, d, radarLimit(r, limit))
             }
@@ -147,7 +159,7 @@ class AlertEngine(
                 ageMs = t.radar.reportedAtMs?.let { now - it },
             )
         }.sortedBy { it.distanceM }
-        return AlertOutput(events, active, sectionStatus())
+        return AlertOutput(events, active, sectionStatus(), upcoming)
     }
 
     private fun isAhead(p: LatLon, heading: Double, target: LatLon, d: Double): Boolean {

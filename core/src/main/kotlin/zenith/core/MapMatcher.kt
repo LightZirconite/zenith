@@ -9,7 +9,8 @@ import kotlin.math.abs
  * parallel road.
  */
 class MapMatcher(
-    private val network: RoadNetwork,
+    /** Current road network; may change as tiles load while driving (segment ids stay stable). */
+    private val network: () -> RoadNetwork?,
     private val sigmaZ: Double = 8.0,
     private val beta: Double = 10.0,
     private val sigmaHeadingDeg: Double = 35.0,
@@ -26,6 +27,8 @@ class MapMatcher(
     private var reported: RoadCandidate? = null
     private var fixesSinceReset = 0
 
+    constructor(network: RoadNetwork) : this({ network })
+
     fun reset() {
         column = emptyList()
         lastPosition = null
@@ -35,7 +38,11 @@ class MapMatcher(
 
     /** Matches [state]; null when no road is within reach. */
     fun update(state: KinematicState): RoadCandidate? {
-        val cands = network.candidates(state.position, searchRadiusM)
+        val net = network() ?: run {
+            reset()
+            return null
+        }
+        val cands = net.candidates(state.position, searchRadiusM)
         if (cands.isEmpty()) {
             reset()
             return null
@@ -88,13 +95,14 @@ class MapMatcher(
 
     /** Driving distance from [a] to [b] when reachable within two segment hops, else null. */
     private fun routeDistance(a: RoadCandidate, b: RoadCandidate): Double? {
+        val net = network() ?: return null
         if (a.segment.id == b.segment.id) {
             if (a.forward != b.forward) return if (a.distanceM < 15 && b.distanceM < 15) 40.0 else null // U-turn
             val d = b.offsetM - a.offsetM
             return if (d >= -5) maxOf(d, 0.0) else null
         }
         if (a.exitNode == b.entryNode) return a.remainingM + b.offsetM
-        for ((mid, forward) in network.departuresFrom(a.exitNode)) {
+        for ((mid, forward) in net.departuresFrom(a.exitNode)) {
             if (mid.id == a.segment.id || mid.id == b.segment.id) continue
             val midExit = if (forward) mid.toNode else mid.fromNode
             if (midExit == b.entryNode) return a.remainingM + mid.lengthM + b.offsetM

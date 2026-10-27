@@ -16,6 +16,7 @@ kotlin {
 }
 
 dependencies {
+    api(libs.kotlinx.serialization.json)
     testImplementation(kotlin("test"))
 }
 

@@ -20,6 +20,7 @@ object Sim {
         noiseM: Double = 0.0,
         seed: Int = 1,
         withVelocity: Boolean = true,
+        frame: LocalFrame = this.frame,
     ): List<GpsFix> {
         val pts = path.map { Vec2(it.first, it.second) }
         val lengths = pts.zipWithNext { a, b -> (b - a).length() }

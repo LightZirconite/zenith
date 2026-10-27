@@ -1,14 +1,14 @@
 package zenith.core
 
-import kotlin.math.roundToInt
-
 data class DriverProfile(val probationary: Boolean = false, val raining: Boolean = false)
 
 /** Everything the UI needs after one GPS fix. */
 data class DriveSnapshot(
     val timeMs: Long,
     val position: LatLon,
-    val speedKmh: Int,
+    /** Speed to display; null until the GPS is accurate enough. */
+    val speedKmh: Int?,
+    val gpsAccuracyM: Double?,
     val headingDeg: Double?,
     val road: RoadCandidate?,
     /** Limit after rain and licence rules; null when unknown. */
@@ -16,6 +16,7 @@ data class DriveSnapshot(
     val limitSource: LimitSource?,
     val alerts: List<ActiveAlert>,
     val section: SectionStatus?,
+    val upcoming: UpcomingRadar?,
     val events: List<AlertEvent>,
 )
 
@@ -24,32 +25,48 @@ data class DriveSnapshot(
  * so a recorded GPX trace replays exactly like a live drive.
  */
 class DrivingSession(
-    network: RoadNetwork?,
+    /** Current road network; may change as road tiles load. */
+    network: () -> RoadNetwork?,
     radars: List<Radar>,
     profile: DriverProfile = DriverProfile(),
     settings: AlertSettings = AlertSettings(),
 ) {
+    constructor(
+        network: RoadNetwork?,
+        radars: List<Radar>,
+        profile: DriverProfile = DriverProfile(),
+        settings: AlertSettings = AlertSettings(),
+    ) : this({ network }, radars, profile, settings)
+
     private val filter = KalmanFilter()
-    private val matcher = network?.let { MapMatcher(it) }
+    private val stabilizer = SpeedStabilizer()
+    private val matcher = MapMatcher(network)
     private val effective: (Int) -> Int = { SpeedRules.effectiveLimit(it, profile.raining, profile.probationary) }
     private val engine = AlertEngine(RadarIndex(radars), settings, effective)
+
+    /** Swaps in a newer radar list (e.g. after a pack download) without resetting the drive. */
+    fun setRadars(radars: List<Radar>) {
+        engine.radars = RadarIndex(radars)
+    }
 
     /** Processes one fix; null when the filter rejected it as an outlier. */
     fun process(fix: GpsFix): DriveSnapshot? {
         val state = filter.update(fix) ?: return null
-        val road = matcher?.update(state)
+        val road = matcher.update(state)
         val roadLimit = road?.limitKmh
         val out = engine.step(state, roadLimit)
         return DriveSnapshot(
             timeMs = state.timeMs,
             position = state.position,
-            speedKmh = (state.speedMps * 3.6).roundToInt(),
+            speedKmh = stabilizer.update(fix, state.speedMps),
+            gpsAccuracyM = fix.accuracyM,
             headingDeg = state.headingDeg,
             road = road,
             limitKmh = roadLimit?.let(effective),
             limitSource = road?.segment?.limitSource,
             alerts = out.active,
             section = out.section,
+            upcoming = out.upcoming,
             events = out.events,
         )
     }

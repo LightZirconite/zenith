@@ -15,6 +15,8 @@ data class RoadSegment(
     val limitSource: LimitSource = LimitSource.EXPLICIT,
     /** OSM highway class (motorway, motorway_link, primary…), used to prefer staying on the same road. */
     val roadClass: String? = null,
+    /** Road reference or name ("A 7", "Rue de la Paix"). */
+    val name: String? = null,
 ) {
     init {
         require(points.size >= 2) { "segment $id needs at least 2 points" }
