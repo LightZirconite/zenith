@@ -14,4 +14,6 @@ Application Android minimaliste d'alertes de conduite : vitesse, limitation, rad
 ./gradlew :app:assembleDebug  # APK debug (nécessite le SDK Android)
 ```
 
-La CI GitHub Actions (`.github/workflows/build-apk.yml`) lance les tests et publie l'APK debug en artifact.
+Chaque push sur `main` lance les tests, compile l'APK signé et le publie en release (`.github/workflows/release.yml`). Dernier APK : https://github.com/LightZirconite/zenith/releases/latest/download/zenith.apk
+
+La clé de signature se crée une seule fois avec `scripts/setup-signing.sh` (gardée dans `~/.zenith`, à sauvegarder).

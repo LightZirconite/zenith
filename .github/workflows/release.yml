@@ -1,0 +1,63 @@
+name: release
+
+# Every push on main: tests, signed release APK, GitHub Release.
+# Latest APK: https://github.com/LightZirconite/zenith/releases/latest/download/zenith.apk
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      ZENITH_BUILD_NUMBER: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Unit tests
+        run: ./gradlew :core:test
+
+      - name: Signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ZENITH_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::Secret ZENITH_KEYSTORE_BASE64 manquant : lance scripts/setup-signing.sh une fois."
+            exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/zenith.jks"
+          echo "ZENITH_KEYSTORE=$RUNNER_TEMP/zenith.jks" >> "$GITHUB_ENV"
+
+      - name: Release APK
+        env:
+          ZENITH_KEYSTORE_PASSWORD: ${{ secrets.ZENITH_KEYSTORE_PASSWORD }}
+          ZENITH_KEY_ALIAS: ${{ secrets.ZENITH_KEY_ALIAS }}
+          ZENITH_KEY_PASSWORD: ${{ secrets.ZENITH_KEY_PASSWORD }}
+        run: |
+          ./gradlew :app:assembleRelease
+          cp app/build/outputs/apk/release/app-release.apk zenith.apk
+          "$ANDROID_HOME"/build-tools/$(ls "$ANDROID_HOME"/build-tools | sort -V | tail -1)/apksigner verify zenith.apk
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="0.1.${ZENITH_BUILD_NUMBER}"
+          gh release create "v$version" zenith.apk \
+            --title "Zenith $version" \
+            --notes "$(git log -1 --pretty=%B)" \
+            --target "$GITHUB_SHA" \
+            --latest

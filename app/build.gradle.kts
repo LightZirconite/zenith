@@ -11,12 +11,27 @@ android {
         applicationId = "zenith.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        // CI passes the run number so every release installs over the previous one.
+        val build = System.getenv("ZENITH_BUILD_NUMBER")?.toInt() ?: 1
+        versionCode = build
+        versionName = "0.1.$build"
+    }
+
+    signingConfigs {
+        val keystore = System.getenv("ZENITH_KEYSTORE")
+        if (keystore != null) {
+            create("release") {
+                storeFile = file(keystore)
+                storePassword = System.getenv("ZENITH_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("ZENITH_KEY_ALIAS")
+                keyPassword = System.getenv("ZENITH_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
         release {
+            signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
         }
