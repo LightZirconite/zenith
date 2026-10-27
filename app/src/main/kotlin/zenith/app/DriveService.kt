@@ -69,6 +69,15 @@ class DriveService : Service(), LocationListener {
             stopSelf()
             return START_NOT_STICKY
         }
+        if (intent?.action == ACTION_RESHOW) {
+            // The notification was swiped away (allowed since Android 14): the drive goes on, put it back.
+            if (!started) {
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            repostNotification()
+            return if (demo) START_NOT_STICKY else START_STICKY
+        }
         if (started) return START_STICKY
         // Android requires the location permission for a "location" foreground service, demo included.
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
@@ -207,13 +216,22 @@ class DriveService : Service(), LocationListener {
         super.onDestroy()
     }
 
-    /** Updates the notification when speed, limit or next radar changes, at most every 2 s. */
+    /**
+     * Updates the notification when speed, limit or next radar changes, at most every 2 s, and
+     * re-posts it every 30 s anyway so it comes back if it was dismissed.
+     */
     private fun refreshNotification(s: DriveSnapshot) {
         val key = Triple(s.speedKmh, s.limitKmh, nextRadarText(s))
-        if (key == lastNotified || s.timeMs - lastNotifiedAtMs < 2_000) return
+        val stale = s.timeMs - lastNotifiedAtMs >= 30_000
+        if (!stale && (key == lastNotified || s.timeMs - lastNotifiedAtMs < 2_000)) return
         lastNotified = key
         lastNotifiedAtMs = s.timeMs
         getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification(s))
+    }
+
+    private fun repostNotification() {
+        lastNotified = null
+        runCatching { getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification(DriveState.snapshot.value)) }
     }
 
     private fun notification(s: DriveSnapshot?): Notification {
@@ -222,6 +240,9 @@ class DriveService : Service(), LocationListener {
         )
         val stop = PendingIntent.getService(
             this, 1, Intent(this, DriveService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE,
+        )
+        val reshow = PendingIntent.getService(
+            this, 3, Intent(this, DriveService::class.java).setAction(ACTION_RESHOW), PendingIntent.FLAG_IMMUTABLE,
         )
         val speed = s?.speedKmh
         val limit = s?.limitKmh
@@ -239,6 +260,7 @@ class DriveService : Service(), LocationListener {
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(listOfNotNull(next, s?.road?.segment?.name).joinToString("\n").ifEmpty { text }))
             .setContentIntent(open)
+            .setDeleteIntent(reshow)
             .addAction(0, "Arrêter", stop)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -274,6 +296,7 @@ class DriveService : Service(), LocationListener {
         private const val ACTION_STOP = "zenith.app.STOP"
         private const val ACTION_DEMO = "zenith.app.DEMO"
         private const val ACTION_AUTO = "zenith.app.AUTO"
+        private const val ACTION_RESHOW = "zenith.app.RESHOW"
 
         fun start(context: Context) =
             ContextCompat.startForegroundService(context, Intent(context, DriveService::class.java))
