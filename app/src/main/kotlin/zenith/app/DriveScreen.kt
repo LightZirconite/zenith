@@ -110,7 +110,7 @@ fun DriveScreen(
                 // A little lower than the middle, so the car arrow on the map stays clear.
                 if (running) Dashboard(snapshot, Modifier.padding(top = if (showMap) 72.dp else 0.dp)) else Idle(data, onDemo)
             }
-            AlertArea(snapshot)
+            AlertArea(snapshot.takeIf { running })
             Spacer(Modifier.height(12.dp))
             AnimatedVisibility(visible = running && navApps.isNotEmpty(), enter = fadeIn(), exit = fadeOut()) {
                 NavApps(navApps, onOpenNavApp)
@@ -333,10 +333,8 @@ private fun AlertCard(a: ActiveAlert) {
 
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(bg).alpha(if (a.overLimit) alpha else 1f)) {
         Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
-            a.limitKmh?.let {
-                LimitSignSmall(it)
-                Spacer(Modifier.width(16.dp))
-            }
+            RadarBadge(a.radar.type, a.limitKmh, 54.dp)
+            Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
                 Text(a.radar.type.label, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 val details = listOfNotNull(
@@ -354,28 +352,17 @@ private fun AlertCard(a: ActiveAlert) {
 }
 
 @Composable
-private fun LimitSignSmall(limitKmh: Int) {
-    Box(
-        Modifier.size(54.dp).background(Color.White, CircleShape).border(6.dp, Red, CircleShape),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(limitKmh.toString(), color = Color.Black, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-    }
-}
-
-@Composable
 private fun UpcomingStrip(u: UpcomingRadar) {
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Surface).padding(horizontal = 18.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("Prochain", color = Dim, fontSize = 15.sp)
-        Spacer(Modifier.width(10.dp))
+        RadarBadge(u.radar.type, u.limitKmh)
+        Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(u.radar.type.label, color = Color.White, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             u.roadName?.let { Text("sur $it", color = Dim, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
         }
-        u.limitKmh?.let { Text("$it · ", color = Dim, fontSize = 17.sp) }
         Text(distanceText(u.distanceM), color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
     }
 }

@@ -21,7 +21,7 @@ class AnnouncerTest {
         assertEquals("Radar fixe dans 700 mètres, limité à 90", Announcer.text(AlertEvent.Approach(0, radar, 708.0, 90)))
         assertNull(Announcer.text(AlertEvent.Passed(0, radar, 85.0, 90, wouldFlash = false)))
         assertEquals(
-            "Radar passé, attention, tu étais trop vite",
+            "Radar passé à 108, flash probable",
             Announcer.text(AlertEvent.Passed(0, radar, 108.0, 90, wouldFlash = true)),
         )
     }

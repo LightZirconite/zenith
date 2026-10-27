@@ -50,6 +50,7 @@ object DriveState {
 
     internal fun stopped() {
         _running.value = false
+        _snapshot.value = null
         _demo.value = false
         _nearbyRadars.value = emptyList()
     }

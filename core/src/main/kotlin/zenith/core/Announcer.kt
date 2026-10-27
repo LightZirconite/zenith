@@ -12,10 +12,10 @@ object Announcer {
             event.limitKmh?.let { append(", limité à ").append(it) }
         }
         is AlertEvent.Brake -> "Ralentis, ${event.limitKmh}"
-        is AlertEvent.Passed -> if (event.wouldFlash) "Radar passé, attention, tu étais trop vite" else null
+        is AlertEvent.Passed -> if (event.wouldFlash) "Radar passé à ${event.speedKmh.roundToInt()}, flash probable" else null
         is AlertEvent.SectionStarted -> "Tronçon de ${spokenDistance(event.lengthM)}, moyenne à ${event.limitKmh}"
         is AlertEvent.SectionEnded ->
-            "Fin du tronçon, moyenne ${event.averageKmh.roundToInt()}" + if (event.wouldFlash) ", trop vite" else ""
+            "Fin du tronçon, moyenne ${event.averageKmh.roundToInt()}" + if (event.wouldFlash) ", au-dessus de la limite" else ""
         is AlertEvent.Overspeed -> if (event.level == OverspeedLevel.WARN) "Limite ${event.limitKmh}" else null
         is AlertEvent.LimitChanged -> null
     }

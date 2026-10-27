@@ -41,7 +41,6 @@ import org.maplibre.android.style.sources.GeoJsonSource
 import zenith.core.DriveSnapshot
 import zenith.core.LatLon
 import zenith.core.Radar
-import zenith.core.RadarType
 import kotlin.math.cos
 import kotlin.math.ln
 
@@ -188,7 +187,7 @@ private class MapHolder {
     fun showRadars(radars: List<Radar>, active: Set<String>) {
         val json = collection(
             radars.map { r ->
-                val props = """{"c":"${color(r.type)}","l":"${r.limitKmh ?: ""}","r":${if (r.id in active) 12 else 9}}"""
+                val props = """{"c":"${radarColorHex(r.type)}","l":"${r.limitKmh ?: ""}","r":${if (r.id in active) 12 else 9}}"""
                 point(r.position, props)
             },
         )
@@ -312,14 +311,6 @@ private class MapHolder {
     private fun line(points: List<LatLon>): String =
         if (points.size < 2) collection(emptyList())
         else """{"type":"Feature","properties":{},"geometry":{"type":"LineString","coordinates":[${points.joinToString(",") { "[${it.lon},${it.lat}]" }}]}}"""
-
-    private fun color(type: RadarType) = when (type) {
-        RadarType.RED_LIGHT -> "#FF9F0A"
-        RadarType.SECTION_START, RadarType.SECTION_END -> "#BF5AF2"
-        RadarType.WORKZONE -> "#FFD60A"
-        RadarType.MOBILE, RadarType.MOBILE_VEHICLE, RadarType.POLICE -> "#FF375F"
-        else -> "#FF3B30"
-    }
 
     private fun log2(x: Double) = ln(x) / ln(2.0)
 
