@@ -29,7 +29,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p out
-          gh release download data -p osm_radars.json -p lufop.json -D out || true
+          # A file that exists on the release must download: a transient failure here would
+          # restart the Lufop base from zero and overwrite the accumulated one.
+          assets=$(gh release view data --json assets -q '.assets[].name' 2>/dev/null || true)
+          for f in osm_radars.json lufop.json; do
+            if grep -qx "$f" <<< "$assets"; then
+              gh release download data -p "$f" -D out
+            fi
+          done
           ls -la out
 
       - name: Lufop harvest
