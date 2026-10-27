@@ -156,21 +156,29 @@ class DriveService : Service(), LocationListener {
         val stop = PendingIntent.getService(
             this, 1, Intent(this, DriveService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE,
         )
-        val speed = s?.speedKmh?.let { "$it km/h" }
-        val text = when {
-            speed == null -> "Recherche des satellites…"
-            s.limitKmh != null -> "$speed · limite ${s.limitKmh}"
-            else -> speed
+        val speed = s?.speedKmh
+        val limit = s?.limitKmh
+        val next = s?.let(::nextRadarText)
+        val title = when {
+            speed == null -> "Zenith · recherche des satellites…"
+            limit != null -> "$speed km/h · limite $limit"
+            else -> "$speed km/h"
         }
+        val text = next ?: s?.road?.segment?.name ?: "Aucun radar sur ta route pour l'instant"
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(s?.let(::nextRadarText) ?: "Zenith actif")
+            .setContentTitle(title)
             .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(listOfNotNull(next, s?.road?.segment?.name).joinToString("\n").ifEmpty { text }))
             .setContentIntent(open)
             .addAction(0, "Arrêter", stop)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+            .setShowWhen(false)
             .setCategory(NotificationCompat.CATEGORY_NAVIGATION)
+            // Android 16: shown as a live chip in the status bar with the current speed.
+            .setRequestPromotedOngoing(true)
+            .apply { speed?.let { setShortCriticalText("$it") } }
             .build()
     }
 

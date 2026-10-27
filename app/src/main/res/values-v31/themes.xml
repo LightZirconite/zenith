@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Launch screen: the Zenith logo on its own dark background. -->
+    <style name="Theme.Zenith" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:windowSplashScreenBackground">@color/logo_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_logo_foreground</item>
+    </style>
+</resources>

@@ -1,9 +1,13 @@
 package zenith.app
 
 import android.Manifest
+import android.app.PictureInPictureParams
 import android.content.Intent
+import android.content.res.Configuration
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.util.Rational
 import android.provider.Settings
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -27,6 +31,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 class MainActivity : ComponentActivity() {
     /** Bumped on every onResume: permissions and updates are re-checked when the user comes back. */
     private val resumes = MutableStateFlow(0)
+    private val inPip = MutableStateFlow(false)
+
+    /** Driving: leaving Zenith (for Waze, Maps…) shrinks it into a picture-in-picture window. */
+    private var pipWanted = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(SystemBarStyle.dark(android.graphics.Color.TRANSPARENT), SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
@@ -41,6 +49,8 @@ class MainActivity : ComponentActivity() {
             val radars by DriveState.nearbyRadars.collectAsStateWithLifecycle()
             val update by Updater.state.collectAsStateWithLifecycle()
             val resumeCount by resumes.collectAsStateWithLifecycle()
+            val pip by inPip.collectAsStateWithLifecycle()
+            val navApps = remember(resumeCount) { NavApp.installed(context) }
             var permissionResults by remember { mutableIntStateOf(0) }
             val permissions = remember(resumeCount, permissionResults) { Permissions.read(context) }
             var onboarded by remember { mutableStateOf(prefs.getBoolean(KEY_ONBOARDED, false)) }
@@ -50,8 +60,10 @@ class MainActivity : ComponentActivity() {
                 if (onboarded && result[Manifest.permission.ACCESS_FINE_LOCATION] == true) DriveService.start(context)
             }
 
-            // Screen stays on while driving only.
+            // While driving: screen stays on, and leaving the app opens the picture-in-picture window.
             LaunchedEffect(running) {
+                pipWanted = running
+                updatePip()
                 if (running) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             }
@@ -69,7 +81,9 @@ class MainActivity : ComponentActivity() {
                 Updater.confirmationShown()
             }
 
-            if (!onboarded) {
+            if (pip) {
+                PipScreen(snapshot)
+            } else if (!onboarded) {
                 Onboarding(
                     permissions = permissions,
                     onLocation = {
@@ -105,6 +119,8 @@ class MainActivity : ComponentActivity() {
                     onInstallUpdate = {
                         if (permissions.installs) Updater.install(context) else openSettings(Permissions.installsIntent(context))
                     },
+                    navApps = navApps,
+                    onOpenNavApp = { it.launch(context) },
                 )
             }
         }
@@ -114,6 +130,31 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         resumes.value++
     }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        // Before Android 12 there is no auto-enter: do it by hand when the user leaves.
+        if (pipWanted && Build.VERSION.SDK_INT < 31) runCatching { enterPictureInPictureMode(pipParams()) }
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        inPip.value = isInPictureInPictureMode
+    }
+
+    private fun updatePip() {
+        runCatching { setPictureInPictureParams(pipParams()) }
+    }
+
+    private fun pipParams(): PictureInPictureParams = PictureInPictureParams.Builder()
+        .setAspectRatio(Rational(1, 1))
+        .apply {
+            if (Build.VERSION.SDK_INT >= 31) {
+                setAutoEnterEnabled(pipWanted)
+                setSeamlessResizeEnabled(false)
+            }
+        }
+        .build()
 
     /**
      * Shows Android's prompt, or its settings screen once the prompt is blocked: after two

@@ -13,6 +13,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -43,7 +44,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -77,12 +83,14 @@ fun DriveScreen(
     onStart: () -> Unit,
     onStop: () -> Unit,
     onInstallUpdate: () -> Unit,
+    navApps: List<NavApp> = emptyList(),
+    onOpenNavApp: (NavApp) -> Unit = {},
 ) {
     val showMap = running && snapshot != null
     Box(Modifier.fillMaxSize().background(Bg)) {
-        // Small tilted map at the top, melting into the background; the speed sits right under it.
-        AnimatedVisibility(visible = showMap, enter = fadeIn(tween(800)), exit = fadeOut()) {
-            DriveMap(snapshot, radars, Modifier.fillMaxWidth().fillMaxHeight(0.46f))
+        // Tilted map over the top of the screen, melting progressively into the background.
+        AnimatedVisibility(visible = showMap, enter = fadeIn(tween(1_200)), exit = fadeOut(tween(600))) {
+            DriveMap(snapshot, radars, Modifier.fillMaxWidth().fillMaxHeight(0.62f))
         }
         Column(
             modifier = Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 20.dp, vertical = 12.dp),
@@ -92,14 +100,27 @@ fun DriveScreen(
             UpdateBanner(update, canInstall, onInstallUpdate)
             Column(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
-                verticalArrangement = if (showMap) Arrangement.Bottom else Arrangement.Center,
+                verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                if (running) Dashboard(snapshot) else Idle(data)
+                // A little lower than the middle, so the car arrow on the map stays clear.
+                if (running) Dashboard(snapshot, Modifier.padding(top = if (showMap) 72.dp else 0.dp)) else Idle(data)
             }
             AlertArea(snapshot)
             Spacer(Modifier.height(12.dp))
+            AnimatedVisibility(visible = running && navApps.isNotEmpty(), enter = fadeIn(), exit = fadeOut()) {
+                NavApps(navApps, onOpenNavApp)
+            }
             StartStop(running, onStart, onStop)
+            AnimatedVisibility(visible = !running, enter = fadeIn(), exit = fadeOut()) {
+                Text(
+                    "Cartes © OpenFreeMap © OpenStreetMap · radars data.gouv.fr, OpenStreetMap, Lufop",
+                    color = Dim.copy(alpha = 0.6f),
+                    fontSize = 10.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                )
+            }
         }
     }
 }
@@ -170,6 +191,17 @@ private fun UpdateBanner(update: UpdateState, canInstall: Boolean, onInstall: ()
 
 @Composable
 private fun Idle(data: DataStatus) {
+    // Logo breathing softly, with a red glow behind the needle.
+    val breath = rememberInfiniteTransition(label = "logo")
+    val scale by breath.animateFloat(0.96f, 1.04f, infiniteRepeatable(tween(2_200), RepeatMode.Reverse), label = "scale")
+    val glow by breath.animateFloat(0.10f, 0.28f, infiniteRepeatable(tween(2_200), RepeatMode.Reverse), label = "glow")
+    Box(contentAlignment = Alignment.Center) {
+        Box(
+            Modifier.size(150.dp).scale(scale)
+                .background(Brush.radialGradient(listOf(Red.copy(alpha = glow), Color.Transparent)), CircleShape),
+        )
+        Image(painterResource(R.drawable.ic_logo_foreground), contentDescription = null, modifier = Modifier.size(150.dp).scale(scale))
+    }
     Text("Zenith", color = Color.White, fontSize = 44.sp, fontWeight = FontWeight.Bold)
     Spacer(Modifier.height(8.dp))
     Text(
@@ -179,8 +211,26 @@ private fun Idle(data: DataStatus) {
     )
 }
 
+/** Shortcuts to the navigation apps installed: Zenith keeps alerting from behind them. */
 @Composable
-private fun Dashboard(s: DriveSnapshot?) {
+private fun NavApps(apps: List<NavApp>, onOpen: (NavApp) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        for (app in apps) {
+            Text(
+                "Ouvrir ${app.label}",
+                color = Color.White,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(Surface)
+                    .clickable { onOpen(app) }.padding(vertical = 12.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun Dashboard(s: DriveSnapshot?, modifier: Modifier = Modifier) {
     val limit = s?.limitKmh
     val speed = s?.speedKmh
     val animatedSpeed by animateIntAsState(speed ?: 0, tween(400), label = "speed")
@@ -193,29 +243,39 @@ private fun Dashboard(s: DriveSnapshot?) {
         },
         label = "speedColor",
     )
-    Text(s?.road?.segment?.name ?: " ", color = Dim, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                if (speed == null) "--" else animatedSpeed.toString(),
-                color = color,
-                fontSize = 150.sp,
-                fontWeight = FontWeight.Bold,
-            )
-            Text("km/h", color = Dim, fontSize = 20.sp)
-        }
-        AnimatedVisibility(visible = limit != null, enter = fadeIn(), exit = fadeOut()) {
-            Row {
-                Spacer(Modifier.width(20.dp))
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    LimitSign(limit ?: 0, uncertain = s?.limitSource == LimitSource.INFERRED)
-                    val ahead = s?.limitAhead
-                    Text(
-                        ahead?.let { "${it.limitKmh} dans ${distanceText(it.distanceM)}" } ?: " ",
-                        color = Dim,
-                        fontSize = 15.sp,
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
+    // Waiting for the GPS: the dashes breathe instead of sitting still.
+    val searching = rememberInfiniteTransition(label = "searching")
+    val searchAlpha by searching.animateFloat(0.35f, 1f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "searchAlpha")
+    // Dark halo so the digits stay readable over the map.
+    val halo = TextStyle(shadow = Shadow(Color.Black, blurRadius = 28f))
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(s?.road?.segment?.name ?: " ", color = Dim, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, style = halo)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    if (speed == null) "--" else animatedSpeed.toString(),
+                    color = color,
+                    fontSize = 150.sp,
+                    fontWeight = FontWeight.Bold,
+                    style = halo,
+                    modifier = Modifier.alpha(if (speed == null) searchAlpha else 1f),
+                )
+                Text("km/h", color = Dim, fontSize = 20.sp)
+            }
+            AnimatedVisibility(visible = limit != null, enter = fadeIn(), exit = fadeOut()) {
+                Row {
+                    Spacer(Modifier.width(20.dp))
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        LimitSign(limit ?: 0, uncertain = s?.limitSource == LimitSource.INFERRED)
+                        val ahead = s?.limitAhead
+                        Text(
+                            ahead?.let { "${it.limitKmh} dans ${distanceText(it.distanceM)}" } ?: " ",
+                            color = Dim,
+                            fontSize = 15.sp,
+                            style = halo,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    }
                 }
             }
         }
