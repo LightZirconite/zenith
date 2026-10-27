@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: data
+  group: lufop
   cancel-in-progress: false
 
 jobs:
@@ -31,7 +31,6 @@ jobs:
           mkdir -p out
           gh release download data -p osm_radars.json -p lufop.json -D out || true
           ls -la out
-          test -f out/osm_radars.json || { echo "::error::osm_radars.json absent : lance d'abord le workflow data"; exit 1; }
 
       - name: Lufop harvest
         env:
@@ -39,12 +38,21 @@ jobs:
         run: python pipeline/harvest_lufop.py out/lufop.json 150
 
       - name: Merge
-        run: python pipeline/build_radars.py merge out/osm_radars.json out/lufop.json out/radars.json
+        run: |
+          if [ -f out/osm_radars.json ]; then
+            python pipeline/build_radars.py merge out/osm_radars.json out/lufop.json out/radars.json
+          else
+            echo "::warning::osm_radars.json absent (workflow data pas encore passé) : radars.json non reconstruit"
+          fi
 
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          files="out/radars.json"
-          test -f out/lufop.json && files="$files out/lufop.json"
-          gh release upload data $files --clobber
+          if ! gh release view data >/dev/null 2>&1; then
+            gh release create data --title "Données Zenith" --prerelease --latest=false \
+              --notes "Radars (data.gouv.fr, Licence Ouverte + OpenStreetMap, ODbL + Lufop) et limitations de vitesse (OpenStreetMap, ODbL). Mis à jour automatiquement."
+          fi
+          files=""
+          for f in out/radars.json out/lufop.json; do test -f "$f" && files="$files $f"; done
+          test -n "$files" && gh release upload data $files --clobber
