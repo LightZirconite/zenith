@@ -5,22 +5,25 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path
-        android:pathData="M33.22,66 A24,24 0 1,1 74.78,66"
-        android:strokeWidth="5.5"
-        android:strokeColor="#FFFFFF"
-        android:strokeLineCap="round" />
-    <path
-        android:pathData="M66,33.22 A24,24 0 0,1 74.78,66"
-        android:strokeWidth="5.5"
-        android:strokeColor="#FF3B30"
-        android:strokeLineCap="round" />
-    <path
-        android:pathData="M54,54 L62.5,40.9"
-        android:strokeWidth="5"
-        android:strokeColor="#FF3B30"
-        android:strokeLineCap="round" />
-    <path
-        android:pathData="M49.5,54 a4.5,4.5 0 1,0 9,0 a4.5,4.5 0 1,0 -9,0"
-        android:fillColor="#FFFFFF" />
+    <!-- Drawing spans y 26.5–69.5: moved down 6 so it sits on the canvas center (54). -->
+    <group android:translateY="6">
+        <path
+            android:pathData="M33.22,66 A24,24 0 1,1 74.78,66"
+            android:strokeWidth="5.5"
+            android:strokeColor="#FFFFFF"
+            android:strokeLineCap="round" />
+        <path
+            android:pathData="M66,33.22 A24,24 0 0,1 74.78,66"
+            android:strokeWidth="5.5"
+            android:strokeColor="#FF3B30"
+            android:strokeLineCap="round" />
+        <path
+            android:pathData="M54,54 L62.5,40.9"
+            android:strokeWidth="5"
+            android:strokeColor="#FF3B30"
+            android:strokeLineCap="round" />
+        <path
+            android:pathData="M49.5,54 a4.5,4.5 0 1,0 9,0 a4.5,4.5 0 1,0 -9,0"
+            android:fillColor="#FFFFFF" />
+    </group>
 </vector>
