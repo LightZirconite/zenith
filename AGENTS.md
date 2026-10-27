@@ -2,6 +2,14 @@
 
 Lis ce fichier en entier avant de toucher au projet. Le README décrit le projet pour les humains ; ici, ce sont les règles, les décisions déjà prises et les pièges déjà rencontrés.
 
+## Vision (à garder en tête à chaque modification)
+
+- **Un Coyote gratuit, natif et minimaliste.** L'app doit être la plus simple et la plus rapide possible : un écran, une vitesse, une limite, la prochaine alerte. Chaque ajout doit justifier sa place à l'écran.
+- **N'annoncer que ce qui est sur la route suivie.** Un radar sur une route parallèle, une bretelle qu'on ne prend pas ou une autre route « devant à vol d'oiseau » ne doit jamais être annoncé ni affiché comme « prochain ». Mieux vaut ne rien afficher qu'une information fausse ; mais un radar réel ne doit jamais être raté (en cas de doute sur la route, on alerte).
+- **Des alertes à la Coyote** : sons forts et progressifs (bips qui s'accélèrent à l'approche quand on est trop vite), voix courte en français, ça marche écran éteint et Waze/Maps devant.
+- **Le maximum de données gratuites, rassemblées par nos scripts.** La CI récupère tout ce qui est gratuit (liste officielle, OSM, Lufop avec la clé de l'auteur, et toute nouvelle source gratuite) et le fusionne dans de simples fichiers de la release `data`. L'app les télécharge régulièrement. Pas de serveur : la base grossit et se met à jour toute seule, jour après jour.
+- **Dépôt public assumé** : la CI GitHub est gratuite et illimitée, il n'y a aucun intérêt à fermer le code.
+
 ## Ce qu'est Zenith
 
 Application Android **minimaliste** d'alertes de conduite : vitesse, limitation, radars (positions exactes, façon Coyote), contrôles, tronçons. **Pas de carte, pas d'itinéraire.** Elle tourne en fond, en complément de Waze ou Google Maps : un service de premier plan qui alerte par sons et voix même écran éteint.
@@ -24,7 +32,8 @@ core/      Kotlin pur (JVM), testé : géo, Kalman, map-matching HMM, moteur d'a
            lecture des packs, GPX, DrivingSession (pipeline déterministe : replay = direct).
 app/       Android Compose : DriveService (GPS 1 Hz, premier plan), DriveData (téléchargement/cache),
            DriveScreen, Speaker (TTS FR), Tones, TripRecorder (GPX), Updater (auto-mise à jour).
-pipeline/  Python : build_roads.py (tuiles de limitations), build_radars.py (osm | merge),
+           RoadHorizon : radars accrochés aux routes, chemin le plus probable, routes atteignables.
+pipeline/  Python : build_roads.py (tuiles de limitations), build_radars.py (osm | merge | check),
            harvest_lufop.py (base Lufop qui grossit chaque jour), lufop_db.sh (base chiffrée).
 .github/workflows/
   release.yml    push sur main touchant l'app → tests + APK signé + release vX (latest)
@@ -72,13 +81,28 @@ Tester le pipeline en local sur un petit extrait : `https://download.geofabrik.d
 
 ## Conventions
 
-- Messages de commit en français, titre court, puis le détail en puces. Terminer par la ligne Co-Authored-By de l'agent.
+- Messages de commit en français, Conventional Commits (`feat:`, `fix:`, `refactor:`, `docs:`…), titre court, puis le détail en puces.
+- **Aucune ligne `Co-Authored-By` ni aucune signature ou mention d'IA** dans les commits, les PR ou le code. L'auteur des commits est `LightZirconite <123307773+LightZirconite@users.noreply.github.com>` (`git config user.name` / `user.email` dans le dépôt).
 - Code et commentaires de code en anglais ; tout texte visible par l'utilisateur en français.
 - Style Kotlin : celui du code existant (data classes, `object` pour les utilitaires purs, KDoc courte au-dessus de chaque classe).
 - Toute logique testable va dans `core` avec des tests ; `app` reste une couche mince.
 - `versionCode` = numéro d'exécution de `release.yml`. Ne pas le coder en dur.
 
+## Horizon électronique (`core/RoadHorizon.kt`)
+
+- `RadarSnapper` rattache chaque radar aux chaussées à moins de 30 m. Toutes celles à moins de 10 m de la plus proche sont gardées (radar entre deux chaussées : alerte des deux côtés). Sans sens mesuré, une route à sens unique donne le sens.
+- `mostProbablePath` suit la route (même nom/`ref`, puis même classe, puis virage nettement le plus droit) et **s'arrête au premier embranchement ambigu**. Le « prochain radar » et la prochaine limite ne viennent que de ce chemin, distance par la route.
+- `reachable` : Dijkstra sur toutes les branches jusqu'à 3,2 km, portée constante (sinon un radar suivi sortirait de la portée en ralentissant et serait annoncé deux fois). Un radar hors du chemin probable n'alerte qu'à 500 m (`branchAlertM`) : la bretelle n'alerte pas toute l'autoroute, mais prévient avant la sortie.
+- Repli sûr : radar à plus de 30 m de toute route, ou pas de tuile chargée → ancienne logique du cône devant la voiture (le « prochain » est alors limité à 3 km).
+
 ## Pièges déjà rencontrés
+
+- **« Prochain radar à 14 km » sur une autre route** : l'ancien moteur prenait le radar le plus proche à vol d'oiseau dans un cône de ±35° jusqu'à 15 km (à 14 km, le cône fait 16 km de large). Corrigé par l'horizon : ne jamais revenir à une recherche en ligne droite quand une route est reconnue.
+- **« Limite 80 » répété** quand la vitesse oscille autour de limite + 3 : l'annonce attend 30 s, ou 10 s sous la limite.
+- **Date des mobiles Lufop** : `update` doit passer dans `radars.json` (`at`, secondes epoch, heure de Paris) ; sans date, un mobile vieux d'une semaine serait annoncé comme en direct. `RadarPack` ne garde la date que pour les types mobiles.
+- **Quota Lufop partagé** : la clé sert à la CI (150/jour) ; des requêtes depuis le téléphone (mobiles en direct) prendraient sur les mêmes 200/jour.
+- **Android 12+** interdit de lancer un service de premier plan `location` depuis l'arrière-plan (démarrage auto au Bluetooth) : passer par `CompanionDeviceManager`.
+- **Maven Central en 429** derrière certains proxys (conteneurs cloud) : un init script local `~/.gradle/init.d/` qui met en premier le miroir `https://maven-central.storage-download.googleapis.com/maven2/` suffit. Ne pas l'ajouter au dépôt.
 
 - **AGP 9** : Kotlin intégré, ne **pas** appliquer `org.jetbrains.kotlin.android` ; `kotlin { compilerOptions { } }` au lieu de `kotlinOptions`.
 - **compileSdk 37** obligatoire avec les AndroidX actuels (targetSdk 36).
@@ -107,11 +131,21 @@ Tester le pipeline en local sur un petit extrait : `https://download.geofabrik.d
 - Ne jamais deviner une limitation à l'aveugle : une route sans tag reste sans limite plutôt que d'afficher un 80 faux dans un village. Les limites déduites (`src` 2) s'affichent avec un anneau gris.
 - **La base Lufop n'est jamais publiée en clair** (dépôt public : la redistribuer pourrait faire couper la clé). Toujours passer par `pipeline/lufop_db.sh`. Une base présente sur la release doit se relire, sinon le job échoue : jamais de redémarrage silencieux à zéro.
 - Le quota Lufop ne doit jamais être dépassé : budget 150/jour dans `radars.yml`, pause de 6,5 s entre deux appels, arrêt à la première erreur.
+- La base Lufop est sauvegardée **juste après la récolte**, avant la fusion : le quota du jour est dépensé, rien ne doit le faire perdre.
+- `build_radars.py check` refuse de publier un `radars.json` qui perd plus de 10 % des radars ; le résumé du job donne les comptes par source, par type et les noms Lufop.
 
 ## Prochaines étapes connues
 
-1. Détecter les zones bâties (OSM `landuse` / `place` / panneaux d'agglomération) pour déduire 50/80 sur les routes sans tag.
-2. Radars mobiles Lufop en direct depuis le téléphone (clé saisie dans des réglages, une requête par ~10 km).
-3. Bulle flottante au-dessus de Waze/Maps, démarrage auto au Bluetooth de la voiture, profils (probatoire, moto).
-4. Horizon électronique : n'annoncer que les radars sur la route réellement suivie, et le prochain changement de limite.
-5. Android Auto (Car App Library).
+Fait : horizon électronique (radars sur la route suivie, prochaine limite), date des mobiles Lufop, garde-fou CI.
+
+1. **Zones bâties** (OSM `traffic_sign=city_limit`, `landuse=residential`, `place`) pour déduire 50/80 sur les routes sans tag.
+2. **Sens des radars** : résoudre `direction=forward/backward` des radars OSM avec la voie qui porte le nœud ; valider l'`azimut` Lufop contre les relations `enforcement` (au-dessus de 95 % d'accord, s'en servir).
+3. **Typage Lufop** : 1 605 radars « fixes » Lufop absents de la liste officielle (frontière, autonomes, leurres ?) ; lire l'histogramme des noms dans le résumé du job `radars` avant de typer plus finement.
+4. **Tunnels** : continuer le long de l'horizon à la dernière vitesse quand le GPS est perdu (60 s maximum).
+5. **Tronçons** : environ 26 fins de tronçon sans début ; reconstruire le début par l'horizon arrière, reprendre un tronçon en cours après redémarrage.
+6. **Réglages minimum** : probatoire, bouton pluie, voix ou bips seulement (`DriverProfile` existe, sans interface).
+7. Feux rouges et passages à niveau : son plus doux, pas de « trop vite ».
+8. Outil de replay GPX en ligne de commande + export du dernier trajet depuis l'app : chaque bug réel devient un test.
+9. Radars mobiles Lufop en direct depuis le téléphone (clé saisie dans des réglages, une requête par ~10 km, quota partagé).
+10. Bulle flottante au-dessus de Waze/Maps, démarrage auto au Bluetooth de la voiture, profils (probatoire, moto).
+11. Android Auto (Car App Library).
