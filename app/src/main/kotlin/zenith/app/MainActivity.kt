@@ -105,7 +105,7 @@ class MainActivity : ComponentActivity() {
             }
 
             if (pip) {
-                PipScreen(snapshot)
+                PipScreen(snapshot, radars)
             } else if (showSettings && onboarded) {
                 SettingsScreen(
                     settings = settings,

@@ -51,21 +51,35 @@ import kotlin.math.ln
  * Vector tiles from OpenFreeMap (free, no key). Any map failure leaves an empty black box.
  */
 @Composable
-fun DriveMap(snapshot: DriveSnapshot?, radars: List<Radar>, modifier: Modifier = Modifier) {
+fun DriveMap(
+    snapshot: DriveSnapshot?,
+    radars: List<Radar>,
+    modifier: Modifier = Modifier,
+    /** Height fraction where the car arrow sits. */
+    carAt: Double = 0.45,
+    /** Drawn over the map; defaults to the drive screen's long fade into black. */
+    overlay: Brush = DriveFade,
+) {
     val context = LocalContext.current
-    val holder = remember { MapHolder() }
+    val holder = remember { MapHolder(carAt) }
     val view = remember { holder.create(context) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
 
     DisposableEffect(lifecycle, view) {
         val map = view as? MapView
+        // Follows start/stop only: in picture-in-picture the activity is paused but still
+        // visible, and a paused MapView would freeze.
         val observer = LifecycleEventObserver { _, event ->
             runCatching {
                 when (event) {
-                    Lifecycle.Event.ON_START -> map?.onStart()
-                    Lifecycle.Event.ON_RESUME -> map?.onResume()
-                    Lifecycle.Event.ON_PAUSE -> map?.onPause()
-                    Lifecycle.Event.ON_STOP -> map?.onStop()
+                    Lifecycle.Event.ON_START -> {
+                        map?.onStart()
+                        map?.onResume()
+                    }
+                    Lifecycle.Event.ON_STOP -> {
+                        map?.onPause()
+                        map?.onStop()
+                    }
                     else -> Unit
                 }
             }
@@ -88,24 +102,22 @@ fun DriveMap(snapshot: DriveSnapshot?, radars: List<Radar>, modifier: Modifier =
 
     Box(modifier) {
         AndroidView(factory = { view }, modifier = Modifier.fillMaxSize())
-        // Long, progressive fade: clear at the top, melting into the black app background below.
-        Box(
-            Modifier.fillMaxSize().background(
-                Brush.verticalGradient(
-                    0f to Color.Black.copy(alpha = 0.45f),
-                    0.12f to Color.Transparent,
-                    0.42f to Color.Transparent,
-                    0.62f to Color.Black.copy(alpha = 0.35f),
-                    0.8f to Color.Black.copy(alpha = 0.75f),
-                    1f to Color.Black,
-                ),
-            ),
-        )
+        Box(Modifier.fillMaxSize().background(overlay))
     }
 }
 
+/** Long, progressive fade: clear at the top, melting into the black app background below. */
+private val DriveFade = Brush.verticalGradient(
+    0f to Color.Black.copy(alpha = 0.45f),
+    0.12f to Color.Transparent,
+    0.42f to Color.Transparent,
+    0.62f to Color.Black.copy(alpha = 0.35f),
+    0.8f to Color.Black.copy(alpha = 0.75f),
+    1f to Color.Black,
+)
+
 /** Owns the MapView and its style objects; every call is a no-op until the style is loaded. */
-private class MapHolder {
+private class MapHolder(private val carAt: Double) {
     private var map: MapLibreMap? = null
     private var style: Style? = null
     private var pendingRadars: String? = null
@@ -160,8 +172,8 @@ private class MapHolder {
         val kmh = (s.speedKmh ?: 0).toDouble()
         val speedZoom = 16.3 - ((kmh - 30).coerceIn(0.0, 100.0) / 100.0) * 2.3
         val heightPx = m.height.toDouble().takeIf { it > 0 } ?: (300.0 * density)
-        // Car at 45 % of the map height: the speed counter covers the faded part below.
-        val aheadPx = heightPx * CAR_AT / density
+        // Car at [carAt] of the map height: the speed counter covers the faded part below.
+        val aheadPx = heightPx * carAt / density
         val framed = s.alerts.firstOrNull()?.distanceM ?: s.upcoming?.takeIf { it.roadName != null }?.distanceM
         val fitZoom = framed?.takeIf { it in 50.0..4_000.0 }?.let { d ->
             // Ground meters per logical pixel at zoom z: 40075016.686 cos(lat) / (512 · 2^z);
@@ -178,7 +190,7 @@ private class MapHolder {
             .bearing(s.headingDeg ?: lastCamera?.bearing ?: 0.0)
             .tilt(tilt)
             .zoom(z)
-            .padding(0.0, 0.0, 0.0, heightPx * (1 - 2 * CAR_AT))
+            .padding(0.0, 0.0, 0.0, heightPx * (1 - 2 * carAt))
             .build()
         lastCamera = camera
         runCatching { m.easeCamera(CameraUpdateFactory.newCameraPosition(camera), 1_000, false) }
@@ -321,7 +333,6 @@ private class MapHolder {
         const val SRC_ME = "me"
         const val SRC_AHEAD = "ahead"
         const val SRC_RADARS = "radars"
-        const val CAR_AT = 0.45
         const val LOOK_AROUND_MS = 8_000L
     }
 }

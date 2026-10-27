@@ -1,87 +1,154 @@
 package zenith.app
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import zenith.core.DriveSnapshot
+import zenith.core.Radar
 import kotlin.math.roundToInt
 
+private val Red = Color(0xFFFF3B30)
+private val Orange = Color(0xFFFF9F0A)
+
+/** Darker map for the small window, deepening toward the speed at the bottom. */
+private val PipFade = Brush.verticalGradient(
+    0f to Color.Black.copy(alpha = 0.55f),
+    0.25f to Color.Black.copy(alpha = 0.25f),
+    0.5f to Color.Black.copy(alpha = 0.3f),
+    1f to Color.Black.copy(alpha = 0.92f),
+)
+
 /**
- * Picture-in-picture window shown over Waze or Maps while driving: speed, limit and the radar
- * being approached. The whole window turns red when over the limit near a radar.
+ * Picture-in-picture window shown over Waze or Maps while driving: Zenith in miniature. The map
+ * fills the window, darkened; the next radar sits on top, the speed and the limit at the bottom.
+ * Everything scales with the window size. Over the limit near a radar, a red frame pulses.
  */
 @Composable
-fun PipScreen(s: DriveSnapshot?) {
+fun PipScreen(s: DriveSnapshot?, radars: List<Radar>) {
     val alert = s?.alerts?.firstOrNull()
     val limit = s?.limitKmh
     val speed = s?.speedKmh
-    val over = speed != null && limit != null && speed > limit
-    val bg by animateColorAsState(
+    val danger = alert?.overLimit == true
+    val speedColor by animateColorAsState(
         when {
-            alert?.overLimit == true -> Color(0xFFFF3B30)
-            alert != null -> Color(0xFF2C2C30)
-            else -> Color.Black
+            speed == null || limit == null -> Color.White
+            speed > limit -> Red
+            speed >= limit - 3 -> Orange
+            else -> Color.White
         },
-        label = "pipBg",
+        label = "pipSpeed",
     )
-    Column(
-        Modifier.fillMaxSize().background(bg).padding(10.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                speed?.toString() ?: "--",
-                color = if (over && alert?.overLimit != true) Color(0xFFFF3B30) else Color.White,
-                fontSize = 46.sp,
-                fontWeight = FontWeight.Bold,
-            )
-            if (limit != null) {
-                Spacer(Modifier.width(8.dp))
-                Box(
-                    Modifier.size(40.dp).background(Color.White, CircleShape).border(5.dp, Color(0xFFFF3B30), CircleShape),
-                    contentAlignment = Alignment.Center,
+    val pulse = rememberInfiniteTransition(label = "pipPulse")
+    val frame by pulse.animateFloat(0.35f, 1f, infiniteRepeatable(tween(450), RepeatMode.Reverse), label = "pipFrame")
+
+    BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)) {
+        val unit = minOf(maxWidth, maxHeight).value / 100f // 1 % of the window's short side, in dp
+        val halo = TextStyle(shadow = Shadow(Color.Black, blurRadius = 18f))
+
+        DriveMap(s, radars, Modifier.fillMaxSize(), carAt = 0.5, overlay = PipFade)
+
+        // Next radar: pill at the top, red while too fast for it.
+        val next = alert?.let { Triple(it.radar, it.limitKmh, it.distanceM) }
+            ?: s?.upcoming?.let { Triple(it.radar, it.limitKmh, it.distanceM) }
+        AnimatedVisibility(
+            visible = next != null,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = (unit * 5).dp),
+        ) {
+            next?.let { (radar, radarLimit, distance) ->
+                Row(
+                    Modifier.clip(RoundedCornerShape(50))
+                        .background(if (danger) Red else Color(0xE616161A))
+                        .padding(start = (unit * 2).dp, end = (unit * 4).dp, top = (unit * 2).dp, bottom = (unit * 2).dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(limit.toString(), color = Color.Black, fontSize = if (limit >= 100) 13.sp else 15.sp, fontWeight = FontWeight.Bold)
+                    RadarBadge(radar.type, radarLimit, (unit * 14).dp)
+                    Spacer(Modifier.width((unit * 3).dp))
+                    Text(
+                        pipDistance(distance),
+                        color = Color.White,
+                        fontSize = (unit * 11).sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Clip,
+                    )
                 }
             }
         }
-        val next = alert?.let { it.radar.type.label to it.distanceM } ?: s?.upcoming?.let { it.radar.type.label to it.distanceM }
-        if (next != null) {
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "${next.first} · ${pipDistance(next.second)}",
-                color = Color.White.copy(alpha = if (alert != null) 1f else 0.7f),
-                fontSize = 12.sp,
-                fontWeight = if (alert != null) FontWeight.Bold else FontWeight.Normal,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth(),
-                textAlign = TextAlign.Center,
-            )
+
+        // Speed and limit, big, at the bottom.
+        Row(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = (unit * 6).dp, vertical = (unit * 4).dp),
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column {
+                Text(
+                    speed?.toString() ?: "--",
+                    color = speedColor,
+                    fontSize = (unit * 30).sp,
+                    lineHeight = (unit * 30).sp,
+                    fontWeight = FontWeight.Bold,
+                    style = halo,
+                )
+                Text("km/h", color = Color.White.copy(alpha = 0.6f), fontSize = (unit * 7).sp, style = halo)
+            }
+            if (limit != null) {
+                val sign = (unit * 26).dp
+                Box(
+                    Modifier.padding(bottom = (unit * 3).dp).size(sign).background(Color.White, CircleShape).border(sign / 9, Red, CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        limit.toString(),
+                        color = Color.Black,
+                        fontSize = (unit * if (limit >= 100) 9 else 11).sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+        }
+
+        // Too fast near a radar: pulsing red frame around the whole window.
+        if (danger) {
+            Box(Modifier.fillMaxSize().alpha(frame).border((unit * 2.5f).dp, Red, RoundedCornerShape((unit * 4).dp)))
         }
     }
 }
