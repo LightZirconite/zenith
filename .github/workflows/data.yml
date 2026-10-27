@@ -42,13 +42,9 @@ jobs:
       - name: Radars
         env:
           GH_TOKEN: ${{ github.token }}
+          LUFOP_DB_KEY: ${{ secrets.LUFOP_DB_KEY }}
         run: |
-          # Only a missing Lufop base is acceptable; a failed download must not drop Lufop radars.
-          if gh release view data --json assets -q '.assets[].name' | grep -qx lufop.json; then
-            gh release download data -p lufop.json -D out
-          else
-            echo "pas encore de base Lufop"
-          fi
+          pipeline/lufop_db.sh fetch out/lufop.json
           python pipeline/build_radars.py merge out/osm_radars.json out/lufop.json out/radars.json
 
       - name: Road tiles

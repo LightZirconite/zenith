@@ -25,12 +25,12 @@ core/      Kotlin pur (JVM), testé : géo, Kalman, map-matching HMM, moteur d'a
 app/       Android Compose : DriveService (GPS 1 Hz, premier plan), DriveData (téléchargement/cache),
            DriveScreen, Speaker (TTS FR), Tones, TripRecorder (GPX), Updater (auto-mise à jour).
 pipeline/  Python : build_roads.py (tuiles de limitations), build_radars.py (osm | merge),
-           harvest_lufop.py (base Lufop qui grossit chaque jour).
+           harvest_lufop.py (base Lufop qui grossit chaque jour), lufop_db.sh (base chiffrée).
 .github/workflows/
   release.yml    push sur main touchant l'app → tests + APK signé + release vX (latest)
   build-apk.yml  PR → tests + APK debug
   data.yml       lundi → extrait OSM France → tuiles + osm_radars.json + radars.json
-  radars.yml     chaque jour → récolte Lufop (≤150 requêtes) + fusion → radars.json, lufop.json
+  radars.yml     chaque jour → récolte Lufop (≤150 requêtes) + fusion → radars.json, lufop.json.enc
 ```
 
 ### Release `data` (la « base de données »)
@@ -39,7 +39,7 @@ pipeline/  Python : build_roads.py (tuiles de limitations), build_radars.py (osm
 |---|---|---|
 | `radars.json` | data.yml, radars.yml | Fusion officiel (data.gouv) + OSM + Lufop, lue par l'app |
 | `osm_radars.json` | data.yml | Radars et relations `enforcement` OSM (sens, tronçons) |
-| `lufop.json` | radars.yml | Notre base Lufop : zones du quadrillage + radars vus (`first`, `seen`, `missing`) |
+| `lufop.json.enc` | radars.yml | Notre base Lufop **chiffrée** (AES-256, secret `LUFOP_DB_KEY`) : zones du quadrillage + radars vus (`first`, `seen`, `missing`) |
 | `roads_<i>_<j>.json.gz` | data.yml | Tuiles 0,5° (`i = floor(lat*2)`, `j = floor(lon*2)`) de segments routiers avec limitation |
 | `manifest.json` | data.yml | Liste et tailles des tuiles |
 
@@ -56,6 +56,7 @@ python pipeline/build_roads.py extrait.osm.pbf out/tiles
 python pipeline/build_radars.py osm extrait.osm.pbf out/osm_radars.json
 python pipeline/build_radars.py merge out/osm_radars.json out/lufop.json out/radars.json   # lufop.json peut être "-"
 LUFOP_API_KEY=... python pipeline/harvest_lufop.py out/lufop.json 150
+GH_REPO=LightZirconite/zenith LUFOP_DB_KEY=$(cat ~/.zenith/lufop-db.key) pipeline/lufop_db.sh fetch out/lufop.json
 ```
 
 Tester le pipeline en local sur un petit extrait : `https://download.geofabrik.de/europe/france/corse-latest.osm.pbf` (35 Mo, environ 20 s). `pip install osmium` (pyosmium) n'est nécessaire que pour `build_roads.py` et l'étape `osm`.
@@ -66,6 +67,7 @@ Tester le pipeline en local sur un petit extrait : `https://download.geofabrik.d
 - Pour `:core:test` en local, un JDK portable (Temurin 21) dans un dossier temporaire suffit.
 - L'auteur installe l'app depuis son téléphone via https://github.com/LightZirconite/zenith/releases/latest/download/zenith.apk. L'app se met ensuite à jour seule (`Updater.kt`).
 - Clé de signature : `~/.zenith/` (keystore + mot de passe), copiée dans les secrets `ZENITH_*`. Ne jamais la régénérer : chaque APK doit garder la même signature, sinon les mises à jour échouent.
+- Clé de la base Lufop : `~/.zenith/lufop-db.key`, copiée dans le secret `LUFOP_DB_KEY`. Ne jamais la régénérer ni la changer sans rechiffrer : sans elle, la base accumulée est perdue.
 - Remotes : `origin` = GitHub, `gitea` = miroir perso de l'auteur.
 
 ## Conventions
@@ -103,6 +105,7 @@ Tester le pipeline en local sur un petit extrait : `https://download.geofabrik.d
 - Toutes les sources sont bienvenues. Chacune garde sa trace dans le champ `src` du radar (`gouv`, `osm`, `lufop`, combinées par `+`).
 - Fusion : regroupement à 80 m. La liste officielle fait foi pour la position, le type et la limite ; OSM apporte le sens et les tronçons ; Lufop ajoute ce qui manque et confirme.
 - Ne jamais deviner une limitation à l'aveugle : une route sans tag reste sans limite plutôt que d'afficher un 80 faux dans un village. Les limites déduites (`src` 2) s'affichent avec un anneau gris.
+- **La base Lufop n'est jamais publiée en clair** (dépôt public : la redistribuer pourrait faire couper la clé). Toujours passer par `pipeline/lufop_db.sh`. Une base présente sur la release doit se relire, sinon le job échoue : jamais de redémarrage silencieux à zéro.
 - Le quota Lufop ne doit jamais être dépassé : budget 150/jour dans `radars.yml`, pause de 6,5 s entre deux appels, arrêt à la première erreur.
 
 ## Prochaines étapes connues

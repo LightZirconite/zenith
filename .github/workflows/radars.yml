@@ -2,6 +2,7 @@ name: radars
 
 # Daily: grows our Lufop database within the free quota (secret LUFOP_API_KEY), then merges
 # official list + OSM extract + Lufop into radars.json on the "data" release.
+# The Lufop base is published encrypted (pipeline/lufop_db.sh, secret LUFOP_DB_KEY).
 on:
   schedule:
     - cron: "30 4 * * *"
@@ -27,16 +28,15 @@ jobs:
       - name: Current data
         env:
           GH_TOKEN: ${{ github.token }}
+          LUFOP_DB_KEY: ${{ secrets.LUFOP_DB_KEY }}
         run: |
           mkdir -p out
           # A file that exists on the release must download: a transient failure here would
           # restart the Lufop base from zero and overwrite the accumulated one.
-          assets=$(gh release view data --json assets -q '.assets[].name' 2>/dev/null || true)
-          for f in osm_radars.json lufop.json; do
-            if grep -qx "$f" <<< "$assets"; then
-              gh release download data -p "$f" -D out
-            fi
-          done
+          if gh release view data --json assets -q '.assets[].name' 2>/dev/null | grep -qx osm_radars.json; then
+            gh release download data -p osm_radars.json -D out
+          fi
+          pipeline/lufop_db.sh fetch out/lufop.json
           ls -la out
 
       - name: Lufop harvest
@@ -55,11 +55,11 @@ jobs:
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
+          LUFOP_DB_KEY: ${{ secrets.LUFOP_DB_KEY }}
         run: |
           if ! gh release view data >/dev/null 2>&1; then
             gh release create data --title "Données Zenith" --prerelease --latest=false \
               --notes "Radars (data.gouv.fr, Licence Ouverte + OpenStreetMap, ODbL + Lufop) et limitations de vitesse (OpenStreetMap, ODbL). Mis à jour automatiquement."
           fi
-          files=""
-          for f in out/radars.json out/lufop.json; do test -f "$f" && files="$files $f"; done
-          test -n "$files" && gh release upload data $files --clobber
+          if [ -f out/radars.json ]; then gh release upload data out/radars.json --clobber; fi
+          pipeline/lufop_db.sh publish out/lufop.json

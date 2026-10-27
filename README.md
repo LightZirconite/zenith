@@ -23,6 +23,6 @@ La clé de signature se crée une seule fois avec `scripts/setup-signing.sh` (ga
 GitHub Actions fabrique les données, publiées comme fichiers de la release [`data`](https://github.com/LightZirconite/zenith/releases/tag/data). L'app les télécharge et les garde en cache.
 
 - `data.yml` (chaque lundi) : extrait OpenStreetMap France (Geofabrik) → tuiles de limitations `roads_*.json.gz` + radars OSM `osm_radars.json`, puis `radars.json`.
-- `radars.yml` (chaque jour) : récolte Lufop sous quota dans `lufop.json` (base qui grossit à chaque passage), puis fusion liste officielle data.gouv + OSM + Lufop → `radars.json`.
+- `radars.yml` (chaque jour) : récolte Lufop sous quota dans `lufop.json.enc` (base qui grossit à chaque passage, publiée chiffrée avec le secret `LUFOP_DB_KEY`), puis fusion liste officielle data.gouv + OSM + Lufop → `radars.json`.
 
 La clé Lufop est le secret de dépôt `LUFOP_API_KEY` (Settings → Secrets and variables → Actions). Sans elle, la récolte Lufop est simplement sautée.
