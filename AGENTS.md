@@ -62,6 +62,7 @@ Format d'un segment de tuile : `[id, from, to, oneway, fwd, bwd, src, classe, no
 ```bash
 ./gradlew :core:test                       # tests JVM (fonctionne en local avec un JDK 17+)
 ./gradlew :app:assembleDebug               # nécessite le SDK Android (voir plus bas)
+./gradlew :core:replay --args="trajet.gpx radars.json tuiles/"   # rejoue un trajet partagé depuis l'app
 python pipeline/build_roads.py extrait.osm.pbf out/tiles
 python pipeline/build_radars.py osm extrait.osm.pbf out/osm_radars.json
 python pipeline/build_radars.py merge out/osm_radars.json out/lufop.json out/radars.json   # lufop.json peut être "-"
@@ -160,7 +161,6 @@ Fait : horizon électronique, prochaine limite, date des mobiles Lufop, garde-fo
 2. **Azimut Lufop** : lire le rapport du job `radars` ; au-dessus de 95 % d'accord (direct ou opposé), s'en servir dans `lufop_items`.
 3. **Typage Lufop** : 1 605 radars « fixes » Lufop absents de la liste officielle (frontière, autonomes, leurres ?) ; lire l'histogramme des noms dans le résumé du job `radars` avant de typer plus finement.
 4. **Tronçons** : environ 26 fins de tronçon sans début ; reconstruire le début par l'horizon arrière, reprendre un tronçon en cours après redémarrage.
-5. Outil de replay GPX en ligne de commande (le partage du trajet depuis l'app est fait) : chaque bug réel devient un test.
-6. Radars mobiles Lufop en direct depuis le téléphone (clé saisie dans des réglages, une requête par ~10 km, quota partagé).
-7. Profil moto.
-8. Android Auto (Car App Library).
+5. Radars mobiles Lufop en direct depuis le téléphone (clé saisie dans des réglages, une requête par ~10 km, quota partagé).
+6. Profil moto.
+7. Android Auto (Car App Library).

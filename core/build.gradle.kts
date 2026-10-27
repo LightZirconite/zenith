@@ -23,3 +23,12 @@ dependencies {
 tasks.test {
     useJUnitPlatform()
 }
+
+// ./gradlew :core:replay --args="trajet.gpx [radars.json] [dossier des tuiles]"
+tasks.register<JavaExec>("replay") {
+    group = "zenith"
+    description = "Rejoue un trajet GPX et liste les annonces."
+    mainClass = "zenith.core.ReplayKt"
+    classpath = sourceSets["main"].runtimeClasspath
+    workingDir = rootDir
+}
