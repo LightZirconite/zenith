@@ -65,7 +65,7 @@ class KalmanFilter(
 
         val hasVelocity = fix.speedMps != null && fix.bearingDeg != null && fix.speedMps > 0.5
         if (hasVelocity) {
-            val v = Vec2.fromHeading(fix.bearingDeg!!) * fix.speedMps!!
+            val v = Vec2.fromHeading(fix.bearingDeg) * fix.speedMps
             val rv = 1.0 // (1 m/s)^2
             correct(doubleArrayOf(z.x, z.y, v.x, v.y), doubleArrayOf(r, r, rv, rv), intArrayOf(0, 1, 2, 3))
         } else {
