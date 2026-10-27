@@ -41,7 +41,7 @@ class DriveService : Service(), LocationListener {
     private lateinit var speaker: Speaker
     private lateinit var tones: TonePlayer
     private lateinit var gpsStatus: GpsStatusWatcher
-    private var lastNotified: Pair<Int?, Int?>? = null
+    private var lastNotified: Triple<Int?, Int?, String?>? = null
     private var lastNotifiedAtMs = 0L
     private var lastDangerBeepMs = 0L
 
@@ -128,9 +128,9 @@ class DriveService : Service(), LocationListener {
         super.onDestroy()
     }
 
-    /** Updates the notification when speed or limit changes, at most every 2 s. */
+    /** Updates the notification when speed, limit or next radar changes, at most every 2 s. */
     private fun refreshNotification(s: DriveSnapshot) {
-        val key = s.speedKmh to s.limitKmh
+        val key = Triple(s.speedKmh, s.limitKmh, nextRadarText(s))
         if (key == lastNotified || s.timeMs - lastNotifiedAtMs < 2_000) return
         lastNotified = key
         lastNotifiedAtMs = s.timeMs
@@ -152,7 +152,7 @@ class DriveService : Service(), LocationListener {
         }
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("Zenith actif")
+            .setContentTitle(s?.let(::nextRadarText) ?: "Zenith actif")
             .setContentText(text)
             .setContentIntent(open)
             .addAction(0, "Arrêter", stop)
@@ -160,6 +160,19 @@ class DriveService : Service(), LocationListener {
             .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_NAVIGATION)
             .build()
+    }
+
+    /** "Radar fixe · 1,2 km", rounded to 100 m so the notification does not refresh every second. */
+    private fun nextRadarText(s: DriveSnapshot): String? {
+        val alert = s.alerts.firstOrNull()
+        val next = s.upcoming
+        val (label, distanceM) = when {
+            alert != null -> alert.radar.type.label to alert.distanceM
+            next != null -> next.radar.type.label to next.distanceM
+            else -> return null
+        }
+        val km = "%.1f".format(distanceM / 1_000).replace('.', ',')
+        return "$label · $km km"
     }
 
     private fun createChannel() {

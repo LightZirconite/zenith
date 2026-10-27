@@ -27,7 +27,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(SystemBarStyle.dark(android.graphics.Color.TRANSPARENT), SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
         super.onCreate(savedInstanceState)
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContent {
             val context = LocalContext.current
             val running by DriveState.running.collectAsStateWithLifecycle()
@@ -46,6 +45,11 @@ class MainActivity : ComponentActivity() {
                 if (locationGranted) DriveService.start(context)
             }
 
+            // Screen stays on while driving only.
+            LaunchedEffect(running) {
+                if (running) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
             LaunchedEffect(Unit) { Updater.checkAndDownload(context) }
             // Install right away when parked; while driving the banner waits for a tap.
             LaunchedEffect(update, running) {

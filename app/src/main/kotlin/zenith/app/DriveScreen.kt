@@ -194,7 +194,16 @@ private fun Dashboard(s: DriveSnapshot?) {
         AnimatedVisibility(visible = limit != null, enter = fadeIn(), exit = fadeOut()) {
             Row {
                 Spacer(Modifier.width(20.dp))
-                LimitSign(limit ?: 0, uncertain = s?.limitSource == LimitSource.INFERRED)
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    LimitSign(limit ?: 0, uncertain = s?.limitSource == LimitSource.INFERRED)
+                    val ahead = s?.limitAhead
+                    Text(
+                        ahead?.let { "${it.limitKmh} dans ${distanceText(it.distanceM)}" } ?: " ",
+                        color = Dim,
+                        fontSize = 15.sp,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
             }
         }
     }
@@ -277,7 +286,10 @@ private fun UpcomingStrip(u: UpcomingRadar) {
     ) {
         Text("Prochain", color = Dim, fontSize = 15.sp)
         Spacer(Modifier.width(10.dp))
-        Text(u.radar.type.label, color = Color.White, fontSize = 17.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Column(Modifier.weight(1f)) {
+            Text(u.radar.type.label, color = Color.White, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            u.roadName?.let { Text("sur $it", color = Dim, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+        }
         u.limitKmh?.let { Text("$it · ", color = Dim, fontSize = 17.sp) }
         Text(distanceText(u.distanceM), color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
     }
