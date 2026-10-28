@@ -136,6 +136,9 @@ private enum class HomeView { IDLE, FLIGHT, DRIVE }
 /** The flight lasts at least this long, even when the position comes at once (demo, warm GPS). */
 private const val MIN_FLIGHT_MS = 3_500L
 
+/** The music steps aside for the flight, but not longer than this if the GPS takes its time. */
+private const val MUSIC_AWAY_MAX_MS = 12_000L
+
 /** A position without a trusted speed (indoors) still lands after this wait. */
 private const val WEAK_FIX_WAIT_MS = 15_000L
 
@@ -282,6 +285,12 @@ fun DriveScreen(
                 sound.fadeHum()
             }
         }
+    }
+    // A long search (indoors, cold GPS): the music does not wait for the jump.
+    LaunchedEffect(phase) {
+        if (phase != FlightPhase.SEARCH) return@LaunchedEffect
+        delay(MUSIC_AWAY_MAX_MS)
+        soundScope.launch { sound.musicBack() }
     }
     // Each satellite locked during the search: a soft note, higher each time.
     var heardLocks by remember(running) { mutableIntStateOf(0) }

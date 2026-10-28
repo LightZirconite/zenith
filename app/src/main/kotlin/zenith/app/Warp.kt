@@ -55,6 +55,9 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -414,8 +417,12 @@ class WarpSound(context: Context) {
         musicAway = false
         music.acquire()
         music.release(pause = true, holdMs = 0)
-        delay(MUSIC_RISE_MS)
-        music.release(holdMs = 0)
+        // Cut short or not, the music always ends up back at its level.
+        try {
+            delay(MUSIC_RISE_MS)
+        } finally {
+            music.release(holdMs = 0)
+        }
     }
 
     /** Flight cut short: the music comes back at once. */
@@ -567,13 +574,24 @@ class WarpSound(context: Context) {
     }
 }
 
-/** Sounds of the flight for this screen, built once, released with it (the music given back). */
+/**
+ * Sounds of the flight for this screen, built once, released with it. The music is given back as
+ * soon as the screen goes off or away: the flight is not watched, nothing to step aside for.
+ */
 @Composable
 fun rememberWarpSound(): WarpSound {
     val context = LocalContext.current
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
     val sound = remember { WarpSound(context) }
     LaunchedEffect(sound) { sound.prepare() }
-    DisposableEffect(sound) { onDispose { sound.release() } }
+    DisposableEffect(sound, lifecycle) {
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) sound.musicNow() }
+        lifecycle.addObserver(observer)
+        onDispose {
+            lifecycle.removeObserver(observer)
+            sound.release()
+        }
+    }
     return sound
 }
 
