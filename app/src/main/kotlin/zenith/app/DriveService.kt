@@ -200,6 +200,7 @@ class DriveService : Service(), LocationListener {
                             speaker.say(
                                 if (raining) "Pluie, limites abaissées" else "Fin de la pluie, limites normales",
                                 delayMs = tones.durationMs(Tone.CHIME) + 80,
+                                pauseMusic = s.pauseMusic,
                             )
                         }
                     }
@@ -307,13 +308,20 @@ class DriveService : Service(), LocationListener {
             is AlertEvent.ZoneLeft -> null
         }
         tone?.let(tones::play)
-        if (!UserSettings.state.value.voice) return
-        Announcer.text(event)?.let { speaker.say(it, delayMs = tone?.let(tones::durationMs)?.plus(80) ?: 0) }
+        val settings = UserSettings.state.value
+        if (!settings.voice) return
+        // What changes the driver's speed now goes first, dropping older announcements still queued.
+        val urgent = event is AlertEvent.Brake || (event is AlertEvent.Overspeed && event.level == OverspeedLevel.WARN) ||
+            (event is AlertEvent.Passed && event.wouldFlash)
+        Announcer.text(event)?.let {
+            speaker.say(it, delayMs = tone?.let { t -> tones.durationMs(t) + 80 } ?: 0, urgent = urgent, pauseMusic = settings.pauseMusic)
+        }
     }
 
     /** Like Coyote: while over the limit near a radar, beeps get faster as it gets closer. */
     private fun dangerBeep(s: DriveSnapshot) {
         val alert = s.alerts.firstOrNull { it.overLimit } ?: return
+        if (speaker.speaking) return // never over the voice
         val interval = when {
             alert.distanceM < 200 -> 500L
             alert.distanceM < 500 -> 1_000L

@@ -78,6 +78,12 @@ fun SettingsScreen(
                 settings.voice,
             ) { on -> onChange { it.copy(voice = on) } }
             Toggle(
+                "Musique en pause pendant la voix",
+                "Spotify, YouTube ou la radio s'arrêtent le temps d'une annonce puis reprennent, pour tout comprendre même en " +
+                    "Bluetooth. Désactivé : la musique baisse seulement. Les bips, eux, baissent toujours la musique.",
+                settings.pauseMusic,
+            ) { on -> onChange { it.copy(pauseMusic = on) } }
+            Toggle(
                 "Arrêt automatique",
                 "Pour la batterie : Zenith s'arrête seul quand la voiture est garée depuis 10 minutes, quand tu repars à pied " +
                     "ou à l'intérieur sans GPS. Jamais sur autoroute ni pendant un bouchon. Avec ta voiture choisie ci-dessous, " +

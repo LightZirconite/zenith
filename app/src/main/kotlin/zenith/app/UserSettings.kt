@@ -12,6 +12,8 @@ data class SettingsState(
     val raining: Boolean = false,
     /** False: alert tones only, no voice. */
     val voice: Boolean = true,
+    /** The music pauses while the voice speaks (else it only gets quieter). */
+    val pauseMusic: Boolean = true,
     /** Battery saver: a drive started by hand ends by itself once the car is parked. */
     val autoStop: Boolean = true,
     /** Drive started by itself when the phone starts riding in a vehicle (activity recognition). */
@@ -42,6 +44,7 @@ object UserSettings {
             // Rain is not kept from one drive to the next: it is a quick toggle for today.
             raining = false,
             voice = p.getBoolean("voice", true),
+            pauseMusic = p.getBoolean("pause_music", true),
             autoStop = p.getBoolean("auto_stop", true),
             autoRain = p.getBoolean("auto_rain", true),
             motionStart = p.getBoolean("motion_start", true),
@@ -58,6 +61,7 @@ object UserSettings {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
             putBoolean("probationary", next.probationary)
             putBoolean("voice", next.voice)
+            putBoolean("pause_music", next.pauseMusic)
             putBoolean("auto_stop", next.autoStop)
             putBoolean("auto_rain", next.autoRain)
             putBoolean("motion_start", next.motionStart)
