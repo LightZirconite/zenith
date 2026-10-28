@@ -38,17 +38,9 @@ Ensuite, Zenith se met à jour tout seul.
 
 ## Android Auto
 
-Sur l'écran de la voiture, Zenith affiche la même chose que sur le téléphone : la carte, ta vitesse, la limite et les alertes. L'ouvrir sur la voiture démarre les alertes sur le téléphone, et la conduite s'arrête quand Android Auto se déconnecte. Si Waze ou Maps occupe l'écran, le prochain radar s'affiche par-dessus.
+Les alertes passent déjà par la voiture : bips et voix sortent sur ses haut-parleurs, même avec Waze ou Maps à l'écran.
 
-Zenith ne vient pas du Play Store : Android Auto ne le montre qu'après ces réglages, à faire une seule fois.
-
-1. Sur le téléphone : **Paramètres** → cherche **Android Auto** et ouvre-le (ou, dans Zenith : Réglages → Android Auto → **Ouvrir Android Auto**).
-2. Tout en bas, touche une dizaine de fois **Version** et accepte : le mode développeur s'active.
-3. **⋮** en haut à droite → **Paramètres pour les développeurs** → coche **Sources inconnues**.
-4. Reviens aux réglages d'Android Auto → **Personnaliser le lanceur** (rubrique Écran) : coche Zenith.
-5. Branche le téléphone et touche **Zenith** sur l'écran de la voiture. À chaque branchement, Android Auto rouvre ensuite seul la dernière appli de navigation utilisée.
-
-Zenith n'apparaît pas ? Débranche, force l'arrêt d'Android Auto (Infos de l'appli → **Forcer l'arrêt**), puis rebranche.
+L'écran Zenith pour la voiture (carte, vitesse, limite, alertes) est prêt dans l'app, mais Android Auto ne l'affiche pas : Google n'accepte ce type d'appli que si elle vient du Play Store. Le réglage « Sources inconnues » des paramètres développeur d'Android Auto ne vaut pas pour elle ([documentation Google](https://developer.android.com/training/cars/testing)).
 
 ## Autorisations
 

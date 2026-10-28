@@ -206,7 +206,6 @@ class MainActivity : ComponentActivity() {
                     permissions = permissions,
                     onMotionPermission = onMotion,
                     androidAutoConnected = carConnected,
-                    onOpenAndroidAuto = { AndroidAuto.openSettings(context) },
                 )
             } else if (showWelcome) {
                 Onboarding(

@@ -12,8 +12,6 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Typeface
-import android.net.Uri
-import android.provider.Settings
 import android.util.Log
 import androidx.car.app.AppManager
 import androidx.car.app.CarAppService
@@ -53,9 +51,6 @@ import kotlin.math.roundToInt
  * Android Auto connecting starts the drive on the phone; disconnecting ends the drive it started.
  */
 object AndroidAuto {
-    /** Android Auto's package, for its settings. */
-    private const val PACKAGE = "com.google.android.projection.gearhead"
-
     private val _connected = MutableStateFlow(false)
     private val _screenVisible = MutableStateFlow(false)
     private var watching = false
@@ -90,18 +85,6 @@ object AndroidAuto {
 
     internal fun screen(visible: Boolean) {
         _screenVisible.value = visible
-    }
-
-    /** Android Auto's settings (developer mode, unknown sources, launcher), as close as an app can get. */
-    fun openSettings(context: Context) {
-        val tries = listOfNotNull(
-            Intent(Intent.ACTION_APPLICATION_PREFERENCES).setPackage(PACKAGE),
-            context.packageManager.getLaunchIntentForPackage(PACKAGE),
-            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$PACKAGE")),
-        )
-        for (intent in tries) {
-            if (runCatching { context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess) return
-        }
     }
 }
 

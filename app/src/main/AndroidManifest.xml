@@ -40,8 +40,6 @@
         <package android:name="com.spotify.music" />
         <package android:name="com.google.android.youtube" />
         <package android:name="com.google.android.apps.youtube.music" />
-        <!-- Settings: opens Android Auto's own settings (unknown sources for Zenith). -->
-        <package android:name="com.google.android.projection.gearhead" />
     </queries>
 
     <application
