@@ -12,6 +12,8 @@ data class SettingsState(
     val raining: Boolean = false,
     /** False: alert tones only, no voice. */
     val voice: Boolean = true,
+    /** Battery saver: a drive started by hand ends by itself once the car is parked. */
+    val autoStop: Boolean = true,
     /** Car paired for the automatic start (CompanionDeviceManager association), with its name. */
     val carAssociationId: Int? = null,
     val carName: String? = null,
@@ -36,6 +38,7 @@ object UserSettings {
             // Rain is not kept from one drive to the next: it is a quick toggle for today.
             raining = false,
             voice = p.getBoolean("voice", true),
+            autoStop = p.getBoolean("auto_stop", true),
             carAssociationId = p.getInt("car_id", -1).takeIf { it >= 0 },
             carName = p.getString("car_name", null),
         )
@@ -49,6 +52,7 @@ object UserSettings {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
             putBoolean("probationary", next.probationary)
             putBoolean("voice", next.voice)
+            putBoolean("auto_stop", next.autoStop)
             putInt("car_id", next.carAssociationId ?: -1)
             putString("car_name", next.carName)
         }

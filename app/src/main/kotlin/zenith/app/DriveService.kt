@@ -13,6 +13,7 @@ import android.content.pm.ServiceInfo
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.os.BatteryManager
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
@@ -36,6 +37,7 @@ import zenith.core.DrivingSession
 import zenith.core.GpsFix
 import zenith.core.LatLon
 import zenith.core.OverspeedLevel
+import zenith.core.ParkDetector
 import zenith.core.RadarIndex
 import java.util.concurrent.Executors
 
@@ -58,6 +60,8 @@ class DriveService : Service(), LocationListener {
     private var data: DriveData? = null
     private var recorder: TripRecorder? = null
     private var gpsStatus: GpsStatusWatcher? = null
+    private var parking: ParkDetector? = null
+    private var ending = false
     private var started = false
     private var demo = false
 
@@ -126,6 +130,7 @@ class DriveService : Service(), LocationListener {
         data = live
         session = DrivingSession({ live.network }, emptyList())
         recorder = TripRecorder(this)
+        parking = ParkDetector(System.currentTimeMillis())
         scope.launch { live.status.collect(DriveState::data) }
         live.loadRadars { pack ->
             radarIndex = RadarIndex(pack.radars)
@@ -150,6 +155,7 @@ class DriveService : Service(), LocationListener {
                 delay(1_000)
                 val lost = System.currentTimeMillis() - lastFixWallMs
                 if (lastFixWallMs > 0 && lost > 2_500) guarded { session.coast(lastFixTimeMs + lost)?.let(::show) }
+                if (parking?.onSilence(System.currentTimeMillis()) == true) endByItself()
             }
         }
     }
@@ -180,8 +186,23 @@ class DriveService : Service(), LocationListener {
             lastFixTimeMs = fix.timeMs
             lastFixWallMs = wallMs
             process(fix)
+            val s = DriveState.snapshot.value
+            if (parking?.onFix(wallMs, fix.position, s?.speedKmh, s?.road?.segment?.roadClass, charging()) == true) endByItself()
         }
     }
+
+    /**
+     * Battery saver: a drive started by hand ends by itself once over (car parked, walking away,
+     * indoors without GPS). A drive started by the car ends when the car disconnects instead.
+     */
+    private fun endByItself() {
+        if (auto || ending || !UserSettings.state.value.autoStop) return
+        ending = true
+        Log.i("Zenith", "drive over: stopping by itself")
+        stopSelf()
+    }
+
+    private fun charging() = runCatching { getSystemService(BatteryManager::class.java).isCharging }.getOrDefault(false)
 
     /** Drive thread only. */
     private fun process(fix: GpsFix) = guarded { session.process(fix)?.let(::show) }

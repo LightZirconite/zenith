@@ -72,6 +72,13 @@ fun SettingsScreen(
                 "Désactivé : seulement les bips, sans voix.",
                 settings.voice,
             ) { on -> onChange { it.copy(voice = on) } }
+            Toggle(
+                "Arrêt automatique",
+                "Pour la batterie : Zenith s'arrête seul quand la voiture est garée depuis 10 minutes, quand tu repars à pied " +
+                    "ou à l'intérieur sans GPS. Jamais sur autoroute ni pendant un bouchon. Avec ta voiture choisie ci-dessous, " +
+                    "il démarre et s'arrête aussi seul avec elle.",
+                settings.autoStop,
+            ) { on -> onChange { it.copy(autoStop = on) } }
             Card {
                 Text("Démarrage automatique en voiture", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(4.dp))
