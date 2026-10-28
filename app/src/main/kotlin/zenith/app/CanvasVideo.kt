@@ -30,13 +30,22 @@ import java.io.File
  * the video cannot play, never a crash.
  */
 @Composable
-fun CanvasVideo(file: File, playing: Boolean, modifier: Modifier = Modifier, onShown: () -> Unit = {}, onFailed: () -> Unit = {}) {
+fun CanvasVideo(
+    file: File,
+    playing: Boolean,
+    modifier: Modifier = Modifier,
+    /** Where the loop should stand now to follow the song (null: unknown, the loop runs freely). */
+    loopPositionMs: (loopMs: Long) -> Long? = { null },
+    onShown: () -> Unit = {},
+    onFailed: () -> Unit = {},
+) {
     val shown by rememberUpdatedState(onShown)
     val failed by rememberUpdatedState(onFailed)
+    val follow by rememberUpdatedState(loopPositionMs)
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     // A new file is a new view and a new player: AndroidView never calls its factory twice.
     key(file) {
-        val loop = remember { LoopPlayer(file, { shown() }, { failed() }) }
+        val loop = remember { LoopPlayer(file, { shown() }, { failed() }, { follow(it) }) }
         DisposableEffect(loop, lifecycle) {
             // Brought up to the current state at once (ON_START if already started).
             val observer = LifecycleEventObserver { _, event ->
@@ -58,8 +67,12 @@ fun CanvasVideo(file: File, playing: Boolean, modifier: Modifier = Modifier, onS
 }
 
 /** Owns the TextureView and its MediaPlayer; main thread only, every call safe in any state. */
-private class LoopPlayer(private val file: File, private val onShown: () -> Unit, private val onFailed: () -> Unit) :
-    TextureView.SurfaceTextureListener {
+private class LoopPlayer(
+    private val file: File,
+    private val onShown: () -> Unit,
+    private val onFailed: () -> Unit,
+    private val loopPosition: (Long) -> Long?,
+) : TextureView.SurfaceTextureListener {
     private var view: TextureView? = null
     private var surface: Surface? = null
     private var player: MediaPlayer? = null
@@ -140,13 +153,23 @@ private class LoopPlayer(private val file: File, private val onShown: () -> Unit
         if (!prepared) return
         try {
             if (started && playing) {
-                if (!p.isPlaying) p.start()
+                if (!p.isPlaying) {
+                    align(p)
+                    p.start()
+                }
             } else if (p.isPlaying) {
                 p.pause()
             }
         } catch (e: Exception) {
             fail(e.toString())
         }
+    }
+
+    /** Puts the loop where it would be had it started with the song (after a pause, back in the app). */
+    private fun align(p: MediaPlayer) {
+        val loopMs = p.duration.toLong().takeIf { it > 0 } ?: return
+        val target = loopPosition(loopMs) ?: return
+        if (kotlin.math.abs(p.currentPosition - target) > ALIGN_SLACK_MS) p.seekTo(target.toInt())
     }
 
     /** Fills the view like ContentScale.Crop: the TextureView stretches the video, the matrix undoes it. */
@@ -173,5 +196,10 @@ private class LoopPlayer(private val file: File, private val onShown: () -> Unit
         failed = true
         releasePlayer()
         onFailed()
+    }
+
+    private companion object {
+        /** Closer than this, a seek would only show a jump. */
+        const val ALIGN_SLACK_MS = 250
     }
 }

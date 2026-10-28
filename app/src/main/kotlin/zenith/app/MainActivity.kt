@@ -83,9 +83,12 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            // Activity granted: the location "all the time" is asked right after, without another tap.
+            var chainBackground by remember { mutableStateOf(false) }
             val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
                 permissionResults++
                 if (!showWelcome && result[Manifest.permission.ACCESS_FINE_LOCATION] == true) DriveService.start(context)
+                if (result[Manifest.permission.ACTIVITY_RECOGNITION] == true) chainBackground = true
             }
             // "Démarrage en roulant": activity recognition first, then the location "all the time".
             val onMotion = {
@@ -96,6 +99,47 @@ class MainActivity : ComponentActivity() {
                     // Android 11+ answers this one with its own settings page ("Toujours autoriser").
                     !permissions.backgroundLocation && Build.VERSION.SDK_INT >= 29 ->
                         requestOrSettings(arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION), { launcher.launch(it) }, details)
+                    else -> Unit
+                }
+            }
+            LaunchedEffect(chainBackground, permissions) {
+                if (chainBackground) {
+                    chainBackground = false
+                    if (permissions.activity && !permissions.backgroundLocation) onMotion()
+                }
+            }
+            val onLocation = {
+                requestOrSettings(Permissions.locationPermissions(), { launcher.launch(it) }) {
+                    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
+                }
+            }
+            val onNotifications = {
+                val permission = Permissions.notificationPermission()
+                val screen = { Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName) }
+                if (permission == null) openSettings(screen()) else requestOrSettings(arrayOf(permission), { launcher.launch(it) }, screen)
+            }
+            // Notification access, Android 13+ for an app installed outside a store: the first try is
+            // blocked, then the app info screen offers the unlock, then the switch works.
+            var mediaStep by remember { mutableIntStateOf(prefs.getInt(KEY_MEDIA_STEP, 0)) }
+            val onMedia = {
+                if (Build.VERSION.SDK_INT >= 33 && mediaStep == 1) {
+                    openSettings(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+                    mediaStep = 2
+                } else {
+                    openSettings(NowPlaying.accessIntent(context))
+                    if (Build.VERSION.SDK_INT >= 33) mediaStep = 1
+                }
+                prefs.edit { putInt(KEY_MEDIA_STEP, mediaStep) }
+            }
+            // The welcome screen's big button: the next missing permission, in the order that asks least.
+            val onNext = {
+                when {
+                    !permissions.location -> onLocation()
+                    !permissions.notifications -> onNotifications()
+                    !permissions.battery -> openSettings(Permissions.batteryIntent(context))
+                    !permissions.installs -> openSettings(Permissions.installsIntent(context))
+                    permissions.motionAvailable && settings.motionStart && !permissions.motion -> onMotion()
+                    !permissions.media -> onMedia()
                     else -> Unit
                 }
             }
@@ -152,7 +196,7 @@ class MainActivity : ComponentActivity() {
                     onBack = { showSettings = false },
                     onShareTrip = remember(resumeCount) { latestTrip(context) }?.let { trip -> { shareTrip(trip) } },
                     mediaAllowed = permissions.media,
-                    onAllowMedia = { openSettings(NowPlaying.accessIntent(context)) },
+                    onAllowMedia = onMedia,
                     permissions = permissions,
                     onMotionPermission = onMotion,
                 )
@@ -161,21 +205,14 @@ class MainActivity : ComponentActivity() {
                     permissions = permissions,
                     returning = onboarded,
                     motionWanted = settings.motionStart,
-                    onLocation = {
-                        requestOrSettings(Permissions.locationPermissions(), { launcher.launch(it) }) {
-                            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
-                        }
-                    },
-                    onNotifications = {
-                        val permission = Permissions.notificationPermission()
-                        val settings = { Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName) }
-                        if (permission == null) openSettings(settings()) else requestOrSettings(arrayOf(permission), { launcher.launch(it) }, settings)
-                    },
+                    onLocation = onLocation,
+                    onNotifications = onNotifications,
                     onInstalls = { openSettings(Permissions.installsIntent(context)) },
                     onBattery = { openSettings(Permissions.batteryIntent(context)) },
                     onMotion = onMotion,
-                    onMedia = { openSettings(NowPlaying.accessIntent(context)) },
-                    onMediaUnlock = { openSettings(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) },
+                    onMedia = onMedia,
+                    mediaStep = mediaStep,
+                    onNext = onNext,
                     onDone = {
                         prefs.edit { putBoolean(KEY_ONBOARDED, true) }
                         onboarded = true
@@ -287,5 +324,6 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val ACTION_START_DRIVE = "zenith.app.START_DRIVE"
         private const val KEY_ONBOARDED = "onboarded"
+        private const val KEY_MEDIA_STEP = "media_step"
     }
 }

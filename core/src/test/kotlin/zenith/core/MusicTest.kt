@@ -57,4 +57,15 @@ class MusicTest {
         assertNull(PlayerActions.like(listOf("TURN_SHUFFLE_ON", "SEEK_15_SECONDS_BACK")))
         assertNull(PlayerActions.like(emptyList()))
     }
+
+    @Test
+    fun `canvas loop follows the track position`() {
+        val p = PlaybackProgress(positionMs = 20_000, updatedAtMs = 1_000, speed = 1f, durationMs = 180_000)
+        // 20 s into the song with a 6 s loop: 2 s into the fourth loop; 2.5 s later, 4.5 s.
+        assertEquals(2_000L, p.loopPositionAt(1_000, playing = true, loopMs = 6_000))
+        assertEquals(4_500L, p.loopPositionAt(3_500, playing = true, loopMs = 6_000))
+        // Paused: the position does not move.
+        assertEquals(2_000L, p.loopPositionAt(9_000, playing = false, loopMs = 6_000))
+        assertEquals(0L, p.loopPositionAt(1_000, playing = true, loopMs = 0))
+    }
 }

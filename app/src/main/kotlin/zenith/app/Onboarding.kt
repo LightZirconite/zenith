@@ -108,8 +108,10 @@ fun Onboarding(
     motionWanted: Boolean = true,
     onMotion: () -> Unit = {},
     onMedia: () -> Unit = {},
-    /** App info screen, where Android 13+ hides "Autoriser les paramètres restreints". */
-    onMediaUnlock: () -> Unit = {},
+    /** Where the notification access stands on Android 13+: 0 activate, 1 unlock (blocked), 2 activate again. */
+    mediaStep: Int = 0,
+    /** The big button: the next missing permission, one after the other. */
+    onNext: () -> Unit = {},
 ) {
     val missing = permissions.missing(motionWanted)
     Column(
@@ -171,41 +173,43 @@ fun Onboarding(
                     onClick = onMotion,
                 )
             }
+            // Android 13+ blocks this one for apps installed outside a store: it shows the unlock
+            // option only after a first try, so the button walks through the three steps.
+            val unlock = Build.VERSION.SDK_INT >= 33 && mediaStep == 1
             Step(
                 title = "Musique",
-                text = "Titre et commandes de Spotify, YouTube ou ton lecteur pendant la conduite, sans compte. Android appelle cela " +
-                    "« accès aux notifications » : Zenith n'y lit que le lecteur. Touche Autoriser et active Zenith." +
-                    if (Build.VERSION.SDK_INT >= 33) {
-                        " Si c'est grisé (appli installée hors Play Store) : « Débloquer », puis ⋮ en haut à droite → " +
-                            "Autoriser les paramètres restreints, et recommence."
-                    } else {
-                        ""
-                    },
+                text = when {
+                    unlock -> "Android l'a bloqué ? Touche Débloquer : ⋮ en haut à droite → « Autoriser les paramètres restreints », " +
+                        "valide avec ton code, puis reviens ici."
+                    mediaStep == 2 -> "Débloqué : touche Activer, puis active Zenith."
+                    else -> "Titre et commandes de Spotify, YouTube ou ton lecteur pendant la conduite, sans compte. Android appelle " +
+                        "cela « accès aux notifications » : Zenith n'y lit que le lecteur. Touche Activer, puis active Zenith."
+                },
                 granted = permissions.media,
                 onClick = onMedia,
-                secondary = if (Build.VERSION.SDK_INT >= 33) "Débloquer" to onMediaUnlock else null,
+                action = if (unlock) "Débloquer" else "Activer",
             )
         }
         Spacer(Modifier.height(12.dp))
+        // One button for everything: each tap opens the next missing permission.
         Text(
             when (missing) {
                 0 -> "C'est parti"
-                1 -> "Encore une autorisation"
-                else -> "Encore $missing autorisations"
+                1 -> "Continuer · dernière autorisation"
+                else -> "Continuer · encore $missing"
             },
-            color = if (missing == 0) Color.Black else Dim,
+            color = Color.Black,
             fontSize = 18.sp,
             fontWeight = FontWeight.SemiBold,
             textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
-                .background(if (missing == 0) Color.White else Surface)
-                .clickable(enabled = missing == 0, onClick = onDone).padding(vertical = 18.dp),
+            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color.White)
+                .clickable(onClick = if (missing == 0) onDone else onNext).padding(vertical = 18.dp),
         )
     }
 }
 
 @Composable
-private fun Step(title: String, text: String, granted: Boolean, onClick: () -> Unit, secondary: Pair<String, () -> Unit>? = null) {
+private fun Step(title: String, text: String, granted: Boolean, onClick: () -> Unit, action: String = "Autoriser") {
     Row(
         Modifier.fillMaxWidth().padding(bottom = 12.dp).clip(RoundedCornerShape(20.dp)).background(Surface)
             .clickable(enabled = !granted, onClick = onClick).padding(18.dp),
@@ -215,16 +219,6 @@ private fun Step(title: String, text: String, granted: Boolean, onClick: () -> U
             Text(title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(4.dp))
             Text(text, color = Color.White.copy(alpha = 0.75f), fontSize = 14.sp)
-            if (!granted && secondary != null) {
-                Text(
-                    secondary.first,
-                    color = Accent,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(top = 6.dp).clip(RoundedCornerShape(50)).clickable(onClick = secondary.second)
-                        .padding(vertical = 6.dp),
-                )
-            }
         }
         Spacer(Modifier.width(14.dp))
         if (granted) {
@@ -233,7 +227,7 @@ private fun Step(title: String, text: String, granted: Boolean, onClick: () -> U
             }
         } else {
             Text(
-                "Autoriser",
+                action,
                 color = Color.White,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold,
