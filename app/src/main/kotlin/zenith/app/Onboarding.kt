@@ -151,10 +151,12 @@ private fun Step(title: String, text: String, granted: Boolean, required: Boolea
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
+            // The label is measured first and stays on one line; a long title wraps in what is left
+            // (it used to take the whole width and squeeze the label into one letter per line).
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text(title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f, fill = false))
                 Spacer(Modifier.width(8.dp))
-                Text(if (required) "obligatoire" else "conseillé", color = Dim, fontSize = 13.sp)
+                Text(if (required) "obligatoire" else "conseillé", color = Dim, fontSize = 13.sp, maxLines = 1, softWrap = false)
             }
             Spacer(Modifier.height(4.dp))
             Text(text, color = Color.White.copy(alpha = 0.75f), fontSize = 14.sp)
