@@ -101,6 +101,8 @@ fun DriveScreen(
     onMediaPrevious: () -> Unit = {},
     onMediaPlayPause: () -> Unit = {},
     onMediaNext: () -> Unit = {},
+    /** One line on the home screen pointing to a setting still waiting for a permission. */
+    hint: String? = null,
 ) {
     val showMap = running && snapshot != null
     Box(Modifier.fillMaxSize().background(Bg)) {
@@ -120,7 +122,7 @@ fun DriveScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 // A little lower than the middle, so the car arrow on the map stays clear.
-                if (running) Dashboard(snapshot, Modifier.padding(top = if (showMap) 72.dp else 0.dp)) else Idle(data, onDemo)
+                if (running) Dashboard(snapshot, Modifier.padding(top = if (showMap) 72.dp else 0.dp)) else Idle(data, onDemo, hint, onOpenSettings)
             }
             AlertArea(snapshot.takeIf { running })
             Spacer(Modifier.height(12.dp))
@@ -254,7 +256,7 @@ private fun UpdateBanner(update: UpdateState, canInstall: Boolean, onInstall: ()
 }
 
 @Composable
-private fun Idle(data: DataStatus, onDemo: () -> Unit) {
+private fun Idle(data: DataStatus, onDemo: () -> Unit, hint: String? = null, onHint: () -> Unit = {}) {
     // Logo breathing softly, with a red glow behind the needle.
     val breath = rememberInfiniteTransition(label = "logo")
     val scale by breath.animateFloat(0.96f, 1.04f, infiniteRepeatable(tween(2_200), RepeatMode.Reverse), label = "scale")
@@ -284,6 +286,15 @@ private fun Idle(data: DataStatus, onDemo: () -> Unit) {
         fontSize = 16.sp,
         textAlign = TextAlign.Center,
     )
+    if (hint != null) {
+        Text(
+            hint,
+            color = Color(0xFF0A84FF),
+            fontSize = 14.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = 14.dp).clip(RoundedCornerShape(12.dp)).clickable(onClick = onHint).padding(8.dp),
+        )
+    }
 }
 
 /** Shortcuts to the navigation apps installed: Zenith keeps alerting from behind them. */

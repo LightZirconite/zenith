@@ -199,6 +199,12 @@ class MainActivity : ComponentActivity() {
                     onMediaPrevious = NowPlaying::previous,
                     onMediaPlayPause = NowPlaying::playPause,
                     onMediaNext = NowPlaying::next,
+                    hint = when {
+                        permissions.motionAvailable && settings.motionStart && !permissions.motion ->
+                            "Réglages → Démarrage en roulant : Zenith démarrera seul en voiture"
+                        !permissions.media -> "Réglages → Musique : Spotify et ton lecteur pendant la conduite"
+                        else -> null
+                    },
                 )
             }
         }
