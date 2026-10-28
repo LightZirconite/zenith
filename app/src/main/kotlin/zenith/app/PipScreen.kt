@@ -53,10 +53,9 @@ private val Red = Color(0xFFFF3B30)
  * Picture-in-picture window shown over Waze or Maps while driving: Zenith in miniature. The map
  * fills the window; the next radar sits on top, the speed and the limit at the bottom. Everything
  * scales with the window size. Over the limit near a radar, a red frame pulses.
- * While a Spotify Canvas plays ([canvas] on), the window shows both, like the drive screen: the
- * Canvas lies under the map, and the map melts into it from the middle down, a true crossfade
- * (one fades out exactly as the other shows), so no dark band ever parts them. Without a canvas
- * (other players, no canvas for the track), the map fills the window.
+ * While a Spotify Canvas plays ([canvas] on), it fills the window behind the map, which stays
+ * whole and turns barely see-through toward the bottom: the Canvas only colors it from behind,
+ * the map always readable (wish of the author). The map always fills the window.
  */
 @Composable
 fun PipScreen(
@@ -81,7 +80,7 @@ fun PipScreen(
         val video = rememberCanvas(media?.spotifyTrackId, canvas)
         var videoShown by remember(video) { mutableStateOf(false) }
         var videoFailed by remember(video) { mutableStateOf(false) }
-        // The map gives way only once the Canvas shows its first frame: never onto black.
+        // The Canvas shows through only once its first frame is up: never onto black.
         val split = video != null && videoShown && !videoFailed
         val blend by animateFloatAsState(if (split) 1f else 0f, tween(900), label = "pipBlend")
         video?.takeIf { !videoFailed }?.let { v ->
@@ -92,7 +91,7 @@ fun PipScreen(
                 onShown = { videoShown = true },
                 onFailed = { videoFailed = true },
                 // Its top edge stays under the part of the map that never fades.
-                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(1f - MELT_FROM + 0.02f),
+                modifier = Modifier.fillMaxSize(),
             )
         }
         DriveMap(
@@ -101,7 +100,7 @@ fun PipScreen(
             zones,
             Modifier.fillMaxSize().then(if (blend > 0f) Modifier.verticalFade(MeltStops.map { (y, a) -> y to 1f - blend * (1f - a) }) else Modifier),
             // Split: the car rides in the part of the map that stays.
-            carAt = if (split) 0.31 else 0.5,
+            carAt = 0.5,
             overlay = PipMapShade,
         )
         Box(Modifier.fillMaxSize().background(PipBottomShade))
@@ -168,13 +167,12 @@ fun PipScreen(
 }
 
 /** The map is whole above this height fraction; below, it melts into the Canvas. */
-private const val MELT_FROM = 0.4f
 
 /**
- * Opacity of the map along the window's height once split: whole down to [MELT_FROM], then a
- * smoothstep down to nothing at 85 %, so the eye finds no edge where the map ends.
+ * Opacity of the map once a Canvas plays behind it: the map stays the window, whole at the top and
+ * barely see-through lower down, so the Canvas only colors it from behind, never covering a road.
  */
-private val MeltStops = listOf(0f to 1f, MELT_FROM to 1f, 0.51f to 0.84f, 0.62f to 0.5f, 0.74f to 0.16f, 0.85f to 0f, 1f to 0f)
+private val MeltStops = listOf(0f to 1f, 0.35f to 0.92f, 1f to 0.68f)
 
 /** The map, calmer than on the drive screen, darker under the radar pill at the top. */
 private val PipMapShade = Brush.verticalGradient(
