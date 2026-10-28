@@ -119,7 +119,8 @@ fun SettingsScreen(
                 Spacer(Modifier.height(4.dp))
                 Text(
                     if (mediaAllowed) {
-                        "Le titre en cours (Spotify, Deezer, YouTube Music…) et ses commandes s'affichent sous les alertes pendant la conduite."
+                        "Le titre en cours (Spotify, YouTube, Deezer…), sa progression et ses commandes s'affichent sous les alertes " +
+                            "pendant la conduite. Une touche sur le titre ouvre le lecteur."
                     } else {
                         "Titre en cours et commandes de Spotify ou de ton lecteur, sous les alertes. Sans compte ni clé. Android appelle " +
                             "cela « accès aux notifications » : Zenith n'y lit que le lecteur de musique. Si l'option est grisée : " +
@@ -140,6 +141,13 @@ fun SettingsScreen(
                     )
                 }
             }
+            Toggle(
+                "Canvas Spotify",
+                "La courte vidéo en boucle de certains titres Spotify, derrière la carte Musique et dans la petite fenêtre. " +
+                    "Services gratuits non officiels (Spicy Lyrics, AuraMusic) : peut cesser de marcher. Environ 3 Mo par " +
+                    "titre, gardés en cache. Sinon, la pochette floutée.",
+                settings.spotifyCanvas,
+            ) { on -> onChange { it.copy(spotifyCanvas = on) } }
             if (onShareTrip != null) {
                 Card {
                     Text("Dernier trajet", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)

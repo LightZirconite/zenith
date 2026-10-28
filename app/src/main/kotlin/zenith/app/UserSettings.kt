@@ -23,6 +23,8 @@ data class SettingsState(
     /** Car paired for the automatic start (CompanionDeviceManager association), with its name. */
     val carAssociationId: Int? = null,
     val carName: String? = null,
+    /** Spotify Canvas behind the music card and in picture-in-picture (unofficial free services). */
+    val spotifyCanvas: Boolean = true,
 ) {
     val profile: DriverProfile get() = DriverProfile(probationary = probationary, raining = raining)
 }
@@ -49,6 +51,7 @@ object UserSettings {
             motionStart = p.getBoolean("motion_start", true),
             carAssociationId = p.getInt("car_id", -1).takeIf { it >= 0 },
             carName = p.getString("car_name", null),
+            spotifyCanvas = p.getBoolean("spotify_canvas", true),
         )
         loaded = true
     }
@@ -65,6 +68,7 @@ object UserSettings {
             putBoolean("motion_start", next.motionStart)
             putInt("car_id", next.carAssociationId ?: -1)
             putString("car_name", next.carName)
+            putBoolean("spotify_canvas", next.spotifyCanvas)
         }
     }
 }

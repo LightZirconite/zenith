@@ -111,7 +111,7 @@ class MainActivity : ComponentActivity() {
             }
 
             if (pip) {
-                PipScreen(snapshot, radars, zones)
+                PipScreen(snapshot, radars, zones, media = media, canvas = settings.spotifyCanvas)
             } else if (showSettings && onboarded) {
                 SettingsScreen(
                     settings = settings,
@@ -196,6 +196,9 @@ class MainActivity : ComponentActivity() {
                     onToggleRain = { UserSettings.update(context) { it.copy(raining = !it.raining, rainManual = true) } },
                     onOpenSettings = { showSettings = true },
                     media = media,
+                    mediaCanvas = settings.spotifyCanvas,
+                    onMediaOpen = { NowPlaying.open(context) },
+                    onMediaLike = NowPlaying::toggleLike,
                     onMediaPrevious = NowPlaying::previous,
                     onMediaPlayPause = NowPlaying::playPause,
                     onMediaNext = NowPlaying::next,

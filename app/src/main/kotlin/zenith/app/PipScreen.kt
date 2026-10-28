@@ -4,6 +4,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -27,6 +28,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -59,9 +63,17 @@ private val PipFade = Brush.verticalGradient(
  * Picture-in-picture window shown over Waze or Maps while driving: Zenith in miniature. The map
  * fills the window, darkened; the next radar sits on top, the speed and the limit at the bottom.
  * Everything scales with the window size. Over the limit near a radar, a red frame pulses.
+ * While a Spotify Canvas plays ([canvas] on), it takes the map's place: Waze or Maps already
+ * show one. The map stays underneath, ready again for the next track without a canvas.
  */
 @Composable
-fun PipScreen(s: DriveSnapshot?, radars: List<Radar>, zones: List<ControlZone> = emptyList()) {
+fun PipScreen(
+    s: DriveSnapshot?,
+    radars: List<Radar>,
+    zones: List<ControlZone> = emptyList(),
+    media: MediaInfo? = null,
+    canvas: Boolean = false,
+) {
     val alert = s?.alerts?.firstOrNull()
     val limit = s?.limitKmh
     val speed = s?.speedKmh
@@ -83,6 +95,7 @@ fun PipScreen(s: DriveSnapshot?, radars: List<Radar>, zones: List<ControlZone> =
         val halo = TextStyle(shadow = Shadow(Color.Black, blurRadius = 18f))
 
         DriveMap(s, radars, zones, Modifier.fillMaxSize(), carAt = 0.5, overlay = PipFade)
+        PipCanvas(media, canvas, calm = alert != null)
 
         // Next radar: pill at the top, red while too fast for it.
         val next = alert?.let { Triple(it.radar, it.limitKmh, it.distanceM) }
@@ -152,6 +165,29 @@ fun PipScreen(s: DriveSnapshot?, radars: List<Radar>, zones: List<ControlZone> =
         if (danger) {
             Box(Modifier.fillMaxSize().alpha(frame).border((unit * 2.5f).dp, Red, RoundedCornerShape((unit * 4).dp)))
         }
+    }
+}
+
+/** The Spotify Canvas over the map, faded in at its first frame and darkened like the map. */
+@Composable
+private fun PipCanvas(media: MediaInfo?, enabled: Boolean, calm: Boolean) {
+    val video = rememberCanvas(media?.spotifyTrackId, enabled) ?: return
+    var shown by remember(video) { mutableStateOf(false) }
+    var failed by remember(video) { mutableStateOf(false) }
+    val alpha by animateFloatAsState(if (!shown) 0f else if (calm) 0.6f else 1f, tween(900), label = "pipCanvas")
+    if (failed) return
+    Box(Modifier.fillMaxSize().alpha(alpha)) {
+        CanvasVideo(
+            video,
+            playing = media?.playing == true,
+            modifier = Modifier.fillMaxSize(),
+            onShown = { shown = true },
+            onFailed = {
+                failed = true
+                media?.spotifyTrackId?.let { SpotifyCanvas.discard(it, video) }
+            },
+        )
+        Box(Modifier.fillMaxSize().background(PipFade))
     }
 }
 

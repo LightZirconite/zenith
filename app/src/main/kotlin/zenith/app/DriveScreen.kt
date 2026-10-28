@@ -98,6 +98,10 @@ fun DriveScreen(
     onOpenSettings: () -> Unit = {},
     /** Track playing in Spotify or another player (notification access granted). */
     media: MediaInfo? = null,
+    /** Spotify Canvas behind the music card (setting). */
+    mediaCanvas: Boolean = true,
+    onMediaOpen: () -> Unit = {},
+    onMediaLike: () -> Unit = {},
     onMediaPrevious: () -> Unit = {},
     onMediaPlayPause: () -> Unit = {},
     onMediaNext: () -> Unit = {},
@@ -127,7 +131,19 @@ fun DriveScreen(
             AlertArea(snapshot.takeIf { running })
             Spacer(Modifier.height(12.dp))
             AnimatedVisibility(visible = running && media != null, enter = fadeIn(), exit = fadeOut()) {
-                media?.let { MediaBar(it, onMediaPrevious, onMediaPlayPause, onMediaNext) }
+                media?.let {
+                    MediaBar(
+                        it,
+                        canvas = mediaCanvas,
+                        // An alert on screen: the music steps back.
+                        calm = snapshot?.alerts?.isNotEmpty() == true,
+                        onOpen = onMediaOpen,
+                        onLike = onMediaLike,
+                        onPrevious = onMediaPrevious,
+                        onPlayPause = onMediaPlayPause,
+                        onNext = onMediaNext,
+                    )
+                }
             }
             AnimatedVisibility(visible = running && navApps.isNotEmpty(), enter = fadeIn(), exit = fadeOut()) {
                 NavApps(navApps, onOpenNavApp)

@@ -30,6 +30,13 @@
         <!-- Shortcuts to the navigation apps Zenith runs behind. -->
         <package android:name="com.waze" />
         <package android:name="com.google.android.apps.maps" />
+        <!-- Music card: opens the player when its session gives no intent of its own. -->
+        <intent>
+            <action android:name="android.media.browse.MediaBrowserService" />
+        </intent>
+        <package android:name="com.spotify.music" />
+        <package android:name="com.google.android.youtube" />
+        <package android:name="com.google.android.apps.youtube.music" />
     </queries>
 
     <application

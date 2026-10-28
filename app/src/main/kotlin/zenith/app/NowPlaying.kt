@@ -1,5 +1,7 @@
 package zenith.app
 
+import android.app.ActivityOptions
+import android.app.PendingIntent
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -17,15 +19,34 @@ import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import zenith.core.LikeAction
+import zenith.core.PlaybackProgress
+import zenith.core.PlayerActions
+import zenith.core.SpotifyTrack
 
-/** The track playing in another app (Spotify, Deezer, YouTube Music…). */
-data class MediaInfo(val title: String, val artist: String?, val art: Bitmap?, val playing: Boolean)
+/** The track playing in another app (Spotify, Deezer, YouTube, YouTube Music…). */
+data class MediaInfo(
+    val title: String,
+    /** Artist, or the channel for a video. */
+    val artist: String?,
+    val art: Bitmap?,
+    val playing: Boolean,
+    /** Package of the player, `com.spotify.music` for Spotify. */
+    val player: String = "",
+    /** Spotify track id (Spotify app only): its Canvas is looked up with it. */
+    val spotifyTrackId: String? = null,
+    /** Null when the player gives no duration or position (radio, live). */
+    val progress: PlaybackProgress? = null,
+    /** Heart button, when the player offers one (Spotify's Liked Songs). */
+    val like: LikeAction? = null,
+)
 
 /**
- * Music bar of the drive screen: Android's media sessions give the track of whatever player is in
- * use and its controls, with no account, no key and no server. Reading other apps' sessions needs
- * the notification access ([MediaListener] exists only for that); without it nothing shows.
- * Main thread only.
+ * Music card of the drive screen: Android's media sessions give the track of whatever player is in
+ * use, its progress and its controls, with no account, no key and no server. Spotify also puts the
+ * track's `spotify:track:<id>` in the media id (for the Canvas) and offers "like" as a custom
+ * action. Reading other apps' sessions needs the notification access ([MediaListener] exists only
+ * for that); without it nothing shows. Main thread only.
  */
 object NowPlaying {
     private val _state = MutableStateFlow<MediaInfo?>(null)
@@ -37,6 +58,7 @@ object NowPlaying {
     private var controller: MediaController? = null
     private var artSource: Bitmap? = null
     private var art: Bitmap? = null
+    private var likeAction: PlaybackState.CustomAction? = null
 
     private val sessions = MediaSessionManager.OnActiveSessionsChangedListener { pick(it.orEmpty()) }
     private val callback = object : MediaController.Callback() {
@@ -78,6 +100,7 @@ object NowPlaying {
         controller = null
         artSource = null
         art = null
+        likeAction = null
         _state.value = null
     }
 
@@ -92,6 +115,36 @@ object NowPlaying {
 
     fun previous() {
         runCatching { controller?.transportControls?.skipToPrevious() }
+    }
+
+    /** Adds the track to the player's likes, or takes it out (the action the player offers now). */
+    fun toggleLike() {
+        val a = likeAction ?: return
+        runCatching { controller?.transportControls?.sendCustomAction(a.action, a.extras) }
+    }
+
+    /** Brings the player to the front: its own "open" intent, else its launcher activity. */
+    fun open(context: Context) {
+        val c = controller ?: return
+        val opened = runCatching { c.sessionActivity?.let { send(it) } != null }.getOrDefault(false)
+        if (!opened) {
+            runCatching {
+                context.packageManager.getLaunchIntentForPackage(c.packageName)
+                    ?.let { context.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            }.onFailure { Log.w("Zenith", "open player", it) }
+        }
+    }
+
+    /** Android 14+: an intent made by the player (in the background) starts only with Zenith's own right to. */
+    private fun send(intent: PendingIntent) {
+        if (Build.VERSION.SDK_INT >= 34) {
+            @Suppress("DEPRECATION")
+            val options = ActivityOptions.makeBasic()
+                .setPendingIntentBackgroundActivityStartMode(ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
+            intent.send(null, 0, null, null, null, null, options.toBundle())
+        } else {
+            intent.send()
+        }
     }
 
     private fun refresh() {
@@ -127,11 +180,26 @@ object NowPlaying {
             // Covers can be large: a small copy is all the bar needs.
             art = source?.let { if (it.width > ART_PX) Bitmap.createScaledBitmap(it, ART_PX, ART_PX * it.height / it.width, true) else it }
         }
+        val playback = c.playbackState
+        val actions = playback?.customActions.orEmpty()
+        val like = PlayerActions.like(actions.map { it.action })
+        likeAction = like?.let { l -> actions.firstOrNull { it.action == l.action } }
         _state.value = MediaInfo(
             title = title,
             artist = md.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: md.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE),
             art = art,
-            playing = c.playbackState?.state == PlaybackState.STATE_PLAYING,
+            playing = playback?.state == PlaybackState.STATE_PLAYING,
+            player = c.packageName,
+            spotifyTrackId = SpotifyTrack.idFromSession(
+                c.packageName,
+                md.getString(MediaMetadata.METADATA_KEY_MEDIA_ID),
+                md.getString(MediaMetadata.METADATA_KEY_MEDIA_URI),
+            ),
+            // Position as of lastPositionUpdateTime (elapsedRealtime), moving at playbackSpeed.
+            progress = playback?.let {
+                PlaybackProgress.of(it.position, it.lastPositionUpdateTime, it.playbackSpeed, md.getLong(MediaMetadata.METADATA_KEY_DURATION))
+            },
+            like = like,
         )
     }
 
