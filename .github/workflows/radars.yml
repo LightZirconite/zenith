@@ -6,7 +6,7 @@ name: radars
 # never spends more than 150 a day; each run takes a random share of what is left, after a random
 # delay, so a missed schedule is caught up and calls never come at fixed times.
 # The Lufop base is published encrypted (pipeline/lufop_db.sh, secret LUFOP_DB_KEY).
-# GitHub never fired these schedules (0 scheduled run since the workflow exists), so each run also
+# GitHub fires these schedules late or not at all (none in the first 27 h), so each run also
 # starts the next one after a random 3 to 5 h pause ("next" job): the chain keeps itself going, and
 # a push of this file or a manual run restarts it if it ever breaks. The same job starts data.yml
 # once its data is a week old (its own weekly cron never fired either).
@@ -105,7 +105,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 330
     steps:
-      - name: Pause
+      # Not stuck: this job waits on purpose before the next run, so it shows "in progress" for hours.
+      - name: Pause de 3 à 5 h avant le prochain passage (normal)
         run: sleep $((10800 + RANDOM % 7200))
       - name: Start the next run
         env:
