@@ -113,6 +113,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
+          # data.yml (road tiles, OSM radars) depends on a weekly cron that rarely fires: started from
+          # here once its manifest is a week old and no run of it is under way. Checked first, so a run
+          # that hands the chain over below still does it.
+          generated=$(gh release download data -p manifest.json -O - 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin)['generated'])" || echo 1970-01-01T00:00:00+00:00)
+          age=$(( $(date +%s) - $(date -d "$generated" +%s) ))
+          busy=$(gh run list --workflow data.yml --limit 5 --json status -q '[.[] | select(.status != "completed")] | length')
+          if [ "$age" -gt $((7 * 86400)) ] && [ "$busy" = "0" ]; then
+            echo "Données OSM vieilles de $((age / 86400)) jours : data.yml relancé."
+            gh workflow run data.yml --ref main
+          fi
           # A newer run (manual, push) carries its own chain: this one stops, so chains never multiply.
           newer=$(gh run list --workflow radars.yml --limit 20 --json databaseId,status \
             -q "[.[] | select(.databaseId > ${{ github.run_id }} and .status != \"completed\")] | length")
@@ -122,12 +132,3 @@ jobs:
             gh workflow run radars.yml --ref main -f chained=true && break
             sleep $((60 * attempt))
           done
-          # data.yml (road tiles, OSM radars) depends on a weekly cron that never fired either:
-          # started from here once its manifest is a week old and no run of it is under way.
-          generated=$(gh release download data -p manifest.json -O - 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin)['generated'])" || echo 1970-01-01T00:00:00+00:00)
-          age=$(( $(date +%s) - $(date -d "$generated" +%s) ))
-          busy=$(gh run list --workflow data.yml --limit 5 --json status -q '[.[] | select(.status != "completed")] | length')
-          if [ "$age" -gt $((7 * 86400)) ] && [ "$busy" = "0" ]; then
-            echo "Données OSM vieilles de $((age / 86400)) jours : data.yml relancé."
-            gh workflow run data.yml --ref main
-          fi
