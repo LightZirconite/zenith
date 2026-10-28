@@ -53,3 +53,19 @@ data class PlaybackProgress(val positionMs: Long, val updatedAtMs: Long, val spe
         }
     }
 }
+
+/** A "like" the player offers among its custom actions: [action] to send, and whether the track is liked now. */
+data class LikeAction(val action: String, val liked: Boolean)
+
+/** Custom actions of the media sessions that Zenith knows how to show. */
+object PlayerActions {
+    /**
+     * Spotify offers the opposite of the current state: "ADD_TO_COLLECTION" while the track is not
+     * in Liked Songs, "REMOVE_FROM_COLLECTION" once it is.
+     */
+    fun like(actions: List<String>): LikeAction? = when {
+        "REMOVE_FROM_COLLECTION" in actions -> LikeAction("REMOVE_FROM_COLLECTION", liked = true)
+        "ADD_TO_COLLECTION" in actions -> LikeAction("ADD_TO_COLLECTION", liked = false)
+        else -> null
+    }
+}
