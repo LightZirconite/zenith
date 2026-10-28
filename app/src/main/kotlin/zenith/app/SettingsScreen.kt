@@ -257,11 +257,12 @@ private fun UpdateCard(version: String, update: UpdateState, onCheck: () -> Unit
         Text(
             when (update) {
                 is UpdateState.UpToDate -> "À jour : version ${update.version}."
+                UpdateState.Checking -> "Recherche d'une nouvelle version…"
                 is UpdateState.Downloading -> "Téléchargement de la version ${update.version}… ${(update.progress * 100).roundToInt()} %"
                 is UpdateState.Ready -> "Version ${update.version} téléchargée, elle s'installe."
                 is UpdateState.Installing, is UpdateState.NeedsConfirmation -> "Installation en cours…"
                 is UpdateState.Failed -> update.message
-                UpdateState.Idle -> "Version $version. Zenith regarde seul s'il y a du nouveau à chaque retour dans l'app (5 min au plus entre deux)."
+                UpdateState.Idle -> "Version $version. Zenith regarde seul s'il y a du nouveau à chaque retour dans l'app, puis toutes les 2 minutes."
             },
             color = Color.White.copy(alpha = 0.75f),
             fontSize = 14.sp,

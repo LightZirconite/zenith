@@ -30,8 +30,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.FileProvider
 import androidx.core.content.edit
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -158,7 +160,15 @@ class MainActivity : ComponentActivity() {
                 if (!running && inPip.value) finishAndRemoveTask()
             }
             LaunchedEffect(settings.pipLarge) { updatePip() }
-            LaunchedEffect(resumeCount) { Updater.checkIfDue(context) }
+            // Each return to the app, then every 2 minutes while it stays in front: a new version never waits.
+            LaunchedEffect(Unit) {
+                lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                    while (true) {
+                        Updater.checkIfDue(context)
+                        delay(2 * 60_000L)
+                    }
+                }
+            }
             // Activity recognition follows the setting and the permissions (renewed at each start too).
             LaunchedEffect(permissions.motion, settings.motionStart) { Motion.sync(context) }
             // Music bar: picks up a notification access granted during the drive.
@@ -207,7 +217,7 @@ class MainActivity : ComponentActivity() {
                     permissions = permissions,
                     onMotionPermission = onMotion,
                     update = update,
-                    onCheckUpdate = { scope.launch { Updater.checkAndDownload(context) } },
+                    onCheckUpdate = { scope.launch { Updater.checkAndDownload(context, force = true) } },
                 )
             } else if (showWelcome) {
                 Onboarding(
@@ -256,6 +266,7 @@ class MainActivity : ComponentActivity() {
                     onMediaPrevious = NowPlaying::previous,
                     onMediaPlayPause = NowPlaying::playPause,
                     onMediaNext = NowPlaying::next,
+                    onMediaSeek = NowPlaying::seekBy,
                 )
             }
         }

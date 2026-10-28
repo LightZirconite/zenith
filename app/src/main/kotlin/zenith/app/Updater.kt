@@ -22,6 +22,9 @@ import java.net.URL
 
 sealed interface UpdateState {
     data object Idle : UpdateState
+
+    /** Asking GitHub right now. */
+    data object Checking : UpdateState
     data class Downloading(val version: String, val progress: Float) : UpdateState
     data class Ready(val version: String, val file: File) : UpdateState
     data class Installing(val version: String) : UpdateState
@@ -45,7 +48,8 @@ object Updater {
     private val _state = MutableStateFlow<UpdateState>(UpdateState.Idle)
     val state: StateFlow<UpdateState> = _state
 
-    private const val CHECK_EVERY_MS = 5 * 60_000L
+    /** Between two automatic checks; GitHub allows 60 an hour without a key. */
+    private const val CHECK_EVERY_MS = 60_000L
 
     /** An install that never reported back (screen dismissed, installer killed) stops blocking checks. */
     private const val INSTALL_TIMEOUT_MS = 2 * 60_000L
@@ -58,20 +62,24 @@ object Updater {
 
     private fun dir(context: Context) = File(context.cacheDir, "update")
 
-    /** Checks GitHub at most every 5 minutes (each time the app comes to the front). */
+    /** Checks GitHub at most once a minute: at each return to the app, and every 2 minutes while it is open. */
     suspend fun checkIfDue(context: Context) {
         if (System.currentTimeMillis() - lastCheckMs < CHECK_EVERY_MS) return
         checkAndDownload(context)
     }
 
-    /** Checks GitHub and downloads a newer APK if there is one; the settings' button calls it directly. */
-    suspend fun checkAndDownload(context: Context) = withContext(Dispatchers.IO) {
+    /**
+     * Checks GitHub and downloads a newer APK if there is one. [force] (the settings' button) asks
+     * whatever the state, except during a download or an install that is still under way.
+     */
+    suspend fun checkAndDownload(context: Context, force: Boolean = false) = withContext(Dispatchers.IO) {
         val current = _state.value
         val stuck = current is UpdateState.Installing && System.currentTimeMillis() - installingSinceMs > INSTALL_TIMEOUT_MS
-        if (current !is UpdateState.Idle && current !is UpdateState.Failed && current !is UpdateState.UpToDate && !stuck) {
-            return@withContext
-        }
+        val free = current is UpdateState.Idle || current is UpdateState.Failed || current is UpdateState.UpToDate || stuck
+        val busy = current is UpdateState.Checking || current is UpdateState.Downloading || (current is UpdateState.Installing && !stuck)
+        if (!free && !(force && !busy)) return@withContext
         lastCheckMs = System.currentTimeMillis()
+        _state.value = UpdateState.Checking
         runCatching {
             val release = Json.parseToJsonElement(get(LATEST)).jsonObject
             val tag = release.getValue("tag_name").jsonPrimitive.content // v0.1.N
@@ -93,6 +101,8 @@ object Updater {
             Log.w("Zenith", "update check", it)
             _state.value = UpdateState.Failed("Mise à jour impossible : ${it.message}")
         }
+        // A release without an APK yet (still being published): nothing to say, the next check sees it.
+        if (_state.value is UpdateState.Checking) _state.value = UpdateState.Idle
     }
 
     /** Hands the downloaded APK to the system installer (asks for confirmation if needed). */

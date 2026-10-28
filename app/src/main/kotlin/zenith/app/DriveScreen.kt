@@ -54,6 +54,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -89,11 +92,34 @@ private val Orange = Color(0xFFFF9F0A)
 private val Green = Color(0xFF30D158)
 private val Dim = Color(0xFF8E8E93)
 
+/**
+ * Shows the content through a growing circle from the tunnel's heart (42 % down the screen), with a
+ * soft rim: 0 nothing, 1 everything, no mask at all.
+ */
+private fun Modifier.portalReveal(progress: Float): Modifier {
+    if (progress >= 1f) return this
+    return graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }.drawWithContent {
+        drawContent()
+        val reach = kotlin.math.hypot(size.width, size.height)
+        val r = (progress * 1.15f).coerceIn(0.001f, 1.15f)
+        drawRect(
+            Brush.radialGradient(
+                0f to Color.Black,
+                (r * 0.82f) to Color.Black,
+                r to Color.Transparent,
+                center = Offset(size.width / 2, size.height * 0.42f),
+                radius = reach,
+            ),
+            blendMode = BlendMode.DstIn,
+        )
+    }
+}
+
 /** What the middle of the drive screen shows: home, the flight while the GPS searches, the speed. */
 private enum class HomeView { IDLE, FLIGHT, DRIVE }
 
 /** The flight lasts at least this long, even when the position comes at once (demo, warm GPS). */
-private const val MIN_FLIGHT_MS = 1_600L
+private const val MIN_FLIGHT_MS = 3_500L
 
 /** A position without a trusted speed (indoors) still lands after this wait. */
 private const val WEAK_FIX_WAIT_MS = 15_000L
@@ -162,6 +188,7 @@ fun DriveScreen(
     onMediaPrevious: () -> Unit = {},
     onMediaPlayPause: () -> Unit = {},
     onMediaNext: () -> Unit = {},
+    onMediaSeek: (Long) -> Unit = {},
 ) {
     // The start is a flight through space: stars at home, a tunnel while the GPS searches, a jump at
     // the first good position, and the map comes in at the flash. Opened mid-drive: straight to the map.
@@ -198,12 +225,15 @@ fun DriveScreen(
             phase == FlightPhase.SEARCH && !flightOver -> {
                 if (before == FlightPhase.IDLE) {
                     sound.engage()
-                    delay(900)
+                    delay(1_400)
                 }
                 sound.startHum()
             }
-            phase == FlightPhase.ARRIVE && before == FlightPhase.SEARCH -> sound.arrive()
-            else -> sound.stopHum()
+            phase == FlightPhase.ARRIVE && before == FlightPhase.SEARCH -> {
+                sound.arrive()
+                sound.fadeHum(900)
+            }
+            else -> sound.fadeHum()
         }
     }
 
@@ -216,56 +246,60 @@ fun DriveScreen(
         spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessVeryLow),
         label = "musicMode",
     )
-    val withMusic by animateFloatAsState(if (media != null && showMap) 1f else 0f, tween(900), label = "withMusic")
+    val withMusic by animateFloatAsState(if (media != null) 1f else 0f, tween(900), label = "withMusic")
+    // The arrival: the whole scene (map and Canvas, loaded during the flight) opens like a portal
+    // from the heart of the tunnel at the flash, rushing in from a zoom, with a shock ring.
+    val portal = remember(running) { Animatable(if (landed) 1f else 0f) }
+    LaunchedEffect(showMap) {
+        if (showMap) portal.animateTo(1f, tween(1_000, easing = FastOutSlowInEasing)) else portal.snapTo(0f)
+    }
     Box(Modifier.fillMaxSize().background(Bg)) {
         AnimatedVisibility(visible = !flightOver, enter = fadeIn(tween(800)), exit = fadeOut(tween(200))) {
             Starfield(phase, gps, onLanded = { landed = true }, onGone = { flightOver = true }, modifier = Modifier.fillMaxSize())
         }
-        // Music ambience from the bottom: the Spotify Canvas (else the cover, blurred), under the map,
-        // which melts into it; it shows with the map, never before it.
-        AnimatedVisibility(
-            visible = showMap && media != null,
-            modifier = Modifier.align(Alignment.BottomCenter),
-            enter = fadeIn(tween(1_200)),
-            exit = fadeOut(tween(600)),
-        ) {
-            media?.let {
-                MusicBackdrop(
-                    it,
-                    canvas = mediaCanvas,
-                    // An alert on screen: the music steps back.
-                    calm = snapshot?.alerts?.isNotEmpty() == true,
-                    focus = focus,
-                    modifier = Modifier.fillMaxWidth().fillMaxHeight(1f - BACKDROP_TOP),
+        if (running) {
+            Box(
+                Modifier.fillMaxSize().portalReveal(portal.value).graphicsLayer {
+                    val k = portal.value
+                    alpha = if (k <= 0f) 0f else 1f
+                    val scale = 1.35f - 0.35f * k
+                    scaleX = scale
+                    scaleY = scale
+                },
+            ) {
+                // Music ambience from the bottom: the Spotify Canvas (else the cover, blurred), under
+                // the map, which melts into it. Built at Start like the map: the Canvas downloads
+                // during the flight and is there at the arrival.
+                media?.let {
+                    MusicBackdrop(
+                        it,
+                        canvas = mediaCanvas,
+                        // An alert on screen: the music steps back.
+                        calm = snapshot?.alerts?.isNotEmpty() == true,
+                        focus = focus,
+                        modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(1f - BACKDROP_TOP),
+                    )
+                }
+                // Tilted map over the top of the screen. It reaches low: alone, it fades into the black
+                // at the same place as ever; with music, it melts into the Canvas, a few of its lines
+                // still faint over it lower down.
+                DriveMap(
+                    snapshot,
+                    radars,
+                    zones,
+                    Modifier.fillMaxWidth().fillMaxHeight(MAP_HEIGHT).then(
+                        if (withMusic > 0f) {
+                            Modifier.verticalFade(blendStops(MapWhole, blendStops(MapOverCanvas, MapInMusicMode, focus), withMusic))
+                        } else {
+                            Modifier
+                        },
+                    ),
+                    // The car where it always was on screen, the map now taller.
+                    carAt = 0.28 / MAP_HEIGHT,
+                    overlay = if (media != null) MapOverMusic else MapAlone,
                 )
             }
-        }
-        // Tilted map over the top of the screen. Built as soon as the drive starts, hidden: its style
-        // and tiles load during the flight, and it lands, already in place, at the flash. It reaches
-        // low on the screen: alone, it fades into the black at the same place as ever; with music,
-        // it melts into the Canvas, a few of its lines still faint over it lower down.
-        val mapAlpha by animateFloatAsState(if (showMap) 1f else 0f, tween(if (showMap) 450 else 300), label = "mapIn")
-        val mapScale by animateFloatAsState(if (showMap) 1f else 1.3f, tween(1_100, easing = FastOutSlowInEasing), label = "mapLanding")
-        if (running) {
-            DriveMap(
-                snapshot,
-                radars,
-                zones,
-                Modifier.fillMaxWidth().fillMaxHeight(MAP_HEIGHT).graphicsLayer {
-                    alpha = mapAlpha
-                    scaleX = mapScale
-                    scaleY = mapScale
-                }.then(
-                    if (withMusic > 0f) {
-                        Modifier.verticalFade(blendStops(MapWhole, blendStops(MapOverCanvas, MapInMusicMode, focus), withMusic))
-                    } else {
-                        Modifier
-                    },
-                ),
-                // The car where it always was on screen, the map now taller.
-                carAt = 0.28 / MAP_HEIGHT,
-                overlay = if (media != null) MapOverMusic else MapAlone,
-            )
+            ShockRing(portal.value, modifier = Modifier.fillMaxSize())
         }
         // Too fast near a radar: the edges of the screen pulse red.
         DangerGlow(on = landed && snapshot?.alerts?.firstOrNull()?.overLimit == true, modifier = Modifier.fillMaxSize())
@@ -313,7 +347,12 @@ fun DriveScreen(
             }
             AlertArea(snapshot.takeIf { running && landed })
             Spacer(Modifier.height(12.dp))
-            AnimatedVisibility(visible = running && landed && media != null, enter = fadeIn(), exit = fadeOut()) {
+            // After the arrival, the rest settles in one after the other, from the speed down to the music.
+            AnimatedVisibility(
+                visible = running && landed && media != null,
+                enter = fadeIn(tween(600, delayMillis = 500)) + slideInVertically(tween(700, delayMillis = 500, easing = FastOutSlowInEasing)) { it / 2 },
+                exit = fadeOut(),
+            ) {
                 media?.let {
                     MediaBar(
                         it,
@@ -323,10 +362,15 @@ fun DriveScreen(
                         onPrevious = onMediaPrevious,
                         onPlayPause = onMediaPlayPause,
                         onNext = onMediaNext,
+                        onSeek = onMediaSeek,
                     )
                 }
             }
-            AnimatedVisibility(visible = running && navApps.isNotEmpty(), enter = fadeIn(), exit = fadeOut()) {
+            AnimatedVisibility(
+                visible = running && landed && navApps.isNotEmpty(),
+                enter = fadeIn(tween(600, delayMillis = 750)) + slideInVertically(tween(700, delayMillis = 750, easing = FastOutSlowInEasing)) { it / 2 },
+                exit = fadeOut(),
+            ) {
                 NavApps(navApps, onOpenNavApp)
             }
             StartStop(running, onStart, onStop)

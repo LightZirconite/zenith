@@ -13,6 +13,7 @@ import android.media.session.PlaybackState
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 import android.service.notification.NotificationListenerService
 import android.util.Log
@@ -118,6 +119,14 @@ object NowPlaying {
 
     fun previous() {
         runCatching { controller?.transportControls?.skipToPrevious() }
+    }
+
+    /** Moves within a video by [deltaMs] from where it is now (the position moves on while playing). */
+    fun seekBy(deltaMs: Long) {
+        val c = controller ?: return
+        val p = c.playbackState ?: return
+        val moved = if (p.state == PlaybackState.STATE_PLAYING) ((SystemClock.elapsedRealtime() - p.lastPositionUpdateTime) * p.playbackSpeed).toLong() else 0L
+        runCatching { c.transportControls.seekTo((p.position + moved + deltaMs).coerceAtLeast(0L)) }
     }
 
     /** Adds the track to the player's likes, or takes it out (the action the player offers now). */

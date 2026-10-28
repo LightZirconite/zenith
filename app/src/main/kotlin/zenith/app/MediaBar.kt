@@ -10,6 +10,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -159,6 +160,8 @@ fun MediaBar(
     onPrevious: () -> Unit,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
+    /** A video: ten seconds back or forward instead of the previous and next ones. */
+    onSeek: (Long) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current
@@ -253,9 +256,9 @@ fun MediaBar(
             }
             val like = media.like
             if (like != null && roomForLike) HeartButton(like.liked, onLike)
-            GlyphButton(Glyph.PREVIOUS, "Précédent", onPrevious)
+            if (media.video) SeekButton("−10", "Reculer de 10 secondes") { onSeek(-10_000) } else GlyphButton(Glyph.PREVIOUS, "Précédent", onPrevious)
             PlayButton(media.playing, onPlayPause)
-            GlyphButton(Glyph.NEXT, "Suivant", onNext)
+            if (media.video) SeekButton("+10", "Avancer de 10 secondes") { onSeek(10_000) } else GlyphButton(Glyph.NEXT, "Suivant", onNext)
         }
         media.progress?.let { ProgressLine(it, media.playing, Modifier.align(Alignment.BottomStart)) }
     }
@@ -288,6 +291,19 @@ private fun GlyphButton(glyph: Glyph, label: String, onClick: () -> Unit) {
         contentAlignment = Alignment.Center,
     ) {
         Canvas(Modifier.size(15.dp)) { drawGlyph(glyph, Color.White) }
+    }
+}
+
+/** Ten seconds back or forward in a video: the number in a thin ring. */
+@Composable
+private fun SeekButton(text: String, label: String, onClick: () -> Unit) {
+    Box(
+        Modifier.size(44.dp).tap(onClick = onClick).clip(CircleShape).semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(Modifier.size(32.dp).border(1.5.dp, Color.White.copy(alpha = 0.7f), CircleShape), contentAlignment = Alignment.Center) {
+            Text(text, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+        }
     }
 }
 
