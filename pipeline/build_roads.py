@@ -148,7 +148,7 @@ def smooth(flags, coords):
             runs.append((start, k))
             start = k
     out = list(flags)
-    for n, (a, b) in enumerate(runs[1:-1], 1):
+    for a, b in runs[1:-1]:
         length = sum(math.dist((coords[k][0] * 111_000, coords[k][1] * 78_000), (coords[k + 1][0] * 111_000, coords[k + 1][1] * 78_000))
                      for k in range(max(a - 1, 0), b))
         if length < MIN_RUN_M:
