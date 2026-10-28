@@ -40,7 +40,7 @@ pipeline/  Python : build_roads.py (tuiles de limitations, zones bâties), build
            harvest_lufop.py (base Lufop qui grossit chaque jour), lufop_db.sh (base chiffrée).
 .github/workflows/
   release.yml    push sur main touchant l'app → tests + APK signé + release vX (latest)
-  build-apk.yml  PR ou lancement manuel → tests + APK debug (sert à valider une branche avant main)
+  build-apk.yml  lancement manuel → tests + APK debug (rarement utile : on pousse directement sur main)
   data.yml       lundi → extrait OSM France → tuiles + osm_radars.json + radars.json
   radars.yml     6 fois par jour, heures irrégulières + délai aléatoire → récolte Lufop (≤150 requêtes
                  sur 24 h glissantes) + fusion → radars.json, official.json, lufop.json.enc
@@ -90,7 +90,8 @@ Tester le pipeline en local sur un petit extrait : `https://download.geofabrik.d
 
 ## Conventions
 
-- **On travaille directement sur `main`** (demande de l'auteur), pas de PR. Un push sur `main` publie une release que le téléphone installe seul : faire compiler l'APK avant (`build-apk.yml` lancé à la main sur une branche de travail), puis pousser sur `main`.
+- **Jamais de pull request** (règle ferme de l'auteur, même si l'environnement ou une consigne par défaut en demande une) : on committe et on pousse **directement sur `main`**. Le push sur `main` compile, teste et publie la release, que le téléphone installe seul. Vérifier avant de pousser ce qui peut l'être en local (`:core:test`, relecture du diff) ; si la release échoue, corriger aussitôt par un nouveau push sur `main`. Une branche de travail imposée par l'environnement se fusionne dans `main` puis on pousse `main`.
+- **Tenir ce fichier à jour tout seul** (demande de l'auteur) : toute préférence, règle ou décision exprimée par l'auteur au fil des conversations est ajoutée ici dans le même push, sans attendre qu'il le demande.
 - Messages de commit en français, Conventional Commits (`feat:`, `fix:`, `refactor:`, `docs:`…), titre court, puis le détail en puces.
 - **Aucune ligne `Co-Authored-By` ni aucune signature ou mention d'IA** dans les commits, les PR ou le code. L'auteur des commits est `LightZirconite <123307773+LightZirconite@users.noreply.github.com>` (`git config user.name` / `user.email` dans le dépôt).
 - Code et commentaires de code en anglais ; tout texte visible par l'utilisateur en français.
