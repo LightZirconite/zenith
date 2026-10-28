@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -46,6 +47,7 @@ import androidx.compose.ui.unit.sp
 import zenith.core.ControlZone
 import zenith.core.DriveSnapshot
 import zenith.core.Radar
+import java.io.File
 import kotlin.math.roundToInt
 
 private val Red = Color(0xFFFF3B30)
@@ -63,8 +65,9 @@ private val PipFade = Brush.verticalGradient(
  * Picture-in-picture window shown over Waze or Maps while driving: Zenith in miniature. The map
  * fills the window, darkened; the next radar sits on top, the speed and the limit at the bottom.
  * Everything scales with the window size. Over the limit near a radar, a red frame pulses.
- * While a Spotify Canvas plays ([canvas] on), it takes the map's place: Waze or Maps already
- * show one. The map stays underneath, ready again for the next track without a canvas.
+ * While a Spotify Canvas plays ([canvas] on), the window shows both, like the drive screen: the
+ * map on top melting into black, the Canvas rising from the bottom under the speed and the limit.
+ * Without a canvas (other players, no canvas for the track), the map fills the window.
  */
 @Composable
 fun PipScreen(
@@ -94,8 +97,20 @@ fun PipScreen(
         val unit = minOf(maxWidth, maxHeight).value / 100f // 1 % of the window's short side, in dp
         val halo = TextStyle(shadow = Shadow(Color.Black, blurRadius = 18f))
 
-        DriveMap(s, radars, zones, Modifier.fillMaxSize(), carAt = 0.5, overlay = PipFade)
-        PipCanvas(media, canvas, calm = alert != null)
+        val video = rememberCanvas(media?.spotifyTrackId, canvas)
+        var videoFailed by remember(video) { mutableStateOf(false) }
+        val split = video != null && !videoFailed
+        val mapHeight by animateFloatAsState(if (split) 0.62f else 1f, tween(700), label = "pipMap")
+        DriveMap(s, radars, zones, Modifier.fillMaxWidth().fillMaxHeight(mapHeight), carAt = 0.5, overlay = if (split) PipMapFade else PipFade)
+        video?.takeIf { !videoFailed }?.let { v ->
+            PipCanvas(
+                v,
+                media,
+                calm = alert != null,
+                onFailed = { videoFailed = true },
+                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(0.6f),
+            )
+        }
 
         // Next radar: pill at the top, red while too fast for it.
         val next = alert?.let { Triple(it.radar, it.limitKmh, it.distanceM) }
@@ -168,26 +183,39 @@ fun PipScreen(
     }
 }
 
-/** The Spotify Canvas over the map, faded in at its first frame and darkened like the map. */
+/** Map on top of a split window: clear at the top, black where the Canvas takes over. */
+private val PipMapFade = Brush.verticalGradient(
+    0f to Color.Black.copy(alpha = 0.5f),
+    0.25f to Color.Black.copy(alpha = 0.15f),
+    0.7f to Color.Black.copy(alpha = 0.55f),
+    1f to Color.Black,
+)
+
+/** Canvas at the bottom of a split window: rising from black, darker again under the speed. */
+private val PipCanvasFade = Brush.verticalGradient(
+    0f to Color.Black,
+    0.35f to Color.Black.copy(alpha = 0.35f),
+    0.65f to Color.Black.copy(alpha = 0.45f),
+    1f to Color.Black.copy(alpha = 0.85f),
+)
+
+/** The Spotify Canvas in the lower part of the window, faded in at its first frame. */
 @Composable
-private fun PipCanvas(media: MediaInfo?, enabled: Boolean, calm: Boolean) {
-    val video = rememberCanvas(media?.spotifyTrackId, enabled) ?: return
+private fun PipCanvas(video: File, media: MediaInfo?, calm: Boolean, onFailed: () -> Unit, modifier: Modifier) {
     var shown by remember(video) { mutableStateOf(false) }
-    var failed by remember(video) { mutableStateOf(false) }
     val alpha by animateFloatAsState(if (!shown) 0f else if (calm) 0.6f else 1f, tween(900), label = "pipCanvas")
-    if (failed) return
-    Box(Modifier.fillMaxSize().alpha(alpha)) {
+    Box(modifier.alpha(alpha)) {
         CanvasVideo(
             video,
             playing = media?.playing == true,
             modifier = Modifier.fillMaxSize(),
             onShown = { shown = true },
             onFailed = {
-                failed = true
                 media?.spotifyTrackId?.let { SpotifyCanvas.discard(it, video) }
+                onFailed()
             },
         )
-        Box(Modifier.fillMaxSize().background(PipFade))
+        Box(Modifier.fillMaxSize().background(PipCanvasFade))
     }
 }
 
