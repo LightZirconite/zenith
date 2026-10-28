@@ -23,6 +23,8 @@ import kotlinx.coroutines.flow.StateFlow
 import zenith.core.LikeAction
 import zenith.core.PlaybackProgress
 import zenith.core.PlayerActions
+import zenith.core.PlayerChoice
+import zenith.core.PlayerSession
 import zenith.core.SpotifyTrack
 import zenith.core.VideoTitle
 
@@ -65,14 +67,16 @@ object NowPlaying {
     private var manager: MediaSessionManager? = null
     private var component: ComponentName? = null
     private var controller: MediaController? = null
+    /** Every active session, all watched: one starting to play can take the card. */
+    private var sessionsSeen: List<MediaController> = emptyList()
     private var artSource: Bitmap? = null
     private var art: Bitmap? = null
     private var likeAction: PlaybackState.CustomAction? = null
 
     private val sessions = MediaSessionManager.OnActiveSessionsChangedListener { pick(it.orEmpty()) }
     private val callback = object : MediaController.Callback() {
-        override fun onMetadataChanged(metadata: MediaMetadata?) = publish()
-        override fun onPlaybackStateChanged(state: PlaybackState?) = publish()
+        override fun onMetadataChanged(metadata: MediaMetadata?) = choose()
+        override fun onPlaybackStateChanged(state: PlaybackState?) = choose()
         override fun onSessionDestroyed() = refresh()
     }
 
@@ -104,7 +108,8 @@ object NowPlaying {
 
     fun stop() {
         runCatching { manager?.removeOnActiveSessionsChangedListener(sessions) }
-        controller?.unregisterCallback(callback)
+        sessionsSeen.forEach { runCatching { it.unregisterCallback(callback) } }
+        sessionsSeen = emptyList()
         manager = null
         controller = null
         artSource = null
@@ -170,16 +175,29 @@ object NowPlaying {
         runCatching { pick(m.getActiveSessions(name)) }
     }
 
-    /** The player playing, else the most recent one (Android lists them most recent first). */
+    /** New list of sessions (Android lists them most recent first): watches them all, then chooses. */
     private fun pick(list: List<MediaController>) {
-        val chosen = list.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING } ?: list.firstOrNull()
-        if (chosen?.sessionToken != controller?.sessionToken) {
-            controller?.unregisterCallback(callback)
-            controller = chosen
-            chosen?.registerCallback(callback, handler)
+        val known = sessionsSeen.map { it.sessionToken }.toSet()
+        val now = list.map { it.sessionToken }.toSet()
+        sessionsSeen.filter { it.sessionToken !in now }.forEach { runCatching { it.unregisterCallback(callback) } }
+        list.filter { it.sessionToken !in known }.forEach { runCatching { it.registerCallback(callback, handler) } }
+        sessionsSeen = list
+        choose()
+    }
+
+    /** The card follows [PlayerChoice]: what plays, music first; else the last music app. */
+    private fun choose() {
+        val candidates = sessionsSeen.map { c ->
+            val md = c.metadata
+            val title = md?.getString(MediaMetadata.METADATA_KEY_TITLE) ?: md?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
+            PlayerSession(idOf(c), c.packageName, c.playbackState?.state == PlaybackState.STATE_PLAYING, !title.isNullOrBlank())
         }
+        val chosen = PlayerChoice.pick(candidates, controller?.let(::idOf))?.let { p -> sessionsSeen.firstOrNull { idOf(it) == p.id } }
+        if (chosen?.sessionToken != controller?.sessionToken) controller = chosen
         publish()
     }
+
+    private fun idOf(c: MediaController) = c.sessionToken.hashCode().toString()
 
     private fun publish() {
         val c = controller

@@ -109,3 +109,36 @@ object VideoTitle {
         return cleaned to artist
     }
 }
+
+/** One media session as the card sees it. [id] is stable for the session, [hasTitle]: it shows something. */
+data class PlayerSession(val id: String, val packageName: String, val playing: Boolean, val hasTitle: Boolean)
+
+/**
+ * Which player the music card follows when several apps hold a media session (a paused music
+ * app, a YouTube video, a podcast…): what is playing wins, a music platform first; with nothing
+ * playing, the last music platform, else the last player. Within the same rank the card keeps the
+ * one it shows, so it never flickers between two of them.
+ */
+object PlayerChoice {
+    /** Apps made for music: preferred over videos and other media at the same rank. */
+    val MUSIC = setOf(
+        SpotifyTrack.PACKAGE, "com.deezer.android.app", "com.google.android.apps.youtube.music",
+        "app.revanced.android.apps.youtube.music", "com.apple.android.music", "com.amazon.mp3", "com.aspiro.tidal",
+        "com.soundcloud.android", "com.qobuz.music", "com.sec.android.app.music", "com.maxmpz.audioplayer",
+        "com.napster.android", "fm.last.android", "com.shazam.android",
+    )
+
+    /** [sessions] most recent first, as Android lists them; [current]: the session shown now. */
+    fun pick(sessions: List<PlayerSession>, current: String?): PlayerSession? {
+        val usable = sessions.filter { it.hasTitle }
+        fun rank(s: PlayerSession) = when {
+            s.playing && s.packageName in MUSIC -> 0
+            s.playing -> 1
+            s.packageName in MUSIC -> 2
+            else -> 3
+        }
+        val best = usable.minOfOrNull(::rank) ?: return null
+        val top = usable.filter { rank(it) == best }
+        return top.firstOrNull { it.id == current } ?: top.first()
+    }
+}

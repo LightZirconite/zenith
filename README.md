@@ -22,6 +22,16 @@ Zenith ne vient pas du Play Store : Play Protect peut bloquer l'installation, pa
 
 Ensuite, Zenith se met à jour tout seul.
 
+## Zenith et Waze
+
+Waze est fait pour te guider ; Zenith est fait pour te prévenir. Les deux tournent ensemble : Waze devant, Zenith en fond.
+
+- **Les radars d'abord** : Zenith rassemble chaque jour toutes les sources gratuites (liste officielle, carte de la Sécurité routière, OpenStreetMap, Lufop), les fusionne et retire les doublons. Pas besoin d'attendre qu'un autre conducteur signale un radar.
+- **Seulement ta route** : un radar sur une route parallèle ou une sortie que tu ne prends pas ne sonne pas. Garé ou à la maison, rien ne sonne.
+- **Des alertes faites pour ça** : voix courte, bips qui s'accélèrent si tu es trop vite, « Ralentis » quand il est temps de freiner, moyenne en direct sur les tronçons.
+- **Libre et sans rien en échange** : code ouvert, aucune publicité, aucun compte, ta position ne quitte jamais le téléphone.
+- **Une app soignée** : décollage dans les étoiles, verre, transitions et sons pensés pour la route.
+
 ## Fonctionnalités
 
 - Ta vitesse et la limitation de la route, en grand
