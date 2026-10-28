@@ -3,10 +3,12 @@ package zenith.app
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -42,6 +44,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import zenith.core.Cockpit
 import zenith.core.ControlZone
 import zenith.core.DriveSnapshot
 import zenith.core.Radar
@@ -55,7 +58,8 @@ private val Red = Color(0xFFFF3B30)
  * scales with the window size. Over the limit near a radar, a red frame pulses.
  * While a Spotify Canvas plays ([canvas] on), it fills the window behind the map, which stays
  * whole and turns barely see-through toward the bottom: the Canvas only colors it from behind,
- * the map always readable (wish of the author). The map always fills the window.
+ * the map always readable (wish of the author). The map always fills the window. Slow or stopped,
+ * the map lets more of the Canvas through, like the drive screen ([Cockpit]); an alert gives it back.
  */
 @Composable
 fun PipScreen(
@@ -64,8 +68,15 @@ fun PipScreen(
     zones: List<ControlZone> = emptyList(),
     media: MediaInfo? = null,
     canvas: Boolean = false,
+    /** The music's room chosen by a tap on the drive screen, if any. */
+    musicChoice: Boolean? = null,
 ) {
     val alert = s?.alerts?.firstOrNull()
+    val focus by animateFloatAsState(
+        Cockpit.music(s?.speedKmh, musicChoice, alerting = alert != null || s?.section != null),
+        spring(dampingRatio = 1f, stiffness = Spring.StiffnessVeryLow),
+        label = "pipMusic",
+    )
     val limit = s?.limitKmh
     val speed = s?.speedKmh
     val danger = alert?.overLimit == true
@@ -98,7 +109,9 @@ fun PipScreen(
             s,
             radars,
             zones,
-            Modifier.fillMaxSize().then(if (blend > 0f) Modifier.verticalFade(MeltStops.map { (y, a) -> y to 1f - blend * (1f - a) }) else Modifier),
+            Modifier.fillMaxSize().then(
+                if (blend > 0f) Modifier.verticalFade(blendStops(MeltStops, MeltStopsSlow, focus).map { (y, a) -> y to 1f - blend * (1f - a) }) else Modifier,
+            ),
             // Split: the car rides in the part of the map that stays.
             carAt = 0.5,
             overlay = PipMapShade,
@@ -173,6 +186,9 @@ fun PipScreen(
  * barely see-through lower down, so the Canvas only colors it from behind, never covering a road.
  */
 private val MeltStops = listOf(0f to 1f, 0.35f to 0.92f, 1f to 0.68f)
+
+/** Slow or stopped: the map still whole at the top, the Canvas clearly through it lower down. */
+private val MeltStopsSlow = listOf(0f to 0.95f, 0.35f to 0.6f, 1f to 0.3f)
 
 /** The map, calmer than on the drive screen, darker under the radar pill at the top. */
 private val PipMapShade = Brush.verticalGradient(

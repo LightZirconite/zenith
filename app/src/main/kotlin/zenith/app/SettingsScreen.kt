@@ -1,40 +1,47 @@
 package zenith.app
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.scaleIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
 
-private val Surface = Color(0xFF16161A)
+/** Cards and rows: glass a little see-through, the sky of home faint behind. */
+private val Surface = Color(0xD916161A)
 private val Accent = Color(0xFF0A84FF)
+private val Green = Color(0xFF30D158)
 private val Dim = Color(0xFF8E8E93)
 
 /** The few choices Zenith offers. Everything else is automatic. */
@@ -44,7 +51,7 @@ fun SettingsScreen(
     version: String,
     onChange: ((SettingsState) -> SettingsState) -> Unit,
     onPairCar: () -> Unit,
-    onUnpairCar: () -> Unit,
+    onUnpairCar: (Car) -> Unit,
     onBack: () -> Unit,
     onShareTrip: (() -> Unit)? = null,
     mediaAllowed: Boolean = false,
@@ -54,143 +61,177 @@ fun SettingsScreen(
     update: UpdateState = UpdateState.Idle,
     onCheckUpdate: () -> Unit = {},
 ) {
-    Column(Modifier.fillMaxSize().background(Color.Black).safeDrawingPadding().padding(horizontal = 20.dp, vertical = 12.dp)) {
-        Text(
-            "‹ Retour",
-            color = Accent,
-            fontSize = 17.sp,
-            modifier = Modifier.tap(onClick = onBack).clip(RoundedCornerShape(12.dp)).padding(vertical = 10.dp, horizontal = 4.dp),
-        )
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-            Spacer(Modifier.height(8.dp))
-            Text("Réglages", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(8.dp))
-            SectionTitle("Alertes")
-            Toggle(
-                "Annonces vocales",
-                "Désactivé : seulement les bips, sans voix.",
-                settings.voice,
-            ) { on -> onChange { it.copy(voice = on) } }
-            Toggle(
-                "Musique en pause pendant la voix",
-                "Spotify, YouTube ou la radio s'arrêtent le temps d'une annonce puis reprennent, pour tout comprendre même en " +
-                    "Bluetooth. Désactivé : la musique baisse seulement. Les bips, eux, baissent toujours la musique.",
-                settings.pauseMusic,
-            ) { on -> onChange { it.copy(pauseMusic = on) } }
-            Toggle(
-                "Jeune permis",
-                "Limites probatoires : 110 sur autoroute, 100 sur voie rapide, 80 sur route à 90.",
-                settings.probationary,
-            ) { on -> onChange { it.copy(probationary = on) } }
-            Toggle(
-                "Pluie automatique",
-                "Pendant la conduite, la météo (Open-Meteo, gratuit) dit s'il pleut et les limites baissent seules : 110 sur " +
-                    "autoroute, 100 sur voie rapide, 80 sur route. Rien à toucher. Seule une position arrondie à ~10 km est envoyée.",
-                settings.autoRain,
-            ) { on -> onChange { it.copy(autoRain = on) } }
-            SectionTitle("En voiture")
-            MotionCard(settings, permissions, onChange, onMotionPermission)
-            Card {
-                Text("Démarrage automatique en voiture", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(4.dp))
-                val text = when {
-                    !CarLink.supported -> "Nécessite Android 13 ou plus récent."
-                    settings.carName != null -> "Zenith démarre quand « ${settings.carName} » se connecte et s'arrête à la déconnexion."
-                    else -> "Choisis le Bluetooth de ta voiture : Zenith démarrera seul en montant, et s'arrêtera en descendant."
-                }
-                Text(text, color = Color.White.copy(alpha = 0.75f), fontSize = 14.sp)
-                if (CarLink.supported) {
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        if (settings.carName != null) "Retirer la voiture" else "Choisir la voiture",
-                        color = Color.White,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.tap(onClick = if (settings.carName != null) onUnpairCar else onPairCar)
-                            .clip(RoundedCornerShape(50))
-                            .background(if (settings.carName != null) Color(0xFF2C2C30) else Accent)
-                            .padding(horizontal = 16.dp, vertical = 9.dp),
-                    )
-                }
+    LargeTitlePage(
+        title = "Réglages",
+        leading = {
+            Text(
+                "‹ Retour",
+                color = Accent,
+                fontSize = 17.sp,
+                modifier = Modifier.tap(onClick = onBack).clip(RoundedCornerShape(12.dp)).padding(vertical = 10.dp, horizontal = 4.dp),
+            )
+        },
+    ) {
+        // Each block arrives in turn, top to bottom.
+        var order = 0
+        Spacer(Modifier.height(8.dp))
+        SectionTitle("Alertes", Modifier.cascade(order++))
+        Toggle(
+            "Annonces vocales",
+            "Désactivé : seulement les bips, sans voix.",
+            settings.voice,
+            Modifier.cascade(order++),
+        ) { on -> onChange { it.copy(voice = on) } }
+        Toggle(
+            "Musique en pause pendant la voix",
+            "Désactivé (conseillé) : pendant une annonce, Spotify, YouTube ou la radio baissent en douceur puis remontent " +
+                "de même. Activé : la musique baisse puis s'arrête le temps de l'annonce. Les bips, eux, ne font que la baisser.",
+            settings.pauseMusic,
+            Modifier.cascade(order++),
+        ) { on -> onChange { it.copy(pauseMusic = on) } }
+        Toggle(
+            "Jeune permis",
+            "Limites probatoires : 110 sur autoroute, 100 sur voie rapide, 80 sur route à 90.",
+            settings.probationary,
+            Modifier.cascade(order++),
+        ) { on -> onChange { it.copy(probationary = on) } }
+        Toggle(
+            "Pluie automatique",
+            "Pendant la conduite, la météo (Open-Meteo, gratuit) dit s'il pleut et les limites baissent seules : 110 sur " +
+                "autoroute, 100 sur voie rapide, 80 sur route. Rien à toucher. Seule une position arrondie à ~10 km est envoyée.",
+            settings.autoRain,
+            Modifier.cascade(order++),
+        ) { on -> onChange { it.copy(autoRain = on) } }
+        SectionTitle("En voiture", Modifier.cascade(order++))
+        MotionCard(settings, permissions, onChange, onMotionPermission, Modifier.cascade(order++))
+        CarsCard(settings.cars, onPairCar, onUnpairCar, Modifier.cascade(order++))
+        Toggle(
+            "Arrêt automatique",
+            "Pour la batterie : Zenith s'arrête seul quand la voiture est garée depuis 10 minutes, quand tu repars à pied " +
+                "ou à l'intérieur sans GPS. Jamais sur autoroute ni pendant un bouchon. Une conduite lancée par l'une des " +
+                "voitures choisies au-dessus s'arrête, elle, avec la voiture.",
+            settings.autoStop,
+            Modifier.cascade(order++),
+        ) { on -> onChange { it.copy(autoStop = on) } }
+        SectionTitle("Musique et petite fenêtre", Modifier.cascade(order++))
+        Card(Modifier.cascade(order++)) {
+            Text("Musique", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                if (mediaAllowed) {
+                    "Le titre en cours (Spotify, YouTube, Deezer…), sa progression et ses commandes s'affichent sous les alertes " +
+                        "pendant la conduite. Une touche sur le titre ouvre le lecteur."
+                } else {
+                    "Titre en cours et commandes de Spotify ou de ton lecteur, sous les alertes. Sans compte ni clé. Android appelle " +
+                        "cela « accès aux notifications » : Zenith n'y lit que le lecteur de musique. Si l'option est grisée : " +
+                        "Infos de l'appli Zenith → ⋮ → Autoriser les paramètres restreints."
+                },
+                color = Color.White.copy(alpha = 0.75f),
+                fontSize = 14.sp,
+            )
+            if (!mediaAllowed) {
+                Spacer(Modifier.height(12.dp))
+                Pill("Autoriser", onClick = onAllowMedia)
             }
-            Toggle(
-                "Arrêt automatique",
-                "Pour la batterie : Zenith s'arrête seul quand la voiture est garée depuis 10 minutes, quand tu repars à pied " +
-                    "ou à l'intérieur sans GPS. Jamais sur autoroute ni pendant un bouchon. Une conduite lancée par la voiture " +
-                    "choisie au-dessus s'arrête, elle, avec la voiture.",
-                settings.autoStop,
-            ) { on -> onChange { it.copy(autoStop = on) } }
-            SectionTitle("Musique et petite fenêtre")
-            Card {
-                Text("Musique", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        }
+        Toggle(
+            "Canvas",
+            "La courte vidéo en boucle des titres (celle de Spotify), derrière la carte Musique et dans la petite fenêtre, " +
+                "quel que soit ton lecteur : Spotify, Deezer, YouTube Music, Apple Music… (pas pour une vidéo YouTube). " +
+                "Services gratuits non officiels (Spicy Lyrics, AuraMusic) : peut cesser de marcher, et tous les titres " +
+                "n'en ont pas. Environ 3 Mo par titre, gardés en cache. Sinon, la pochette floutée.",
+            settings.spotifyCanvas,
+            Modifier.cascade(order++),
+        ) { on -> onChange { it.copy(spotifyCanvas = on) } }
+        Toggle(
+            "Petite fenêtre carrée",
+            "Désactivé : en quittant Zenith pendant la conduite, un bandeau compact en largeur, qui laisse voir Waze ou " +
+                "Maps. Activé : une fenêtre carrée, plus grande. Un double appui sur la fenêtre l'agrandit aussi un moment.",
+            settings.pipLarge,
+            Modifier.cascade(order++),
+        ) { on -> onChange { it.copy(pipLarge = on) } }
+        SectionTitle("Application", Modifier.cascade(order++))
+        UpdateCard(version, update, onCheckUpdate, Modifier.cascade(order++))
+        if (onShareTrip != null) {
+            Card(Modifier.cascade(order++)) {
+                Text("Dernier trajet", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    if (mediaAllowed) {
-                        "Le titre en cours (Spotify, YouTube, Deezer…), sa progression et ses commandes s'affichent sous les alertes " +
-                            "pendant la conduite. Une touche sur le titre ouvre le lecteur."
-                    } else {
-                        "Titre en cours et commandes de Spotify ou de ton lecteur, sous les alertes. Sans compte ni clé. Android appelle " +
-                            "cela « accès aux notifications » : Zenith n'y lit que le lecteur de musique. Si l'option est grisée : " +
-                            "Infos de l'appli Zenith → ⋮ → Autoriser les paramètres restreints."
-                    },
+                    "Fichier GPX de ton dernier trajet, pour signaler une alerte manquée ou fausse : il se rejoue tel quel.",
                     color = Color.White.copy(alpha = 0.75f),
                     fontSize = 14.sp,
                 )
-                if (!mediaAllowed) {
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        "Autoriser",
-                        color = Color.White,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.tap(onClick = onAllowMedia).clip(RoundedCornerShape(50)).background(Accent)
-                            .padding(horizontal = 16.dp, vertical = 9.dp),
-                    )
-                }
+                Spacer(Modifier.height(12.dp))
+                Pill("Partager", onClick = onShareTrip)
             }
-            Toggle(
-                "Canvas",
-                "La courte vidéo en boucle des titres (celle de Spotify), derrière la carte Musique et dans la petite fenêtre, " +
-                    "quel que soit ton lecteur : Spotify, Deezer, YouTube Music, Apple Music… (pas pour une vidéo YouTube). " +
-                    "Services gratuits non officiels (Spicy Lyrics, AuraMusic) : peut cesser de marcher, et tous les titres " +
-                    "n'en ont pas. Environ 3 Mo par titre, gardés en cache. Sinon, la pochette floutée.",
-                settings.spotifyCanvas,
-            ) { on -> onChange { it.copy(spotifyCanvas = on) } }
-            Toggle(
-                "Petite fenêtre carrée",
-                "Désactivé : en quittant Zenith pendant la conduite, un bandeau compact en largeur, qui laisse voir Waze ou " +
-                    "Maps. Activé : une fenêtre carrée, plus grande. Un double appui sur la fenêtre l'agrandit aussi un moment.",
-                settings.pipLarge,
-            ) { on -> onChange { it.copy(pipLarge = on) } }
-            SectionTitle("Application")
-            UpdateCard(version, update, onCheckUpdate)
-            if (onShareTrip != null) {
-                Card {
-                    Text("Dernier trajet", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "Fichier GPX de ton dernier trajet, pour signaler une alerte manquée ou fausse : il se rejoue tel quel.",
-                        color = Color.White.copy(alpha = 0.75f),
-                        fontSize = 14.sp,
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        "Partager",
-                        color = Color.White,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.tap(onClick = onShareTrip).clip(RoundedCornerShape(50)).background(Accent)
-                            .padding(horizontal = 16.dp, vertical = 9.dp),
-                    )
-                }
+        }
+        Spacer(Modifier.height(16.dp))
+        Text(
+            "Zenith $version\nCartes © OpenFreeMap © OpenStreetMap\nRadars : data.gouv.fr (Licence Ouverte), OpenStreetMap (ODbL), Lufop\n" +
+                "Astuce : appui long sur le logo de l'accueil pour un trajet de démo.",
+            color = Dim,
+            fontSize = 12.sp,
+            modifier = Modifier.cascade(order++),
+        )
+    }
+}
+
+/**
+ * The cars whose Bluetooth starts Zenith: one row each, removable, and a button to add another.
+ * Any of them connecting starts the drive; its disconnection ends it.
+ */
+@Composable
+private fun CarsCard(cars: List<Car>, onAdd: () -> Unit, onRemove: (Car) -> Unit, modifier: Modifier = Modifier) {
+    Card(modifier.animateContentSize(spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow))) {
+        Text("Démarrage automatique en voiture", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            when {
+                !CarLink.supported -> "Nécessite Android 13 ou plus récent."
+                cars.isEmpty() -> "Choisis le Bluetooth de ta voiture : Zenith démarrera seul en montant, et s'arrêtera en " +
+                    "descendant. Plusieurs voitures possibles."
+                cars.size == 1 -> "Zenith démarre quand « ${cars[0].name} » se connecte et s'arrête à la déconnexion."
+                else -> "Zenith démarre dès que l'une de tes ${cars.size} voitures se connecte, et s'arrête à sa déconnexion."
+            },
+            color = Color.White.copy(alpha = 0.75f),
+            fontSize = 14.sp,
+        )
+        if (CarLink.supported) {
+            for (car in cars) {
+                key(car.associationId) { CarRow(car, onRemove) }
             }
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(12.dp))
+            Pill(if (cars.isEmpty()) "Choisir la voiture" else "Ajouter une voiture", onClick = onAdd)
+        }
+    }
+}
+
+/** A paired car, popping in when just added. */
+@Composable
+private fun CarRow(car: Car, onRemove: (Car) -> Unit) {
+    val shown = remember { MutableTransitionState(false).apply { targetState = true } }
+    AnimatedVisibility(
+        visibleState = shown,
+        enter = fadeIn() + expandVertically(spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)) +
+            scaleIn(spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMediumLow), initialScale = 0.9f),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(top = 12.dp).glass(RoundedCornerShape(14.dp), Color.White.copy(alpha = 0.05f))
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(8.dp).background(Green, CircleShape))
+            Spacer(Modifier.width(10.dp))
             Text(
-                "Zenith $version\nCartes © OpenFreeMap © OpenStreetMap\nRadars : data.gouv.fr (Licence Ouverte), OpenStreetMap (ODbL), Lufop\n" +
-                    "Astuce : appui long sur le logo de l'accueil pour un trajet de démo.",
-                color = Dim,
-                fontSize = 12.sp,
+                car.name,
+                color = Color.White,
+                fontSize = 16.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
             )
+            Spacer(Modifier.width(10.dp))
+            Pill("Retirer", color = Color(0xFF2C2C30), onClick = { onRemove(car) })
         }
     }
 }
@@ -202,6 +243,7 @@ private fun MotionCard(
     permissions: Permissions?,
     onChange: ((SettingsState) -> SettingsState) -> Unit,
     onPermission: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val available = permissions?.motionAvailable == true
     val missing = when {
@@ -210,7 +252,7 @@ private fun MotionCard(
         permissions?.backgroundLocation != true -> "Autoriser la position « Toujours »"
         else -> null
     }
-    Card {
+    Card(modifier) {
         Row(
             Modifier.fillMaxWidth().tap(enabled = available) { onChange { it.copy(motionStart = !it.motionStart) } },
             verticalAlignment = Alignment.CenterVertically,
@@ -226,7 +268,7 @@ private fun MotionCard(
                                 "presque sans batterie). Il faut « Activité physique », puis la position « Toujours autoriser » : " +
                                 "sans elle, Android coupe le GPS d'une conduite démarrée seule."
                         settings.motionStart -> "Zenith démarre seul quand tu roules en voiture, même fermé, et s'arrête une fois garé."
-                        else -> "Désactivé : Zenith ne démarre seul qu'avec le Bluetooth de ta voiture."
+                        else -> "Désactivé : Zenith ne démarre seul qu'avec le Bluetooth de tes voitures."
                     },
                     color = Color.White.copy(alpha = 0.75f),
                     fontSize = 14.sp,
@@ -237,22 +279,15 @@ private fun MotionCard(
         }
         if (missing != null) {
             Spacer(Modifier.height(12.dp))
-            Text(
-                missing,
-                color = Color.White,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.tap(onClick = onPermission).clip(RoundedCornerShape(50)).background(Accent)
-                    .padding(horizontal = 16.dp, vertical = 9.dp),
-            )
+            Pill(missing, onClick = onPermission)
         }
     }
 }
 
 /** Where the self-update stands, with a button to look at once instead of waiting for the next check. */
 @Composable
-private fun UpdateCard(version: String, update: UpdateState, onCheck: () -> Unit) {
-    Card {
+private fun UpdateCard(version: String, update: UpdateState, onCheck: () -> Unit, modifier: Modifier = Modifier) {
+    Card(modifier) {
         Text("Mises à jour", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(4.dp))
         Text(
@@ -269,41 +304,47 @@ private fun UpdateCard(version: String, update: UpdateState, onCheck: () -> Unit
             fontSize = 14.sp,
         )
         Spacer(Modifier.height(12.dp))
-        Text(
-            "Rechercher maintenant",
-            color = Color.White,
-            fontSize = 15.sp,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.tap(onClick = onCheck).clip(RoundedCornerShape(50)).background(Accent)
-                .padding(horizontal = 16.dp, vertical = 9.dp),
-        )
+        Pill("Rechercher maintenant", onClick = onCheck)
     }
 }
 
 /** Small gray heading over a group of settings, iOS-style. */
 @Composable
-private fun SectionTitle(title: String) {
+private fun SectionTitle(title: String, modifier: Modifier = Modifier) {
     Text(
         title.uppercase(),
         color = Dim,
         fontSize = 13.sp,
         fontWeight = FontWeight.SemiBold,
         letterSpacing = 0.6.sp,
-        modifier = Modifier.padding(start = 6.dp, top = 14.dp, bottom = 8.dp),
+        modifier = modifier.padding(start = 6.dp, top = 14.dp, bottom = 8.dp),
     )
 }
 
 @Composable
-private fun Card(content: @Composable () -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(bottom = 12.dp).glass(RoundedCornerShape(20.dp), Surface).padding(18.dp)) {
+private fun Card(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    Column(modifier.fillMaxWidth().padding(bottom = 12.dp).glass(RoundedCornerShape(20.dp), Surface).padding(18.dp)) {
         content()
     }
 }
 
+/** Rounded action button inside a card. */
 @Composable
-private fun Toggle(title: String, text: String, on: Boolean, onToggle: (Boolean) -> Unit) {
+private fun Pill(text: String, color: Color = Accent, onClick: () -> Unit) {
+    Text(
+        text,
+        color = Color.White,
+        fontSize = 15.sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.tap(onClick = onClick).clip(RoundedCornerShape(50)).background(color)
+            .padding(horizontal = 16.dp, vertical = 9.dp),
+    )
+}
+
+@Composable
+private fun Toggle(title: String, text: String, on: Boolean, modifier: Modifier = Modifier, onToggle: (Boolean) -> Unit) {
     Row(
-        Modifier.fillMaxWidth().padding(bottom = 12.dp).tap { onToggle(!on) }
+        modifier.fillMaxWidth().padding(bottom = 12.dp).tap { onToggle(!on) }
             .glass(RoundedCornerShape(20.dp), Surface).padding(18.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -317,10 +358,10 @@ private fun Toggle(title: String, text: String, on: Boolean, onToggle: (Boolean)
     }
 }
 
-/** iOS-like switch, animated. */
+/** iOS-like switch, animated: the knob springs across, the track glows green. */
 @Composable
 private fun Switch(on: Boolean) {
-    val track by animateColorAsState(if (on) Color(0xFF30D158) else Color(0xFF3A3A3C), label = "track")
+    val track by animateColorAsState(if (on) Green else Color(0xFF3A3A3C), label = "track")
     val knob by animateDpAsState(if (on) 20.dp else 0.dp, spring(dampingRatio = 0.65f, stiffness = Spring.StiffnessMediumLow), label = "knob")
     Box(Modifier.size(width = 50.dp, height = 30.dp).clip(RoundedCornerShape(50)).background(track).padding(3.dp)) {
         Box(Modifier.offset(x = knob).size(24.dp).background(Color.White, CircleShape))

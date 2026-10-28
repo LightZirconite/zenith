@@ -2,12 +2,16 @@ package zenith.app
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateIntAsState
 import androidx.compose.animation.core.infiniteRepeatable
@@ -29,6 +33,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -37,7 +42,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.statusBarsIgnoringVisibility
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
@@ -47,8 +57,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -76,7 +88,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import zenith.core.ActiveAlert
+import zenith.core.AlertEvent
+import zenith.core.Cockpit
 import zenith.core.ControlZone
 import zenith.core.DriveSnapshot
 import zenith.core.LimitSource
@@ -93,7 +108,7 @@ private val Green = Color(0xFF30D158)
 private val Dim = Color(0xFF8E8E93)
 
 /**
- * Shows the content through a growing circle from the tunnel's heart (42 % down the screen), with a
+ * Shows the content through a circle around the tunnel's heart ([HEART_Y] down the screen), with a
  * soft rim: 0 nothing, 1 everything, no mask at all.
  */
 private fun Modifier.portalReveal(progress: Float): Modifier {
@@ -107,7 +122,7 @@ private fun Modifier.portalReveal(progress: Float): Modifier {
                 0f to Color.Black,
                 (r * 0.82f) to Color.Black,
                 r to Color.Transparent,
-                center = Offset(size.width / 2, size.height * 0.42f),
+                center = Offset(size.width / 2, size.height * HEART_Y),
                 radius = reach,
             ),
             blendMode = BlendMode.DstIn,
@@ -124,11 +139,17 @@ private const val MIN_FLIGHT_MS = 3_500L
 /** A position without a trusted speed (indoors) still lands after this wait. */
 private const val WEAK_FIX_WAIT_MS = 15_000L
 
+/** Home's buttons rise back into place after a drive, and sink away at Start. */
+private val BottomIn = fadeIn(tween(500, delayMillis = 400)) +
+    slideInVertically(spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessLow)) { it }
+private val BottomOut = fadeOut(tween(200)) + slideOutVertically(tween(300)) { it / 2 }
+
+/** Chips pop in with a spring and shrink away. */
+private val ChipIn = fadeIn(tween(300)) + scaleIn(spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMedium), initialScale = 0.7f)
+private val ChipOut = fadeOut(tween(200)) + scaleOut(tween(200), targetScale = 0.85f)
+
 /** The map's height, as a share of the screen: lower than where it visibly ends, for its faint tail. */
 private const val MAP_HEIGHT = 0.8f
-
-/** Where the music backdrop starts, as a share of the screen: higher than where it visibly begins. */
-private const val BACKDROP_TOP = 0.2f
 
 /** Alone, the map fades into the black where it always did (62 % of the screen), black below. */
 private val MapAlone = Brush.verticalGradient(
@@ -161,6 +182,7 @@ private val MapOverCanvas = listOf(0f to 1f, 0.35f to 1f, 0.45f to 0.85f, 0.575f
 /** Music mode: the map keeps only the top of the screen, the Canvas takes the rest. */
 private val MapInMusicMode = listOf(0f to 1f, 0.15f to 1f, 0.25f to 0.6f, 0.33f to 0.35f, 0.42f to 0.18f, 0.52f to 0.08f, 0.65f to 0.02f, 1f to 0f)
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun DriveScreen(
     running: Boolean,
@@ -189,10 +211,13 @@ fun DriveScreen(
     onMediaPlayPause: () -> Unit = {},
     onMediaNext: () -> Unit = {},
     onMediaSeek: (Long) -> Unit = {},
+    /** The music's room chosen by a tap on the music card, until the speed agrees ([Cockpit]). */
+    musicChoice: Boolean? = null,
+    onMusicChoice: (Boolean) -> Unit = {},
 ) {
     // The start is a flight through space: stars at home, a tunnel while the GPS searches, a jump at
     // the first good position, and the map comes in at the flash. Opened mid-drive: straight to the map.
-    var landed by remember(running) { mutableStateOf(snapshot?.speedKmh != null) }
+    var landed by remember(running) { mutableStateOf(running && snapshot?.speedKmh != null) }
     var flightOver by remember(running) { mutableStateOf(landed) }
     var minFlightDone by remember(running) { mutableStateOf(false) }
     var weakFixWaited by remember(running) { mutableStateOf(false) }
@@ -216,7 +241,20 @@ fun DriveScreen(
         landed || (fixGood && minFlightDone) -> FlightPhase.ARRIVE
         else -> FlightPhase.SEARCH
     }
+    // The demo has no GPS: its satellites lock by themselves during the flight.
+    var demoLocked by remember(running) { mutableIntStateOf(0) }
+    LaunchedEffect(running, demo) {
+        while (running && demo && demoLocked < 4) {
+            delay(650)
+            demoLocked++
+        }
+    }
+    val sky = if (demo) GpsInfo(used = demoLocked, visible = 9) else gps
+    // A drive just ended (seen at the change itself): the stars rush back out of hyperspace.
+    val lastRunning = remember { booleanArrayOf(running) }
+    val comingHome = remember(running) { (!running && lastRunning[0]).also { lastRunning[0] = running } }
     val sound = rememberWarpSound()
+    val soundScope = rememberCoroutineScope()
     var heardPhase by remember { mutableStateOf<FlightPhase?>(null) }
     LaunchedEffect(phase, flightOver) {
         val before = heardPhase
@@ -224,6 +262,7 @@ fun DriveScreen(
         when {
             phase == FlightPhase.SEARCH && !flightOver -> {
                 if (before == FlightPhase.IDLE) {
+                    sound.musicAway()
                     sound.engage()
                     delay(1_400)
                 }
@@ -231,38 +270,106 @@ fun DriveScreen(
             }
             phase == FlightPhase.ARRIVE && before == FlightPhase.SEARCH -> {
                 sound.arrive()
+                // Apart from this effect, which the end of the jump restarts: the music comes back at the boom.
+                soundScope.launch {
+                    delay(JUMP_IMPACT_MS)
+                    sound.musicBack()
+                }
                 sound.fadeHum(900)
             }
-            else -> sound.fadeHum()
+            else -> {
+                if (phase == FlightPhase.IDLE) sound.musicNow()
+                sound.fadeHum()
+            }
+        }
+    }
+    // Each satellite locked during the search: a soft note, higher each time.
+    var heardLocks by remember(running) { mutableIntStateOf(0) }
+    LaunchedEffect(sky.used, phase) {
+        val n = sky.used.coerceAtMost(4)
+        if (phase == FlightPhase.SEARCH && n > heardLocks) {
+            heardLocks = n
+            sound.lock(n)
         }
     }
 
     val showMap = running && hasFix && landed
-    // Music mode: a tap on the music card brings the Canvas up the screen; an alert brings the map back.
-    var musicMode by remember(running) { mutableStateOf(false) }
+    // Music mode: slow or stopped, the Canvas rises up the screen, more the slower; from town speeds
+    // the map has it. A tap on the music card decides instead until the speed agrees; an alert
+    // always brings the map back.
     val alerting = snapshot?.alerts?.isNotEmpty() == true || snapshot?.section != null
     val focus by animateFloatAsState(
-        if (musicMode && media != null && !alerting) 1f else 0f,
-        spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessVeryLow),
+        if (media == null) 0f else Cockpit.music(snapshot?.speedKmh, musicChoice, alerting),
+        spring(dampingRatio = 1f, stiffness = Spring.StiffnessVeryLow),
         label = "musicMode",
     )
+    // On the road the buttons step back (smaller, the shortcuts folded away): nothing to touch by
+    // accident, more room for the road; slow or stopped, they come back.
+    var cruising by remember(running) { mutableStateOf(false) }
+    LaunchedEffect(snapshot?.speedKmh) { cruising = Cockpit.cruising(snapshot?.speedKmh, cruising) }
+    // The flight takes the whole screen: the status bar (time, battery) folds away until the map is there.
+    ImmersiveBars(hidden = running && !flightOver)
     val withMusic by animateFloatAsState(if (media != null) 1f else 0f, tween(900), label = "withMusic")
     // The arrival: the whole scene (map and Canvas, loaded during the flight) opens like a portal
-    // from the heart of the tunnel at the flash, rushing in from a zoom, with a shock ring.
-    val portal = remember(running) { Animatable(if (landed) 1f else 0f) }
-    LaunchedEffect(showMap) {
-        if (showMap) portal.animateTo(1f, tween(1_000, easing = FastOutSlowInEasing)) else portal.snapTo(0f)
+    // from the heart of the tunnel at the flash, rushing in from a zoom, with a shock ring. At the
+    // stop it closes back into the heart, receding, while the stars rush out of it.
+    val portal = remember { Animatable(if (landed) 1f else 0f) }
+    var sceneUp by remember { mutableStateOf(running) }
+    LaunchedEffect(running, showMap) {
+        when {
+            showMap -> {
+                sceneUp = true
+                portal.animateTo(1f, tween(1_000, easing = FastOutSlowInEasing))
+            }
+            running -> {
+                sceneUp = true
+                portal.snapTo(0f)
+            }
+            portal.value > 0f -> {
+                portal.animateTo(0f, tween(900, easing = FastOutSlowInEasing))
+                sceneUp = false
+            }
+            else -> sceneUp = false
+        }
+    }
+    // Each radar (or section) passed: a band of light sweeps down the screen, as under a gantry.
+    var passes by remember { mutableIntStateOf(0) }
+    var passFlash by remember { mutableStateOf(false) }
+    LaunchedEffect(snapshot) {
+        val flash = snapshot?.events?.firstNotNullOfOrNull { event ->
+            when (event) {
+                is AlertEvent.Passed -> event.wouldFlash
+                is AlertEvent.SectionEnded -> event.wouldFlash
+                else -> null
+            }
+        } ?: return@LaunchedEffect
+        passFlash = flash
+        passes++
+    }
+    val pass = remember { Animatable(1f) }
+    LaunchedEffect(passes) {
+        if (passes > 0) {
+            pass.snapTo(0f)
+            pass.animateTo(1f, tween(1_200, easing = LinearOutSlowInEasing))
+        }
     }
     Box(Modifier.fillMaxSize().background(Bg)) {
         AnimatedVisibility(visible = !flightOver, enter = fadeIn(tween(800)), exit = fadeOut(tween(200))) {
-            Starfield(phase, gps, onLanded = { landed = true }, onGone = { flightOver = true }, modifier = Modifier.fillMaxSize())
+            Starfield(
+                phase,
+                sky,
+                onLanded = { landed = true },
+                onGone = { flightOver = true },
+                modifier = Modifier.fillMaxSize(),
+                comingHome = comingHome,
+            )
         }
-        if (running) {
+        if (running || sceneUp) {
             Box(
                 Modifier.fillMaxSize().portalReveal(portal.value).graphicsLayer {
                     val k = portal.value
                     alpha = if (k <= 0f) 0f else 1f
-                    val scale = 1.35f - 0.35f * k
+                    val scale = if (running) 1.35f - 0.35f * k else 0.75f + 0.25f * k
                     scaleX = scale
                     scaleY = scale
                 },
@@ -277,7 +384,7 @@ fun DriveScreen(
                         // An alert on screen: the music steps back.
                         calm = snapshot?.alerts?.isNotEmpty() == true,
                         focus = focus,
-                        modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(1f - BACKDROP_TOP),
+                        modifier = Modifier.fillMaxSize(),
                     )
                 }
                 // Tilted map over the top of the screen. It reaches low: alone, it fades into the black
@@ -301,10 +408,25 @@ fun DriveScreen(
             }
             ShockRing(portal.value, modifier = Modifier.fillMaxSize())
         }
+        // The flight's words, under the globe at the tunnel's heart; they rush past the viewer at the jump.
+        AnimatedVisibility(
+            visible = phase == FlightPhase.SEARCH,
+            enter = fadeIn(tween(700, delayMillis = 900)) +
+                slideInVertically(tween(900, delayMillis = 900, easing = FastOutSlowInEasing)) { it / 4 },
+            exit = fadeOut(tween(300)) + scaleOut(tween(400), targetScale = 1.8f),
+        ) {
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+                val globe = minOf(maxWidth, maxHeight) * GLOBE_SHARE
+                FlightCaption(sky, demo, Modifier.align(Alignment.TopCenter).padding(top = maxHeight * HEART_Y + globe * 1.75f + 16.dp))
+            }
+        }
         // Too fast near a radar: the edges of the screen pulse red.
         DangerGlow(on = landed && snapshot?.alerts?.firstOrNull()?.overLimit == true, modifier = Modifier.fillMaxSize())
+        RadarPassWave(pass.value, passFlash, Modifier.fillMaxSize())
         Column(
-            modifier = Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 20.dp, vertical = 12.dp),
+            // The status bar's room is kept while it is folded away for the flight: nothing jumps.
+            modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.union(WindowInsets.statusBarsIgnoringVisibility))
+                .padding(horizontal = 20.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             StatusRow(running && landed, gps, data, demo, snapshot)
@@ -325,13 +447,22 @@ fun DriveScreen(
                 AnimatedContent(
                     view,
                     transitionSpec = {
-                        if (initialState == HomeView.FLIGHT && targetState == HomeView.DRIVE) {
-                            (fadeIn(tween(400, delayMillis = 100)) + scaleIn(spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessLow), initialScale = 1.5f))
-                                .togetherWith(fadeOut(tween(300)) + scaleOut(tween(350), targetScale = 2.6f))
-                        } else {
-                            (fadeIn(tween(500, delayMillis = 150)) + scaleIn(spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessLow), initialScale = 0.9f))
-                                .togetherWith(fadeOut(tween(250)) + scaleOut(tween(250), targetScale = 1.05f))
-                        }
+                        when {
+                            // Start: home rushes past the viewer as the tunnel forms.
+                            initialState == HomeView.IDLE && targetState == HomeView.FLIGHT ->
+                                EnterTransition.None
+                                    .togetherWith(fadeOut(tween(450)) + scaleOut(tween(600, easing = FastOutSlowInEasing), targetScale = 2.4f))
+                            initialState == HomeView.FLIGHT && targetState == HomeView.DRIVE ->
+                                (fadeIn(tween(400, delayMillis = 100)) + scaleIn(spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessLow), initialScale = 1.5f))
+                                    .togetherWith(fadeOut(tween(300)) + scaleOut(tween(350), targetScale = 2.6f))
+                            // Back home: the speed recedes, home comes out of the distance as the stars slow down.
+                            targetState == HomeView.IDLE ->
+                                (fadeIn(tween(700, delayMillis = 350)) + scaleIn(spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessVeryLow), initialScale = 0.55f))
+                                    .togetherWith(fadeOut(tween(300)) + scaleOut(tween(500), targetScale = 0.7f))
+                            else ->
+                                (fadeIn(tween(500, delayMillis = 150)) + scaleIn(spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessLow), initialScale = 0.9f))
+                                    .togetherWith(fadeOut(tween(250)) + scaleOut(tween(250), targetScale = 1.05f))
+                        }.using(SizeTransform(clip = false))
                     },
                     contentAlignment = Alignment.Center,
                     label = "home",
@@ -339,7 +470,8 @@ fun DriveScreen(
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         when (shown) {
                             HomeView.IDLE -> Idle(data, onDemo)
-                            HomeView.FLIGHT -> FlightCaption(gps, demo)
+                            // The flight's words sit under the globe, drawn over the whole screen.
+                            HomeView.FLIGHT -> Spacer(Modifier.height(1.dp))
                             HomeView.DRIVE -> Dashboard(snapshot, Modifier.padding(top = if (showMap) 72.dp else 0.dp))
                         }
                     }
@@ -356,7 +488,7 @@ fun DriveScreen(
                 media?.let {
                     MediaBar(
                         it,
-                        onTap = { musicMode = !musicMode },
+                        onTap = { onMusicChoice(Cockpit.toggle(focus)) },
                         onOpen = onMediaOpen,
                         onLike = onMediaLike,
                         onPrevious = onMediaPrevious,
@@ -367,14 +499,14 @@ fun DriveScreen(
                 }
             }
             AnimatedVisibility(
-                visible = running && landed && navApps.isNotEmpty(),
+                visible = running && landed && navApps.isNotEmpty() && !cruising,
                 enter = fadeIn(tween(600, delayMillis = 750)) + slideInVertically(tween(700, delayMillis = 750, easing = FastOutSlowInEasing)) { it / 2 },
                 exit = fadeOut(),
             ) {
                 NavApps(navApps, onOpenNavApp)
             }
-            StartStop(running, onStart, onStop)
-            AnimatedVisibility(visible = !running, enter = fadeIn(), exit = fadeOut()) {
+            StartStop(running, onStart, onStop, compact = running && cruising)
+            AnimatedVisibility(visible = !running, enter = BottomIn, exit = BottomOut) {
                 Text(
                     "Réglages",
                     color = Color.White,
@@ -385,7 +517,7 @@ fun DriveScreen(
                         .padding(vertical = 14.dp),
                 )
             }
-            AnimatedVisibility(visible = !running, enter = fadeIn(), exit = fadeOut()) {
+            AnimatedVisibility(visible = !running, enter = BottomIn, exit = BottomOut) {
                 Text(
                     "Cartes © OpenFreeMap © OpenStreetMap · radars data.gouv.fr, OpenStreetMap, Lufop",
                     color = Dim.copy(alpha = 0.6f),
@@ -419,18 +551,18 @@ private fun StatusRow(
         }
     }
     Row(Modifier.fillMaxWidth().height(32.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        AnimatedVisibility(visible = running && demo, enter = fadeIn(), exit = fadeOut()) {
+        AnimatedVisibility(visible = running && demo, enter = ChipIn, exit = ChipOut) {
             Chip("Démo · trajet simulé", Color(0xFF0A84FF))
         }
-        AnimatedVisibility(visible = running && !demo && estimated, enter = fadeIn(), exit = fadeOut()) {
+        AnimatedVisibility(visible = running && !demo && estimated, enter = ChipIn, exit = ChipOut) {
             Chip("Tunnel · position estimée", Orange)
         }
         // Control itinerary: a movable radar may be anywhere along it.
         val zone = snapshot?.zone
-        AnimatedVisibility(visible = running && zone != null && !estimated, enter = fadeIn(), exit = fadeOut()) {
+        AnimatedVisibility(visible = running && zone != null && !estimated, enter = ChipIn, exit = ChipOut) {
             Chip("Itinéraire de contrôle · ${((zone?.remainingM ?: 0.0) / 1_000).roundToInt().coerceAtLeast(1)} km", Orange)
         }
-        AnimatedVisibility(visible = running && !demo && !estimated && zone == null && showGps, enter = fadeIn(), exit = fadeOut()) {
+        AnimatedVisibility(visible = running && !demo && !estimated && zone == null && showGps, enter = ChipIn, exit = ChipOut) {
             val text = when {
                 gps.accuracyM == null -> "Satellites ${gps.used}/${gps.visible} · recherche"
                 gpsGood -> "GPS ±${gps.accuracyM.roundToInt()} m · ${gps.used} sat."
@@ -439,7 +571,7 @@ private fun StatusRow(
             Chip(text, if (gpsGood) Green else Orange)
         }
         Spacer(Modifier.weight(1f))
-        AnimatedVisibility(visible = data.loading || data.error != null, enter = fadeIn(), exit = fadeOut()) {
+        AnimatedVisibility(visible = data.loading || data.error != null, enter = ChipIn, exit = ChipOut) {
             Chip(data.error ?: "Chargement des routes…", if (data.error != null) Orange else Dim)
         }
     }
@@ -585,15 +717,28 @@ private fun Dashboard(s: DriveSnapshot?, modifier: Modifier = Modifier) {
 /** Round limit sign; gray ring when the limit is only inferred (road type, built-up area or not). */
 @Composable
 internal fun LimitSign(limitKmh: Int, uncertain: Boolean, size: Dp = 104.dp) {
-    // A new limit pops in, so the eye catches the change.
+    // A new limit pops in and sends out a ring, so the eye catches the change.
     val pop = remember { Animatable(1f) }
+    val ring = remember { Animatable(1f) }
     LaunchedEffect(limitKmh) {
+        launch {
+            ring.snapTo(0f)
+            ring.animateTo(1f, tween(900, easing = LinearOutSlowInEasing))
+        }
         pop.snapTo(1.15f)
         pop.animateTo(1f, spring(dampingRatio = 0.45f, stiffness = Spring.StiffnessLow))
     }
+    val edge = if (uncertain) Dim else Red
     Box(
-        modifier = Modifier.graphicsLayer { scaleX = pop.value; scaleY = pop.value }.size(size).background(Color.White, CircleShape)
-            .border(size * 0.106f, if (uncertain) Dim else Red, CircleShape),
+        modifier = Modifier.graphicsLayer { scaleX = pop.value; scaleY = pop.value }.size(size)
+            .drawBehind {
+                val k = ring.value
+                if (k < 1f) {
+                    drawCircle(edge.copy(alpha = 0.6f * (1f - k)), radius = this.size.minDimension / 2 * (1f + 0.7f * k), style = Stroke(3.dp.toPx() * (1f - k) + 0.5f))
+                }
+            }
+            .background(Color.White, CircleShape)
+            .border(size * 0.106f, edge, CircleShape),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -637,7 +782,7 @@ private fun AlertCard(a: ActiveAlert) {
     val alpha by pulse.animateFloat(1f, 0.55f, infiniteRepeatable(tween(450), RepeatMode.Reverse), label = "alpha")
     val bg by animateColorAsState(if (a.overLimit) Red else Glass, tween(300), label = "alertBg")
 
-    Column(Modifier.fillMaxWidth().glass(RoundedCornerShape(22.dp), bg).alpha(if (a.overLimit) alpha else 1f)) {
+    Column(Modifier.fillMaxWidth().glass(RoundedCornerShape(22.dp), bg).sheen().alpha(if (a.overLimit) alpha else 1f)) {
         Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
             RadarBadge(a.radar.type, a.limitKmh, 54.dp)
             Spacer(Modifier.width(16.dp))
@@ -679,7 +824,7 @@ private fun SectionCard(s: SectionStatus) {
     val slowDown = s.lost || s.targetKmh < s.limitKmh
     val progress by animateFloatAsState((1 - s.remainingM / s.lengthM).toFloat().coerceIn(0f, 1f), label = "section")
     val bg by animateColorAsState(if (slowDown) Red else Glass, tween(400), label = "sectionBg")
-    Column(Modifier.fillMaxWidth().padding(bottom = 12.dp).glass(RoundedCornerShape(22.dp), bg)) {
+    Column(Modifier.fillMaxWidth().padding(bottom = 12.dp).glass(RoundedCornerShape(22.dp), bg).sheen()) {
         Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp), verticalAlignment = Alignment.CenterVertically) {
             RadarBadge(RadarType.SECTION_START, s.limitKmh, 54.dp)
             Spacer(Modifier.width(16.dp))
@@ -709,18 +854,17 @@ private fun SectionCard(s: SectionStatus) {
     }
 }
 
+/** Start, then Stop; [compact] on the road: lower and quieter, still there. */
 @Composable
-private fun StartStop(running: Boolean, onStart: () -> Unit, onStop: () -> Unit) {
+private fun StartStop(running: Boolean, onStart: () -> Unit, onStop: () -> Unit, compact: Boolean = false) {
     val bg by animateColorAsState(if (running) Glass else Color.White, label = "buttonBg")
+    val height by animateDpAsState(if (compact) 9.dp else 18.dp, spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessLow), label = "buttonHeight")
+    val quiet by animateFloatAsState(if (compact) 0.7f else 1f, tween(500), label = "buttonQuiet")
     // At home, the Start button sends out a soft ring of light now and then: the one thing to touch.
     val ping = rememberInfiniteTransition(label = "startPing")
     val wave by ping.animateFloat(0f, 1f, infiniteRepeatable(tween(2_600, easing = FastOutSlowInEasing)), label = "startWave")
-    Text(
-        if (running) "Arrêter" else "Démarrer",
-        color = if (running) Color.White else Color.Black,
-        fontSize = 18.sp,
-        fontWeight = FontWeight.SemiBold,
-        textAlign = TextAlign.Center,
+    Box(
+        contentAlignment = Alignment.Center,
         modifier = Modifier.fillMaxWidth()
             .drawBehind {
                 if (running || wave > 0.7f) return@drawBehind
@@ -735,8 +879,26 @@ private fun StartStop(running: Boolean, onStart: () -> Unit, onStop: () -> Unit)
                 )
             }
             .tap(onClick = if (running) onStop else onStart).glass(RoundedCornerShape(18.dp), bg)
-            .padding(vertical = 18.dp),
-    )
+            .padding(vertical = height)
+            .alpha(quiet),
+    ) {
+        // The word rolls over, like a switch flipping.
+        AnimatedContent(
+            running,
+            transitionSpec = {
+                (slideInVertically(spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow)) { it } + fadeIn(tween(250)))
+                    .togetherWith(slideOutVertically(tween(250)) { -it } + fadeOut(tween(200)))
+            },
+            label = "startStop",
+        ) { on ->
+            Text(
+                if (on) "Arrêter" else "Démarrer",
+                color = if (on) Color.White else Color.Black,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+    }
 }
 
 /** Speed digits: white, orange just under the limit, red above it. */

@@ -8,28 +8,56 @@ import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -83,8 +111,7 @@ data class Permissions(
     }
 }
 
-private val Bg = Color(0xFF000000)
-private val Surface = Color(0xFF16161A)
+private val Surface = Color(0xD916161A)
 private val Green = Color(0xFF30D158)
 private val Accent = Color(0xFF0A84FF)
 private val Dim = Color(0xFF8E8E93)
@@ -92,7 +119,8 @@ private val Dim = Color(0xFF8E8E93)
 /**
  * Every permission Zenith needs, each with the reason in plain words, so none of Android's prompts
  * comes as a surprise. All are required: the screen comes back whenever one is missing (outside a
- * drive), and lets the driver through only once everything is granted.
+ * drive), and lets the driver through only once everything is granted. A bar fills as they come,
+ * each granted step lights up with a check and a ring of light.
  */
 @Composable
 fun Onboarding(
@@ -113,105 +141,182 @@ fun Onboarding(
     onNext: () -> Unit = {},
 ) {
     val missing = permissions.missing(motionWanted)
-    Column(
-        Modifier.fillMaxSize().background(Bg).safeDrawingPadding().padding(horizontal = 20.dp, vertical = 12.dp),
+    val showMotion = permissions.motionAvailable && motionWanted
+    val total = if (showMotion) 6 else 5
+    LargeTitlePage(
+        title = if (returning) "Autorisations" else "Bienvenue",
+        bottom = { GoButton(missing, onClick = if (missing == 0) onDone else onNext) },
     ) {
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-            Spacer(Modifier.height(24.dp))
-            Text(if (returning) "Autorisations" else "Bienvenue", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(8.dp))
-            Text(
-                if (returning) {
-                    "Il en manque pour que Zenith marche à fond : nouvelles fonctions, ou une autorisation retirée. Voici pourquoi chacune est là."
-                } else {
-                    "Zenith a besoin de quelques autorisations pour t'alerter, même écran éteint ou derrière Waze. " +
-                        "Android va afficher ses propres fenêtres : voici pourquoi chacune est là."
-                },
-                color = Dim,
-                fontSize = 16.sp,
-            )
-            Spacer(Modifier.height(24.dp))
+        var order = 0
+        Spacer(Modifier.height(8.dp))
+        Text(
+            if (returning) {
+                "Il en manque pour que Zenith marche à fond : nouvelles fonctions, ou une autorisation retirée. Voici pourquoi chacune est là."
+            } else {
+                "Zenith a besoin de quelques autorisations pour t'alerter, même écran éteint ou derrière Waze. " +
+                    "Android va afficher ses propres fenêtres : voici pourquoi chacune est là."
+            },
+            color = Dim,
+            fontSize = 16.sp,
+            modifier = Modifier.cascade(order++),
+        )
+        Spacer(Modifier.height(18.dp))
+        Progress((total - missing).coerceAtLeast(0), total, Modifier.cascade(order++))
+        Spacer(Modifier.height(18.dp))
+        Step(
+            title = "Position précise",
+            text = "Pour mesurer ta vitesse et savoir quels radars sont sur ta route. Ta position ne quitte jamais le téléphone. " +
+                "Choisis « Pendant l'utilisation de l'appli ».",
+            granted = permissions.location,
+            onClick = onLocation,
+            modifier = Modifier.cascade(order++),
+        )
+        Step(
+            title = "Notifications",
+            text = "Android exige une notification visible pour que Zenith reste actif en arrière-plan. Elle affiche ta vitesse et le prochain radar.",
+            granted = permissions.notifications,
+            onClick = onNotifications,
+            modifier = Modifier.cascade(order++),
+        )
+        Step(
+            title = "Mises à jour automatiques",
+            text = "Zenith se met à jour tout seul depuis GitHub. Comme l'app ne vient pas du Play Store, Android parle " +
+                "d'« applications inconnues » : c'est normal. Active simplement l'interrupteur puis reviens.",
+            granted = permissions.installs,
+            onClick = onInstalls,
+            modifier = Modifier.cascade(order++),
+        )
+        Step(
+            title = "Batterie sans restriction",
+            text = "Pour qu'Android ne coupe pas les alertes au milieu d'un long trajet. Zenith ne consomme que pendant la conduite.",
+            granted = permissions.battery,
+            onClick = onBattery,
+            modifier = Modifier.cascade(order++),
+        )
+        if (showMotion) {
             Step(
-                title = "Position précise",
-                text = "Pour mesurer ta vitesse et savoir quels radars sont sur ta route. Ta position ne quitte jamais le téléphone. " +
-                    "Choisis « Pendant l'utilisation de l'appli ».",
-                granted = permissions.location,
-                onClick = onLocation,
-            )
-            Step(
-                title = "Notifications",
-                text = "Android exige une notification visible pour que Zenith reste actif en arrière-plan. Elle affiche ta vitesse et le prochain radar.",
-                granted = permissions.notifications,
-                onClick = onNotifications,
-            )
-            Step(
-                title = "Mises à jour automatiques",
-                text = "Zenith se met à jour tout seul depuis GitHub. Comme l'app ne vient pas du Play Store, Android parle " +
-                    "d'« applications inconnues » : c'est normal. Active simplement l'interrupteur puis reviens.",
-                granted = permissions.installs,
-                onClick = onInstalls,
-            )
-            Step(
-                title = "Batterie sans restriction",
-                text = "Pour qu'Android ne coupe pas les alertes au milieu d'un long trajet. Zenith ne consomme que pendant la conduite.",
-                granted = permissions.battery,
-                onClick = onBattery,
-            )
-            if (permissions.motionAvailable && motionWanted) {
-                Step(
-                    title = "Démarrage en roulant",
-                    text = when {
-                        !permissions.activity ->
-                            "Zenith démarre seul dès que le téléphone sent que tu roules en voiture, même fermé, presque sans batterie. " +
-                                "D'abord « Activité physique », puis la position « Toujours autoriser »."
-                        !permissions.backgroundLocation ->
-                            "Encore la position « Toujours autoriser » : sans elle, Android coupe le GPS d'une conduite démarrée seule."
-                        else -> "Zenith démarre seul quand tu roules en voiture et s'arrête une fois garé."
-                    },
-                    granted = permissions.motion,
-                    onClick = onMotion,
-                )
-            }
-            // Android 13+ blocks this one for apps installed outside a store: it shows the unlock
-            // option only after a first try, so the button walks through the three steps.
-            val unlock = Build.VERSION.SDK_INT >= 33 && mediaStep == 1
-            Step(
-                title = "Musique",
+                title = "Démarrage en roulant",
                 text = when {
-                    unlock -> "Android l'a bloqué ? Touche Débloquer : ⋮ en haut à droite → « Autoriser les paramètres restreints », " +
-                        "valide avec ton code, puis reviens ici."
-                    mediaStep == 2 -> "Débloqué : touche Activer, puis active Zenith."
-                    else -> "Titre et commandes de Spotify, YouTube ou ton lecteur pendant la conduite, sans compte. Android appelle " +
-                        "cela « accès aux notifications » : Zenith n'y lit que le lecteur. Touche Activer, puis active Zenith."
+                    !permissions.activity ->
+                        "Zenith démarre seul dès que le téléphone sent que tu roules en voiture, même fermé, presque sans batterie. " +
+                            "D'abord « Activité physique », puis la position « Toujours autoriser »."
+                    !permissions.backgroundLocation ->
+                        "Encore la position « Toujours autoriser » : sans elle, Android coupe le GPS d'une conduite démarrée seule."
+                    else -> "Zenith démarre seul quand tu roules en voiture et s'arrête une fois garé."
                 },
-                granted = permissions.media,
-                onClick = onMedia,
-                action = if (unlock) "Débloquer" else "Activer",
+                granted = permissions.motion,
+                onClick = onMotion,
+                modifier = Modifier.cascade(order++),
             )
         }
-        Spacer(Modifier.height(12.dp))
-        // One button for everything: each tap opens the next missing permission.
-        Text(
-            when (missing) {
-                0 -> "C'est parti"
-                1 -> "Continuer · dernière autorisation"
-                else -> "Continuer · encore $missing"
+        // Android 13+ blocks this one for apps installed outside a store: it shows the unlock
+        // option only after a first try, so the button walks through the three steps.
+        val unlock = Build.VERSION.SDK_INT >= 33 && mediaStep == 1
+        Step(
+            title = "Musique",
+            text = when {
+                unlock -> "Android l'a bloqué ? Touche Débloquer : ⋮ en haut à droite → « Autoriser les paramètres restreints », " +
+                    "valide avec ton code, puis reviens ici."
+                mediaStep == 2 -> "Débloqué : touche Activer, puis active Zenith."
+                else -> "Titre et commandes de Spotify, YouTube ou ton lecteur pendant la conduite, sans compte. Android appelle " +
+                    "cela « accès aux notifications » : Zenith n'y lit que le lecteur. Touche Activer, puis active Zenith."
             },
-            color = Color.Black,
-            fontSize = 18.sp,
-            fontWeight = FontWeight.SemiBold,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth().tap(onClick = if (missing == 0) onDone else onNext).clip(RoundedCornerShape(18.dp))
-                .background(Color.White).padding(vertical = 18.dp),
+            granted = permissions.media,
+            onClick = onMedia,
+            action = if (unlock) "Débloquer" else "Activer",
+            modifier = Modifier.cascade(order++),
         )
+        Spacer(Modifier.height(12.dp))
+    }
+}
+
+/** How many of the permissions are granted: a bar of light filling with a spring, green when full. */
+@Composable
+private fun Progress(done: Int, total: Int, modifier: Modifier = Modifier) {
+    val k by animateFloatAsState(done / total.toFloat(), spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessLow), label = "progress")
+    val color by animateColorAsState(if (done == total) Green else Accent, tween(600), label = "progressColor")
+    Column(modifier) {
+        Text("$done sur $total", color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(8.dp))
+        Box(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.1f))) {
+            Box(
+                Modifier.fillMaxHeight().fillMaxWidth(k.coerceIn(0f, 1f)).clip(RoundedCornerShape(50))
+                    .background(Brush.horizontalGradient(listOf(color.copy(alpha = 0.6f), color))),
+            )
+        }
+    }
+}
+
+/** The one button: the next permission, the count rolling down, then a glowing "C'est parti". */
+@Composable
+private fun GoButton(missing: Int, onClick: () -> Unit) {
+    val ready = missing == 0
+    val glow = rememberInfiniteTransition(label = "go")
+    val pulse by glow.animateFloat(0f, 1f, infiniteRepeatable(tween(1_400, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "goPulse")
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
+            .drawBehind {
+                if (!ready) return@drawBehind
+                val grow = 8.dp.toPx() * pulse
+                drawRoundRect(
+                    Green.copy(alpha = 0.35f * (1f - pulse)),
+                    topLeft = Offset(-grow, -grow),
+                    size = Size(size.width + 2 * grow, size.height + 2 * grow),
+                    cornerRadius = CornerRadius(18.dp.toPx() + grow),
+                    style = Stroke(2.dp.toPx()),
+                )
+            }
+            .tap(onClick = onClick).clip(RoundedCornerShape(18.dp)).background(Color.White).padding(vertical = 18.dp),
+    ) {
+        AnimatedContent(
+            missing,
+            transitionSpec = {
+                (slideInVertically(spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow)) { it } + fadeIn(tween(250)))
+                    .togetherWith(slideOutVertically(tween(250)) { -it } + fadeOut(tween(200)))
+            },
+            label = "goText",
+        ) { left ->
+            Text(
+                when (left) {
+                    0 -> "C'est parti"
+                    1 -> "Continuer · dernière autorisation"
+                    else -> "Continuer · encore $left"
+                },
+                color = Color.Black,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center,
+            )
+        }
     }
 }
 
 @Composable
-private fun Step(title: String, text: String, granted: Boolean, onClick: () -> Unit, action: String = "Autoriser") {
+private fun Step(
+    title: String,
+    text: String,
+    granted: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    action: String = "Autoriser",
+) {
+    // Granted while the screen is open: a ring of light runs out from the check.
+    var seen by remember { mutableStateOf(granted) }
+    val burst = remember { Animatable(1f) }
+    LaunchedEffect(granted) {
+        if (granted && !seen) {
+            burst.snapTo(0f)
+            burst.animateTo(1f, tween(800, easing = LinearOutSlowInEasing))
+        }
+        seen = granted
+    }
+    val edge by animateColorAsState(if (granted) Green.copy(alpha = 0.35f) else Color.Transparent, tween(600), label = "stepEdge")
     Row(
-        Modifier.fillMaxWidth().padding(bottom = 12.dp).tap(enabled = !granted, onClick = onClick)
-            .glass(RoundedCornerShape(20.dp), Surface).padding(18.dp),
+        modifier.fillMaxWidth().padding(bottom = 12.dp).tap(enabled = !granted, onClick = onClick)
+            .glass(RoundedCornerShape(20.dp), Surface)
+            .drawBehind { drawRect(Brush.horizontalGradient(listOf(Color.Transparent, edge), startX = size.width * 0.5f)) }
+            .padding(18.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
@@ -220,18 +325,36 @@ private fun Step(title: String, text: String, granted: Boolean, onClick: () -> U
             Text(text, color = Color.White.copy(alpha = 0.75f), fontSize = 14.sp)
         }
         Spacer(Modifier.width(14.dp))
-        if (granted) {
-            Box(Modifier.size(30.dp).background(Green, CircleShape), contentAlignment = Alignment.Center) {
-                Text("✓", color = Color.Black, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        AnimatedContent(
+            granted,
+            transitionSpec = {
+                (scaleIn(spring(dampingRatio = 0.45f, stiffness = Spring.StiffnessMediumLow), initialScale = 0.3f) + fadeIn(tween(200)))
+                    .togetherWith(scaleOut(tween(200), targetScale = 0.6f) + fadeOut(tween(150)))
+            },
+            contentAlignment = Alignment.Center,
+            label = "stepState",
+        ) { done ->
+            if (done) {
+                Box(
+                    Modifier.size(30.dp).drawBehind {
+                        val k = burst.value
+                        if (k < 1f) {
+                            drawCircle(Green.copy(alpha = 0.6f * (1f - k)), radius = size.minDimension / 2 * (1f + 1.4f * k), style = Stroke(2.dp.toPx() * (1f - k) + 0.5f))
+                        }
+                    }.background(Green, CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("✓", color = Color.Black, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                }
+            } else {
+                Text(
+                    action,
+                    color = Color.White,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.clip(RoundedCornerShape(50)).background(Accent).padding(horizontal = 14.dp, vertical = 8.dp),
+                )
             }
-        } else {
-            Text(
-                action,
-                color = Color.White,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.clip(RoundedCornerShape(50)).background(Accent).padding(horizontal = 14.dp, vertical = 8.dp),
-            )
         }
     }
 }

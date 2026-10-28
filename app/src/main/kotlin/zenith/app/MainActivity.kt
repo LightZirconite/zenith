@@ -19,6 +19,18 @@ import androidx.activity.result.IntentSenderRequest
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -69,6 +81,7 @@ class MainActivity : ComponentActivity() {
             val settings by UserSettings.state.collectAsStateWithLifecycle()
             val media by NowPlaying.state.collectAsStateWithLifecycle()
             val startNow by startRequested.collectAsStateWithLifecycle()
+            val musicChoice by DriveState.musicChoice.collectAsStateWithLifecycle()
             var showSettings by remember { mutableStateOf(false) }
             val scope = rememberCoroutineScope()
             val pairLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { }
@@ -186,10 +199,16 @@ class MainActivity : ComponentActivity() {
                 Updater.confirmationShown()
             }
 
+            val screen = when {
+                showWelcome -> Screen.WELCOME
+                showSettings -> Screen.SETTINGS
+                else -> Screen.DRIVE
+            }
             if (pip) {
-                PipScreen(snapshot, radars, zones, media = media, canvas = settings.spotifyCanvas)
-            } else if (showSettings && !showWelcome) {
-                SettingsScreen(
+                PipScreen(snapshot, radars, zones, media = media, canvas = settings.spotifyCanvas, musicChoice = musicChoice)
+            } else AnimatedContent(screen, transitionSpec = { screenTransition(initialState, targetState) }, label = "screen") { shown ->
+                when (shown) {
+                Screen.SETTINGS -> SettingsScreen(
                     settings = settings,
                     version = remember { runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull().orEmpty() },
                     onChange = { change -> UserSettings.update(context, change) },
@@ -199,16 +218,18 @@ class MainActivity : ComponentActivity() {
                                 context,
                                 launch = { sender -> pairLauncher.launch(IntentSenderRequest.Builder(sender).build()) },
                                 onPaired = { info ->
-                                    UserSettings.update(context) { it.copy(carAssociationId = info.id, carName = info.displayName?.toString() ?: "ta voiture") }
+                                    UserSettings.update(context) { s ->
+                                        val car = Car(info.id, info.displayName?.toString() ?: "Voiture ${s.cars.size + 1}")
+                                        s.copy(cars = s.cars.filter { it.associationId != car.associationId } + car)
+                                    }
                                 },
                                 onError = { Log.w("Zenith", "car pairing: $it") },
                             )
                         }
                     },
-                    onUnpairCar = {
-                        val id = settings.carAssociationId
-                        if (id != null && CarLink.supported) CarLink.unpair(context, id)
-                        UserSettings.update(context) { it.copy(carAssociationId = null, carName = null) }
+                    onUnpairCar = { car ->
+                        if (CarLink.supported) CarLink.unpair(context, car.associationId)
+                        UserSettings.update(context) { s -> s.copy(cars = s.cars.filter { it.associationId != car.associationId }) }
                     },
                     onBack = { showSettings = false },
                     onShareTrip = remember(resumeCount) { latestTrip(context) }?.let { trip -> { shareTrip(trip) } },
@@ -219,8 +240,7 @@ class MainActivity : ComponentActivity() {
                     update = update,
                     onCheckUpdate = { scope.launch { Updater.checkAndDownload(context, force = true) } },
                 )
-            } else if (showWelcome) {
-                Onboarding(
+                Screen.WELCOME -> Onboarding(
                     permissions = permissions,
                     returning = onboarded,
                     motionWanted = settings.motionStart,
@@ -237,8 +257,7 @@ class MainActivity : ComponentActivity() {
                         onboarded = true
                     },
                 )
-            } else {
-                DriveScreen(
+                Screen.DRIVE -> DriveScreen(
                     running = running,
                     snapshot = snapshot,
                     radars = radars,
@@ -267,7 +286,10 @@ class MainActivity : ComponentActivity() {
                     onMediaPlayPause = NowPlaying::playPause,
                     onMediaNext = NowPlaying::next,
                     onMediaSeek = NowPlaying::seekBy,
+                    musicChoice = musicChoice,
+                    onMusicChoice = DriveState::chooseMusic,
                 )
+                }
             }
         }
     }
@@ -345,9 +367,33 @@ class MainActivity : ComponentActivity() {
             .onFailure { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) }
     }
 
+    /**
+     * Between full screens: settings slide in over home, which sinks back into the distance, and
+     * slide away on the way back; the welcome page lifts toward the viewer as home comes up.
+     */
+    private fun screenTransition(from: Screen, to: Screen): ContentTransform = when {
+        to == Screen.SETTINGS -> ContentTransform(
+            slideInHorizontally(spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMediumLow)) { it } + fadeIn(tween(250)),
+            scaleOut(tween(450, easing = FastOutSlowInEasing), targetScale = 0.9f) + fadeOut(tween(400)),
+        )
+        from == Screen.SETTINGS -> ContentTransform(
+            scaleIn(spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessLow), initialScale = 0.9f) + fadeIn(tween(350)),
+            slideOutHorizontally(tween(350, easing = FastOutSlowInEasing)) { it } + fadeOut(tween(300, delayMillis = 50)),
+            // The page leaving stays on top while it slides away.
+            targetContentZIndex = -1f,
+        )
+        else -> ContentTransform(
+            scaleIn(spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessVeryLow), initialScale = 0.85f) + fadeIn(tween(600, delayMillis = 150)),
+            scaleOut(tween(500), targetScale = 1.12f) + fadeOut(tween(400)),
+        )
+    }
+
     companion object {
         const val ACTION_START_DRIVE = "zenith.app.START_DRIVE"
         private const val KEY_ONBOARDED = "onboarded"
         private const val KEY_MEDIA_STEP = "media_step"
     }
 }
+
+/** The full screens, for the transitions between them (the small window has none). */
+private enum class Screen { DRIVE, SETTINGS, WELCOME }

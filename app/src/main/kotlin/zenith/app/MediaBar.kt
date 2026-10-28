@@ -131,13 +131,16 @@ fun MusicBackdrop(media: MediaInfo, canvas: Boolean, calm: Boolean, focus: Float
 }
 
 /**
- * Opacity of the backdrop along its height (it starts at a fifth of the screen): a faint tail high
- * up, whole from the middle of the screen, where the map has melted away.
+ * Opacity of the backdrop down the screen: nothing above a fifth, a faint tail, whole from the
+ * middle of the screen, where the map has melted away.
  */
-private val BackdropMask = listOf(0f to 0f, 0.125f to 0.5f, 0.275f to 1f, 1f to 1f)
+private val BackdropMask = listOf(0f to 0f, 0.2f to 0f, 0.3f to 0.5f, 0.42f to 1f, 1f to 1f)
 
-/** Music mode: whole almost from its top, the map having stepped back. */
-private val BackdropMaskFocus = listOf(0f to 0f, 0.04f to 0.6f, 0.1f to 1f, 1f to 1f)
+/**
+ * Music mode: it rises higher, whole from a third of the screen, but still through a long soft
+ * fade under the map's top (a hard edge up there would spoil the crossfade).
+ */
+private val BackdropMaskFocus = listOf(0f to 0f, 0.05f to 0f, 0.18f to 0.5f, 0.33f to 1f, 1f to 1f)
 
 /**
  * Music controls under the alerts, for any player (Spotify, YouTube, Deezer…): cover, title,

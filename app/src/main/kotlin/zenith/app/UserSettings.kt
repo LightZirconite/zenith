@@ -4,7 +4,12 @@ import android.content.Context
 import androidx.core.content.edit
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import org.json.JSONArray
+import org.json.JSONObject
 import zenith.core.DriverProfile
+
+/** A car paired for the automatic start: its CompanionDeviceManager association and its name. */
+data class Car(val associationId: Int, val name: String)
 
 /** User choices, kept in SharedPreferences. */
 data class SettingsState(
@@ -12,17 +17,16 @@ data class SettingsState(
     val raining: Boolean = false,
     /** False: alert tones only, no voice. */
     val voice: Boolean = true,
-    /** The music pauses while the voice speaks (else it only gets quieter). */
-    val pauseMusic: Boolean = true,
+    /** The music pauses while the voice speaks (else it slides down and back up). */
+    val pauseMusic: Boolean = false,
     /** Battery saver: a drive started by hand ends by itself once the car is parked. */
     val autoStop: Boolean = true,
     /** Drive started by itself when the phone starts riding in a vehicle (activity recognition). */
     val motionStart: Boolean = true,
     /** Rain mode from the weather (Open-Meteo) while driving. */
     val autoRain: Boolean = true,
-    /** Car paired for the automatic start (CompanionDeviceManager association), with its name. */
-    val carAssociationId: Int? = null,
-    val carName: String? = null,
+    /** Cars paired for the automatic start: any of them connecting starts the drive. */
+    val cars: List<Car> = emptyList(),
     /** Spotify Canvas behind the music card and in picture-in-picture (unofficial free services). */
     val spotifyCanvas: Boolean = true,
     /** Square picture-in-picture window, larger; else a compact strip that leaves Waze visible. */
@@ -48,12 +52,15 @@ object UserSettings {
             // Set by the weather during a drive, never kept from one drive to the next.
             raining = false,
             voice = p.getBoolean("voice", true),
-            pauseMusic = p.getBoolean("pause_music", true),
+            // New key: the voice now lowers the music by default, the old "pause" choice is not kept.
+            pauseMusic = p.getBoolean("voice_pause", false),
             autoStop = p.getBoolean("auto_stop", true),
             autoRain = p.getBoolean("auto_rain", true),
             motionStart = p.getBoolean("motion_start", true),
-            carAssociationId = p.getInt("car_id", -1).takeIf { it >= 0 },
-            carName = p.getString("car_name", null),
+            cars = readCars(p.getString("cars", null))
+                // The single car of earlier versions.
+                ?: p.getInt("car_id", -1).takeIf { it >= 0 }?.let { listOf(Car(it, p.getString("car_name", null) ?: "Ta voiture")) }
+                ?: emptyList(),
             spotifyCanvas = p.getBoolean("spotify_canvas", true),
             pipLarge = p.getBoolean("pip_large", false),
         )
@@ -67,14 +74,23 @@ object UserSettings {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
             putBoolean("probationary", next.probationary)
             putBoolean("voice", next.voice)
-            putBoolean("pause_music", next.pauseMusic)
+            putBoolean("voice_pause", next.pauseMusic)
             putBoolean("auto_stop", next.autoStop)
             putBoolean("auto_rain", next.autoRain)
             putBoolean("motion_start", next.motionStart)
-            putInt("car_id", next.carAssociationId ?: -1)
-            putString("car_name", next.carName)
+            putString("cars", JSONArray(next.cars.map { JSONObject().put("id", it.associationId).put("name", it.name) }).toString())
             putBoolean("spotify_canvas", next.spotifyCanvas)
             putBoolean("pip_large", next.pipLarge)
+            remove("pause_music")
+            remove("car_id")
+            remove("car_name")
         }
+    }
+
+    private fun readCars(json: String?): List<Car>? = json?.let {
+        runCatching {
+            val array = JSONArray(it)
+            List(array.length()) { i -> array.getJSONObject(i).let { o -> Car(o.getInt("id"), o.getString("name")) } }
+        }.getOrNull()
     }
 }
