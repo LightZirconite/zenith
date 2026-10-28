@@ -236,8 +236,13 @@ private class MapHolder {
                 (heightPx * (1 - 2 * carAt)).coerceAtLeast(0.0),
             )
             .build()
+        val first = lastCamera == null
         lastCamera = camera
-        runCatching { m.easeCamera(CameraUpdateFactory.newCameraPosition(camera), 1_000, false) }
+        // The first position lands at once: never a zoom from the whole world at start.
+        runCatching {
+            if (first) m.moveCamera(CameraUpdateFactory.newCameraPosition(camera))
+            else m.easeCamera(CameraUpdateFactory.newCameraPosition(camera), 1_000, false)
+        }
     }
 
     fun showRadars(radars: List<Radar>, active: Set<String>) {

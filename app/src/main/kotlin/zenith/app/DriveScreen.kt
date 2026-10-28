@@ -124,18 +124,29 @@ fun DriveScreen(
 ) {
     val showMap = running && snapshot != null
     Box(Modifier.fillMaxSize().background(Bg)) {
-        // Tilted map over the top of the screen, melting progressively into the background.
-        AnimatedVisibility(
-            visible = showMap,
-            enter = fadeIn(tween(1_200)) + scaleIn(tween(1_600, easing = FastOutSlowInEasing), initialScale = 1.08f),
-            exit = fadeOut(tween(600)),
-        ) {
+        // Tilted map over the top of the screen, melting progressively into the background. Built as
+        // soon as the drive starts, hidden: its style and tiles load while the GPS searches, and it
+        // shows, already in place, with the first position.
+        val mapAlpha by animateFloatAsState(if (showMap) 1f else 0f, tween(if (showMap) 500 else 300), label = "mapIn")
+        val mapScale by animateFloatAsState(if (showMap) 1f else 1.03f, tween(700, easing = FastOutSlowInEasing), label = "mapScale")
+        if (running) {
             // With music, the bottom of the map stays half visible: the Canvas fades in over it.
-            DriveMap(snapshot, radars, zones, Modifier.fillMaxWidth().fillMaxHeight(0.62f), overlay = if (media != null) MapOverMusic else DriveFade)
+            DriveMap(
+                snapshot,
+                radars,
+                zones,
+                Modifier.fillMaxWidth().fillMaxHeight(0.62f).graphicsLayer {
+                    alpha = mapAlpha
+                    scaleX = mapScale
+                    scaleY = mapScale
+                },
+                overlay = if (media != null) MapOverMusic else DriveFade,
+            )
         }
-        // Music ambience from the bottom: the Spotify Canvas (else the cover, blurred) melting into the black.
+        // Music ambience from the bottom: the Spotify Canvas (else the cover, blurred) melting into
+        // the black, together with the map, never before it.
         AnimatedVisibility(
-            visible = running && media != null,
+            visible = showMap && media != null,
             modifier = Modifier.align(Alignment.BottomCenter),
             enter = fadeIn(tween(1_200)),
             exit = fadeOut(tween(600)),
