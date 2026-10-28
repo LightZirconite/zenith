@@ -1,19 +1,30 @@
 package zenith.core
 
-/** A scripted drive: real road network, made-up radars and the GPS fixes of the drive. */
-data class DemoScenario(val network: RoadNetwork, val radars: List<Radar>, val fixes: List<GpsFix>)
+/** A scripted drive: real road network, made-up radars and zones, and the GPS fixes of the drive. */
+data class DemoScenario(
+    val network: RoadNetwork,
+    val radars: List<Radar>,
+    val fixes: List<GpsFix>,
+    val zones: List<ControlZone> = emptyList(),
+)
 
 /**
- * Hidden demo: about two minutes on the real D 107 (Corsica, OSM tile bundled in core). The driver
- * first speeds past a radar (warning, brake, danger beeps, "too fast"), passes a second one at the
- * limit, then slows for the 50 zone shown ahead. Fixes go through the normal [DrivingSession].
+ * Hidden demo: about three and a half minutes on the real D 107 (Corsica, OSM tile bundled in
+ * core). The driver first speeds past a radar (warning, brake, danger beeps, "too fast"), passes a
+ * second one at the limit, enters a control itinerary, slows for the 50 village shown ahead, then
+ * drives a section whose start camera is unknown (placed on the road from the end and its length).
+ * Fixes go through the normal [DrivingSession].
  */
 object DemoDrive {
     const val TILE = "/demo/roads_85_19.json"
     private const val ROAD = "D 107"
-    private const val LENGTH_M = 3_000.0
+    private const val LENGTH_M = 4_150.0
     private const val FIRST_RADAR_M = 900.0
     private const val SECOND_AFTER_M = 900.0
+    private const val ZONE_FROM_M = 1_900.0
+    private const val ZONE_TO_M = 3_600.0
+    private const val SECTION_END_M = 3_950.0
+    private const val SECTION_LENGTH_M = 800.0
     private const val OVER_KMH = 18
     private const val ACCEL_MPS2 = 1.5
     private const val BRAKE_MPS2 = 2.0
@@ -47,10 +58,15 @@ object DemoDrive {
         fun limitAt(d: Double): Int = limits[path.lastOrNull { it.startM <= d }?.segment?.id] ?: DEFAULT_KMH
 
         val secondM = (FIRST_RADAR_M + SECOND_AFTER_M).coerceAtMost(line.lengthM - 150)
+        val endM = SECTION_END_M.coerceAtMost(line.lengthM - 100)
         val radars = listOf(
             Radar("demo-1", line.pointAt(FIRST_RADAR_M), RadarType.FIXED, limitAt(FIRST_RADAR_M), line.bearingAt(FIRST_RADAR_M)),
             Radar("demo-2", line.pointAt(secondM), RadarType.FIXED, limitAt(secondM), line.bearingAt(secondM)),
+            // Section end only, with its length: the app places the start on the road.
+            Radar("demo-3", line.pointAt(endM), RadarType.SECTION_END, limitAt(endM), line.bearingAt(endM), sectionLengthM = SECTION_LENGTH_M),
         )
+        val zoneTo = ZONE_TO_M.coerceAtMost(line.lengthM)
+        val zone = ControlZone("demo-zone", generateSequence(ZONE_FROM_M) { it + 25.0 }.takeWhile { it <= zoneTo }.map(line::pointAt).toList())
 
         val fixes = mutableListOf<GpsFix>()
         var s = 0.0
@@ -64,6 +80,6 @@ object DemoDrive {
             s += v
             t++
         }
-        return DemoScenario(network, radars, fixes)
+        return DemoScenario(network, radars, fixes, listOf(zone))
     }
 }

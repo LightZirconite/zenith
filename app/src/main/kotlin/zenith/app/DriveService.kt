@@ -227,8 +227,9 @@ class DriveService : Service(), LocationListener {
     /** Hidden demo: replays [DemoDrive] in real time through the same pipeline, then stops. */
     private fun startDemo() {
         val scenario = DemoDrive.load()
-        session = DrivingSession(scenario.network, scenario.radars)
+        session = DrivingSession(scenario.network, scenario.radars, zones = scenario.zones)
         radarIndex = RadarIndex(scenario.radars)
+        zoneBoxes = scenario.zones.map { it to BBox.of(it.points) }
         scope.launch(drive) {
             val t0 = System.currentTimeMillis()
             for (fix in scenario.fixes) {
