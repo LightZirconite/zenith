@@ -56,54 +56,34 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import zenith.core.PlaybackProgress
 
-private val BarSurface = Color(0xFF16161A)
+private val BarGlass = Color(0x9916161A)
 private val BarDim = Color(0xFFB0B0B5)
 private val Liked = Color(0xFF1ED760)
-
-/** Dark on the left for the text, lighter where the backdrop shows, so it melts into the card. */
-private val BarScrim = Brush.horizontalGradient(
-    0f to Color.Black.copy(alpha = 0.72f),
-    0.45f to Color.Black.copy(alpha = 0.45f),
-    1f to Color.Black.copy(alpha = 0.3f),
-)
 
 private enum class Glyph { PREVIOUS, PLAY, PAUSE, NEXT }
 
 /**
- * Music card under the alerts, for any player (Spotify, YouTube, Deezer…): cover, title, artist
- * and the buttons a driver needs, over a dark backdrop: the Spotify Canvas looping when the track
- * has one ([canvas] on), else the cover blurred. The heart (Spotify) shows when the card is wide
- * enough; a thin line at the bottom follows the track. A tap on the cover or the title opens the
- * player. [calm] while an alert shows: the backdrop steps back.
+ * Ambience of the drive screen while music plays: the Spotify Canvas looping when the track has one
+ * ([canvas] on), else the cover blurred, rising from the bottom of the screen and melting into the
+ * black like the map from the top. Dark enough for the speed to stay readable; [calm] while an
+ * alert shows, it steps back further.
  */
 @Composable
-fun MediaBar(
-    media: MediaInfo,
-    canvas: Boolean = true,
-    calm: Boolean = false,
-    onOpen: () -> Unit = {},
-    onLike: () -> Unit = {},
-    onPrevious: () -> Unit,
-    onPlayPause: () -> Unit,
-    onNext: () -> Unit,
-) {
+fun MusicBackdrop(media: MediaInfo, canvas: Boolean, calm: Boolean, modifier: Modifier = Modifier) {
     val video = rememberCanvas(media.spotifyTrackId, canvas)
     var videoShown by remember(video) { mutableStateOf(false) }
     var videoFailed by remember(video) { mutableStateOf(false) }
-    val videoAlpha by animateFloatAsState(if (!videoShown) 0f else if (calm) 0.3f else 0.9f, tween(900), label = "canvas")
-    val artAlpha by animateFloatAsState(if (calm) 0.3f else 0.6f, tween(600), label = "backdrop")
+    val videoAlpha by animateFloatAsState(if (!videoShown) 0f else if (calm) 0.35f else 0.85f, tween(900), label = "canvas")
+    val artAlpha by animateFloatAsState(if (calm) 0.25f else 0.5f, tween(600), label = "backdrop")
     val backdrop = remember(media.art) { media.art?.let(::tiny) }
-
-    BoxWithConstraints(Modifier.fillMaxWidth().padding(bottom = 10.dp).height(80.dp).clip(RoundedCornerShape(20.dp)).background(BarSurface)) {
-        // Below that width the heart would leave the title almost no room.
-        val roomForLike = maxWidth >= 340.dp
+    Box(modifier) {
         // Blurred cover: a tiny copy upscaled is already soft, the blur (Android 12+) smooths it out.
         backdrop?.let {
             Image(
                 it.asImageBitmap(),
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize().blur(16.dp).alpha(artAlpha),
+                modifier = Modifier.fillMaxSize().blur(24.dp).alpha(artAlpha),
             )
         }
         if (video != null && !videoFailed) {
@@ -118,7 +98,36 @@ fun MediaBar(
                 },
             )
         }
-        Box(Modifier.fillMaxSize().background(BarScrim))
+        Box(Modifier.fillMaxSize().background(BackdropFade))
+    }
+}
+
+/** Black at the top (it meets the map's fade), darker again at the bottom under the buttons. */
+private val BackdropFade = Brush.verticalGradient(
+    0f to Color.Black,
+    0.3f to Color.Black.copy(alpha = 0.6f),
+    0.7f to Color.Black.copy(alpha = 0.45f),
+    1f to Color.Black.copy(alpha = 0.75f),
+)
+
+/**
+ * Music controls under the alerts, for any player (Spotify, YouTube, Deezer…): cover, title,
+ * artist and the buttons a driver needs, on a translucent strip over [MusicBackdrop]. The heart
+ * (Spotify) shows when the strip is wide enough; a thin line at the bottom follows the track. A
+ * tap on the cover or the title opens the player.
+ */
+@Composable
+fun MediaBar(
+    media: MediaInfo,
+    onOpen: () -> Unit = {},
+    onLike: () -> Unit = {},
+    onPrevious: () -> Unit,
+    onPlayPause: () -> Unit,
+    onNext: () -> Unit,
+) {
+    BoxWithConstraints(Modifier.fillMaxWidth().padding(bottom = 10.dp).height(72.dp).clip(RoundedCornerShape(20.dp)).background(BarGlass)) {
+        // Below that width the heart would leave the title almost no room.
+        val roomForLike = maxWidth >= 340.dp
 
         val halo = TextStyle(shadow = Shadow(Color.Black.copy(alpha = 0.8f), blurRadius = 12f))
         Row(Modifier.fillMaxSize().padding(start = 12.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {

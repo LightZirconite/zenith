@@ -109,6 +109,23 @@ fun DriveScreen(
         AnimatedVisibility(visible = showMap, enter = fadeIn(tween(1_200)), exit = fadeOut(tween(600))) {
             DriveMap(snapshot, radars, zones, Modifier.fillMaxWidth().fillMaxHeight(0.62f))
         }
+        // Music ambience from the bottom: the Spotify Canvas (else the cover, blurred) melting into the black.
+        AnimatedVisibility(
+            visible = running && media != null,
+            modifier = Modifier.align(Alignment.BottomCenter),
+            enter = fadeIn(tween(1_200)),
+            exit = fadeOut(tween(600)),
+        ) {
+            media?.let {
+                MusicBackdrop(
+                    it,
+                    canvas = mediaCanvas,
+                    // An alert on screen: the music steps back.
+                    calm = snapshot?.alerts?.isNotEmpty() == true,
+                    modifier = Modifier.fillMaxWidth().fillMaxHeight(0.55f),
+                )
+            }
+        }
         Column(
             modifier = Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 20.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -129,9 +146,6 @@ fun DriveScreen(
                 media?.let {
                     MediaBar(
                         it,
-                        canvas = mediaCanvas,
-                        // An alert on screen: the music steps back.
-                        calm = snapshot?.alerts?.isNotEmpty() == true,
                         onOpen = onMediaOpen,
                         onLike = onMediaLike,
                         onPrevious = onMediaPrevious,
