@@ -98,6 +98,9 @@ def main():
         return
     db = json.load(open(path)) if os.path.exists(path) else {"v": 1, "cells": initial_cells(), "radars": {}}
     now = int(time.time())
+    if "calls" not in db and db.get("updated"):
+        # Base from before the call log: its last run counts as a full budget spent at that time.
+        db["calls"] = [int(datetime.fromisoformat(db["updated"]).timestamp())] * budget
     db["calls"] = [t for t in db.get("calls", []) if t > now - WINDOW_S]
     left = budget - len(db["calls"])
     spend_all = len(sys.argv) > 3 and sys.argv[3] == "all"  # manual run: no random share
