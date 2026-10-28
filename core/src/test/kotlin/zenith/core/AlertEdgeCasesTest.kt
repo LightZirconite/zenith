@@ -109,6 +109,19 @@ class AlertEdgeCasesTest {
     }
 
     @Test
+    fun `two cameras of a level crossing, close but measuring different directions, are both announced`() {
+        // Seen in the real data (fr-FE391503 / fr-FE391504, 75 m apart): the second one went silent as a "twin".
+        val network = RoadNetwork(listOf(Sim.seg(1, 1, 2, 0.0 to -1_500.0, 0.0 to 2_500.0, limit = 50)))
+        val other = Radar("other", Sim.ll(15.0, 960.0), RadarType.LEVEL_CROSSING, directionDeg = 38.0)
+        val mine = Radar("mine", Sim.ll(0.0, 1_030.0), RadarType.LEVEL_CROSSING, directionDeg = 0.0)
+        for (seed in seeds) {
+            val fixes = Sim.drive(listOf(0.0 to 0.0, 0.0 to 1_500.0), 50 / 3.6, noiseM = 4.0, seed = seed)
+            val ids = replay(network, listOf(other, mine), fixes).events().filterIsInstance<AlertEvent.Approach>().map { it.radar.id }
+            assertTrue("mine" in ids, "seed $seed: $ids")
+        }
+    }
+
+    @Test
     fun `a late fix during a section is ignored instead of failing`() {
         val tracker = SectionTracker(1_000.0, 90, 0)
         tracker.advance(100.0, 4_000)

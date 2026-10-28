@@ -32,3 +32,12 @@ tasks.register<JavaExec>("replay") {
     classpath = sourceSets["main"].runtimeClasspath
     workingDir = rootDir
 }
+
+// ./gradlew :core:audit --args="radars.json dossier_des_tuiles [trajets] [graine]"
+tasks.register<JavaExec>("audit") {
+    group = "zenith"
+    description = "Trajets simulés sur les vraies routes et les vrais radars : radars ratés, annonces hors route."
+    mainClass = "zenith.core.FieldAuditMain"
+    classpath = sourceSets["main"].runtimeClasspath
+    workingDir = rootDir
+}

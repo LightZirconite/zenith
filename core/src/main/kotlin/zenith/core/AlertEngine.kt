@@ -241,7 +241,10 @@ class AlertEngine(
             if (r.id !in tracked && d <= triggerM) {
                 val twin = tracked.values.any { t ->
                     !t.silent && t.radar.type == r.type && Geo.distanceM(t.radar.position, r.position) <= settings.twinM &&
-                        (t.radar.limitKmh == null || r.limitKmh == null || t.radar.limitKmh == r.limitKmh)
+                        (t.radar.limitKmh == null || r.limitKmh == null || t.radar.limitKmh == r.limitKmh) &&
+                        // Two measured directions that differ: two cameras (level crossing, crossroads), not one.
+                        (t.radar.directionDeg == null || r.directionDeg == null ||
+                            Geo.headingDiffDeg(t.radar.directionDeg, r.directionDeg) <= TWIN_DIRECTION_DEG)
                 }
                 tracked[r.id] = Track(r, Geo.distanceM(state.position, r.position), v, silent = twin)
                 if (!twin) events += AlertEvent.Approach(now, r, d, radarLimit(r, roadLimit))
@@ -452,5 +455,8 @@ class AlertEngine(
 
         /** A tracked radar whose road distance vanishes under this (or two fixes of travel) was reached. */
         const val REACHED_M = 30.0
+
+        /** Same camera seen by two sources: their measured directions agree within this. */
+        const val TWIN_DIRECTION_DEG = 25.0
     }
 }

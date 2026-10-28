@@ -147,7 +147,8 @@ object RoadHorizon {
 
     private fun exitNode(s: HorizonStep) = if (s.forward) s.segment.toNode else s.segment.fromNode
 
-    private fun continuation(network: RoadNetwork, last: HorizonStep): Pair<RoadSegment, Boolean>? {
+    /** Obvious way on after [last], or null at a fork without one (also used by [FieldAudit] to drive like people do). */
+    internal fun continuation(network: RoadNetwork, last: HorizonStep): Pair<RoadSegment, Boolean>? {
         val options = network.departuresFrom(exitNode(last)).filter { it.first.id != last.segment.id }
         if (options.size <= 1) return options.firstOrNull()
         val current = last.segment
