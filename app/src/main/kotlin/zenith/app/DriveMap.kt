@@ -223,8 +223,7 @@ private class MapHolder {
             .bearing(s.headingDeg ?: lastCamera?.bearing ?: 0.0)
             .tilt(tilt)
             .zoom(z)
-            // Padding on one side moves the view's center, where the car sits, toward the other.
-            .padding(0.0, (heightPx * (2 * carAt - 1)).coerceAtLeast(0.0), 0.0, (heightPx * (1 - 2 * carAt)).coerceAtLeast(0.0))
+            .padding(0.0, 0.0, 0.0, heightPx * (1 - 2 * carAt))
             .build()
         val first = lastCamera == null
         lastCamera = camera
