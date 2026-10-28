@@ -18,7 +18,8 @@ class Speaker(context: Context, private val ducker: AudioDucker) : TextToSpeech.
         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
         .build()
     private val tts = TextToSpeech(context, this)
-    private val pending = mutableListOf<String>()
+    /** Said before the engine was ready: replayed as asked (after the tone, urgent or not) once it is. */
+    private val pending = mutableListOf<() -> Unit>()
     private val counter = AtomicInteger(0)
     /** Utterances queued or speaking → whether each one paused the music. */
     private val queued = ConcurrentHashMap<String, Boolean>()
@@ -42,7 +43,7 @@ class Speaker(context: Context, private val ducker: AudioDucker) : TextToSpeech.
             override fun onError(utteranceId: String) = finished(utteranceId)
         })
         ready = true
-        pending.forEach { say(it) }
+        pending.forEach { it() }
         pending.clear()
     }
 
@@ -53,7 +54,7 @@ class Speaker(context: Context, private val ducker: AudioDucker) : TextToSpeech.
     @Synchronized
     fun say(text: String, delayMs: Int = 0, urgent: Boolean = false, pauseMusic: Boolean = true) {
         if (!ready) {
-            pending += text
+            pending += { say(text, delayMs, urgent, pauseMusic) }
             return
         }
         val id = "zenith-${counter.incrementAndGet()}"

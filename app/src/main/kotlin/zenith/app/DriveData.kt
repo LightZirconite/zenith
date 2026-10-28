@@ -34,8 +34,13 @@ data class DataStatus(
     val radarsUpdatedMs: Long? = null,
     val tilesLoaded: Int = 0,
     val loading: Boolean = false,
-    val error: String? = null,
-)
+    /** Radar list unavailable (no cache and no network). */
+    val radarError: String? = null,
+    /** Road tiles around the car unavailable; cleared once they load. */
+    val tileError: String? = null,
+) {
+    val error: String? get() = tileError ?: radarError
+}
 
 /**
  * Offline data built weekly by the "data" workflow and published on the GitHub "data" release:
@@ -68,7 +73,8 @@ class DriveData(context: Context, private val scope: CoroutineScope) {
         if (!radarFile.exists() || age(radarFile) > DAY_MS) {
             runCatching { download("radars.json", radarFile) }
                 .onSuccess { publishRadars(onLoaded) }
-                .onFailure { fail("radars", it) }
+                // With a cached list the drive goes on with it: nothing to warn about.
+                .onFailure { if (radarFile.exists()) Log.w("Zenith", "data radars refresh", it) else fail("radars", it) }
         }
     }
 
@@ -83,13 +89,17 @@ class DriveData(context: Context, private val scope: CoroutineScope) {
             mutex.withLock {
                 _status.update { it.copy(loading = true) }
                 val available = availableTiles ?: loadManifest()
+                var failed: String? = null
                 for (key in missing) {
                     val file = File(tileDir, key.fileName)
                     val segments = runCatching {
                         if (available != null && key.fileName !in available) return@runCatching emptyList()
                         if (!file.exists() || age(file) > 30 * DAY_MS) download(key.fileName, file)
                         RoadTiles.parse(GZIPInputStream(file.inputStream()).bufferedReader().use { it.readText() })
-                    }.onFailure { fail("tuile ${key.fileName}", it) }.getOrNull()
+                    }.onFailure {
+                        Log.w("Zenith", "data tile ${key.fileName}", it)
+                        failed = "Données tuile ${key.fileName} indisponibles"
+                    }.getOrNull()
                     if (segments != null) tiles[key] = segments else failedAtMs[key] = System.currentTimeMillis()
                     pending -= key
                 }
@@ -97,14 +107,16 @@ class DriveData(context: Context, private val scope: CoroutineScope) {
                 val keep = wanted.flatMap { k -> (-1..1).flatMap { di -> (-1..1).map { dj -> RoadTiles.Key(k.i + di, k.j + dj) } } }.toSet()
                 tiles.keys.retainAll(keep)
                 network = RoadNetwork(tiles.values.flatten().distinctBy { it.id })
-                _status.update { it.copy(tilesLoaded = tiles.size, loading = false) }
+                // A tile that failed once and came back (network back) no longer shows an error.
+                _status.update { it.copy(tilesLoaded = tiles.size, loading = false, tileError = failed) }
             }
         }
     }
 
     private fun loadManifest(): Set<String>? {
         if (!manifestFile.exists() || age(manifestFile) > DAY_MS) {
-            runCatching { download("manifest.json", manifestFile) }.onFailure { fail("manifest", it) }
+            // Without it every tile is simply tried: a failing tile says so itself.
+            runCatching { download("manifest.json", manifestFile) }.onFailure { Log.w("Zenith", "data manifest", it) }
         }
         return runCatching {
             val manifest = Json.parseToJsonElement(manifestFile.readText()).jsonObject
@@ -126,13 +138,15 @@ class DriveData(context: Context, private val scope: CoroutineScope) {
 
     private fun publishRadars(onLoaded: (RadarData) -> Unit) {
         val pack = runCatching { RadarPack.parseAll(radarFile.readText()) }.onFailure { fail("radars", it) }.getOrNull() ?: return
-        _status.update { it.copy(radarCount = pack.radars.size, zoneCount = pack.zones.size, radarsUpdatedMs = radarFile.lastModified(), error = null) }
+        _status.update {
+            it.copy(radarCount = pack.radars.size, zoneCount = pack.zones.size, radarsUpdatedMs = radarFile.lastModified(), radarError = null)
+        }
         onLoaded(pack)
     }
 
     private fun fail(what: String, e: Throwable) {
         Log.w("Zenith", "data $what", e)
-        _status.update { it.copy(error = "Données $what indisponibles") }
+        _status.update { it.copy(radarError = "Données $what indisponibles") }
     }
 
     private fun age(f: File) = System.currentTimeMillis() - f.lastModified()
