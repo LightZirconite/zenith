@@ -3,6 +3,7 @@ name: data
 # Weekly: rebuilds the speed-limit road tiles and the OSM radar extract from the France OSM
 # extract, then radars.json. Everything is an asset of the "data" release (never marked latest,
 # so the APK link keeps pointing to the app release). radars.yml refreshes radars.json daily.
+# Built-up areas (landuse) are kept in the extract: roads without a limit get 50 / 80 from them.
 on:
   schedule:
     - cron: "0 3 * * 1"
@@ -11,8 +12,9 @@ on:
 permissions:
   contents: write
 
+# Shared with radars.yml: both publish radars.json and official.json.
 concurrency:
-  group: data
+  group: data-release
   cancel-in-progress: false
 
 jobs:
@@ -32,8 +34,9 @@ jobs:
       - name: France extract
         run: |
           mkdir -p out
-          curl -sSL --retry 3 -o france.osm.pbf https://download.geofabrik.de/europe/france-latest.osm.pbf
-          osmium tags-filter france.osm.pbf w/highway n/highway=speed_camera r/type=enforcement -o drive.osm.pbf
+          curl -sSL --fail --retry 3 --retry-delay 30 -o france.osm.pbf https://download.geofabrik.de/europe/france-latest.osm.pbf
+          osmium tags-filter france.osm.pbf w/highway n/highway=speed_camera r/type=enforcement \
+            wr/landuse=residential,retail,commercial -o drive.osm.pbf
           rm france.osm.pbf
           ls -la drive.osm.pbf
 
@@ -45,11 +48,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           LUFOP_DB_KEY: ${{ secrets.LUFOP_DB_KEY }}
         run: |
-          if gh release view data --json assets -q '.assets[].name' 2>/dev/null | grep -qx radars.json; then
-            gh release download data -p radars.json -O out/previous_radars.json
-          fi
+          assets=$(gh release view data --json assets -q '.assets[].name' 2>/dev/null || true)
+          if grep -qx radars.json <<< "$assets"; then gh release download data -p radars.json -O out/previous_radars.json; fi
+          if grep -qx official.json <<< "$assets"; then gh release download data -p official.json -D out; fi
           pipeline/lufop_db.sh fetch out/lufop.json
-          python pipeline/build_radars.py merge out/osm_radars.json out/lufop.json out/radars.json
+          python pipeline/build_radars.py merge out/osm_radars.json out/lufop.json out/radars.json out/official.json
 
       - name: Road tiles
         run: |
@@ -72,7 +75,7 @@ jobs:
         run: |
           if ! gh release view data >/dev/null 2>&1; then
             gh release create data --title "Données Zenith" --prerelease --latest=false \
-              --notes "Radars (data.gouv.fr, Licence Ouverte + OpenStreetMap, ODbL) et limitations de vitesse (OpenStreetMap, ODbL). Mis à jour chaque semaine."
+              --notes "Radars (data.gouv.fr et radars.securite-routiere.gouv.fr, Licence Ouverte + OpenStreetMap, ODbL + Lufop) et limitations de vitesse (OpenStreetMap, ODbL). Mis à jour automatiquement."
           fi
           gh release upload data out/osm_radars.json --clobber
           ls out/tiles/*.json.gz | xargs -n 50 gh release upload data --clobber
@@ -84,4 +87,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           python pipeline/build_radars.py check out/previous_radars.json out/radars.json
-          gh release upload data out/radars.json --clobber
+          gh release upload data out/radars.json out/official.json --clobber

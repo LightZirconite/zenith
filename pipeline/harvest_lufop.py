@@ -2,16 +2,21 @@
 """Grows our own Lufop radar database a little every day, within the free-plan quota.
 
 France is covered by search circles. Each run visits the least recently visited circles
-(never-visited first) with at most <budget> requests, 10 per minute. A circle that returns
-the 200-result cap is split into four smaller ones, so dense areas end up fully covered.
-Radars are merged into the stored database: new ones added, seen ones refreshed, and ones
-missing twice in a row from a fully-read circle dropped (removed or moved).
+(never-visited first). A circle that returns the 200-result cap is split into four smaller
+ones, so dense areas end up fully covered. Radars are merged into the stored database: new ones
+added, seen ones refreshed, and ones missing twice in a row from a fully-read circle dropped.
 
-Usage: LUFOP_API_KEY=... harvest_lufop.py <lufop.json> [budget]
+Quota: the database keeps the time of every call of the last 24 hours, and the calls of any
+24-hour window never exceed <budget> (so neither does any calendar day, whatever the number of
+runs). The workflow runs several times a day at irregular times; each run spends a random share
+of what is left, with irregular pauses (never under 6.5 s: 10 requests / minute).
+
+Usage: LUFOP_API_KEY=... harvest_lufop.py <lufop.json> [budget per 24 h] [all]
 """
 import json
 import math
 import os
+import random
 import sys
 import time
 import urllib.parse
@@ -21,6 +26,9 @@ from datetime import datetime, timezone
 API = "https://api.lufop.net/api"
 MAX_RESULTS = 200
 MIN_INTERVAL_S = 6.5  # free plan: 10 requests / minute
+MAX_INTERVAL_S = 15.0
+RUN_SHARE = (30, 60)  # calls one run may spend, drawn at random, within the 24-hour budget
+WINDOW_S = 24 * 3600
 # Metropolitan France + Corsica, 60 km grid, 45 km circles (covers each square).
 LAT_MIN, LAT_MAX, LON_MIN, LON_MAX = 41.3, 51.2, -5.3, 9.7
 STEP_KM = 60.0
@@ -90,16 +98,23 @@ def main():
         return
     db = json.load(open(path)) if os.path.exists(path) else {"v": 1, "cells": initial_cells(), "radars": {}}
     now = int(time.time())
+    db["calls"] = [t for t in db.get("calls", []) if t > now - WINDOW_S]
+    left = budget - len(db["calls"])
+    spend_all = len(sys.argv) > 3 and sys.argv[3] == "all"  # manual run: no random share
+    share = left if spend_all else min(left, random.randint(*RUN_SHARE))
+    print(f"{len(db['calls'])} requêtes ces dernières 24 h, {max(left, 0)} restantes, {max(share, 0)} pour ce passage")
     used = added = dropped = 0
     last_call = 0.0
-    while used < budget:
+    while used < share:
         cell = min(db["cells"], key=lambda c: c["last"])
         if cell["last"] > now - 3600:
             break  # everything visited within the hour
-        wait = MIN_INTERVAL_S - (time.monotonic() - last_call)
+        wait = random.uniform(MIN_INTERVAL_S, MAX_INTERVAL_S) - (time.monotonic() - last_call)
         if wait > 0:
             time.sleep(wait)
         last_call = time.monotonic()
+        # Counted before the answer: a call that fails still uses the quota.
+        db["calls"].append(int(time.time()))
         try:
             results = query(key, cell)
         except Exception as e:  # noqa: BLE001 - quota or network: stop for today, keep what we have

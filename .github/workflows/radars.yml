@@ -1,25 +1,38 @@
 name: radars
 
-# Daily: grows our Lufop database within the free quota (secret LUFOP_API_KEY), then merges
-# official list + OSM extract + Lufop into radars.json on the "data" release.
+# Several times a day, at irregular times: grows our Lufop database within the free quota (secret
+# LUFOP_API_KEY), then merges official lists + OSM extract + Lufop into radars.json on the "data"
+# release. harvest_lufop.py keeps the calls of the last 24 h in the base, so any number of runs
+# never spends more than 150 a day; each run takes a random share of what is left, after a random
+# delay, so a missed schedule is caught up and calls never come at fixed times.
 # The Lufop base is published encrypted (pipeline/lufop_db.sh, secret LUFOP_DB_KEY).
 on:
   schedule:
-    - cron: "30 4 * * *"
+    - cron: "17 1 * * *"
+    - cron: "43 5 * * *"
+    - cron: "8 9 * * *"
+    - cron: "36 13 * * *"
+    - cron: "52 17 * * *"
+    - cron: "24 21 * * *"
   workflow_dispatch:
 
 permissions:
   contents: write
 
+# Shared with data.yml: both publish radars.json and official.json.
 concurrency:
-  group: lufop
+  group: data-release
   cancel-in-progress: false
 
 jobs:
   radars:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
+      - name: Random delay
+        if: github.event_name == 'schedule'
+        run: sleep $((RANDOM % 2700))
+
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
@@ -33,19 +46,18 @@ jobs:
           mkdir -p out
           # A file that exists on the release must download: a transient failure here would
           # restart the Lufop base from zero and overwrite the accumulated one.
-          if gh release view data --json assets -q '.assets[].name' 2>/dev/null | grep -qx osm_radars.json; then
-            gh release download data -p osm_radars.json -D out
-          fi
-          if gh release view data --json assets -q '.assets[].name' 2>/dev/null | grep -qx radars.json; then
-            gh release download data -p radars.json -O out/previous_radars.json
-          fi
+          assets=$(gh release view data --json assets -q '.assets[].name' 2>/dev/null || true)
+          if grep -qx osm_radars.json <<< "$assets"; then gh release download data -p osm_radars.json -D out; fi
+          if grep -qx radars.json <<< "$assets"; then gh release download data -p radars.json -O out/previous_radars.json; fi
+          if grep -qx official.json <<< "$assets"; then gh release download data -p official.json -D out; fi
           pipeline/lufop_db.sh fetch out/lufop.json
           ls -la out
 
+      # A manual run spends everything left in the 24-hour budget at once.
       - name: Lufop harvest
         env:
           LUFOP_API_KEY: ${{ secrets.LUFOP_API_KEY }}
-        run: python pipeline/harvest_lufop.py out/lufop.json 150
+        run: python pipeline/harvest_lufop.py out/lufop.json 150 ${{ github.event_name == 'workflow_dispatch' && 'all' || '' }}
 
       # Saved before anything else can fail: today's quota is spent, its results must not be lost.
       - name: Save Lufop base
@@ -55,14 +67,14 @@ jobs:
         run: |
           if ! gh release view data >/dev/null 2>&1; then
             gh release create data --title "Données Zenith" --prerelease --latest=false \
-              --notes "Radars (data.gouv.fr, Licence Ouverte + OpenStreetMap, ODbL + Lufop) et limitations de vitesse (OpenStreetMap, ODbL). Mis à jour automatiquement."
+              --notes "Radars (data.gouv.fr et radars.securite-routiere.gouv.fr, Licence Ouverte + OpenStreetMap, ODbL + Lufop) et limitations de vitesse (OpenStreetMap, ODbL). Mis à jour automatiquement."
           fi
           pipeline/lufop_db.sh publish out/lufop.json
 
       - name: Merge
         run: |
           if [ -f out/osm_radars.json ]; then
-            python pipeline/build_radars.py merge out/osm_radars.json out/lufop.json out/radars.json
+            python pipeline/build_radars.py merge out/osm_radars.json out/lufop.json out/radars.json out/official.json
             python pipeline/build_radars.py check out/previous_radars.json out/radars.json
           else
             echo "::warning::osm_radars.json absent (workflow data pas encore passé) : radars.json non reconstruit"
@@ -72,4 +84,4 @@ jobs:
         if: hashFiles('out/radars.json') != ''
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload data out/radars.json --clobber
+        run: gh release upload data out/radars.json out/official.json --clobber
