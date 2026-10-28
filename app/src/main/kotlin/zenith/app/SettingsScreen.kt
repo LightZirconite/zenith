@@ -69,15 +69,9 @@ fun SettingsScreen(
             Toggle(
                 "Pluie automatique",
                 "Pendant la conduite, la météo (Open-Meteo, gratuit) dit s'il pleut et les limites baissent seules : 110 sur " +
-                    "autoroute, 100 sur voie rapide, 80 sur route. Seule une position arrondie à ~10 km est envoyée. " +
-                    "Un appui sur la puce Pluie/Sec reprend la main jusqu'à la fin du trajet.",
+                    "autoroute, 100 sur voie rapide, 80 sur route. Rien à toucher. Seule une position arrondie à ~10 km est envoyée.",
                 settings.autoRain,
             ) { on -> onChange { it.copy(autoRain = on) } }
-            Toggle(
-                "Pluie maintenant",
-                "Limites de pluie tout de suite, sans attendre la météo.",
-                settings.raining,
-            ) { on -> onChange { it.copy(raining = on, rainManual = true) } }
             Toggle(
                 "Annonces vocales",
                 "Désactivé : seulement les bips, sans voix.",

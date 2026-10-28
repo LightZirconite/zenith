@@ -53,6 +53,10 @@ data class Permissions(
 ) {
     val motion: Boolean get() = motionAvailable && activity && backgroundLocation
 
+    /** Permissions still missing; the motion start counts only when wanted and possible here. */
+    fun missing(motionWanted: Boolean): Int =
+        listOf(location, notifications, installs, battery, media, !(motionAvailable && motionWanted) || motion).count { !it }
+
     companion object {
         fun read(context: Context) = Permissions(
             location = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
@@ -87,9 +91,9 @@ private val Accent = Color(0xFF0A84FF)
 private val Dim = Color(0xFF8E8E93)
 
 /**
- * First launch, and again once when a new version of Zenith asks for something new: every
- * permission, each with the reason in plain words, so none of Android's prompts comes as a
- * surprise. Only the location is required to start.
+ * Every permission Zenith needs, each with the reason in plain words, so none of Android's prompts
+ * comes as a surprise. All are required: the screen comes back whenever one is missing (outside a
+ * drive), and lets the driver through only once everything is granted.
  */
 @Composable
 fun Onboarding(
@@ -99,22 +103,25 @@ fun Onboarding(
     onInstalls: () -> Unit,
     onBattery: () -> Unit,
     onDone: () -> Unit,
-    /** Shown again for new permissions: "Nouveautés" instead of "Bienvenue". */
+    /** Shown again because something is missing: not the first launch. */
     returning: Boolean = false,
     motionWanted: Boolean = true,
     onMotion: () -> Unit = {},
     onMedia: () -> Unit = {},
+    /** App info screen, where Android 13+ hides "Autoriser les paramètres restreints". */
+    onMediaUnlock: () -> Unit = {},
 ) {
+    val missing = permissions.missing(motionWanted)
     Column(
         Modifier.fillMaxSize().background(Bg).safeDrawingPadding().padding(horizontal = 20.dp, vertical = 12.dp),
     ) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             Spacer(Modifier.height(24.dp))
-            Text(if (returning) "Nouveautés" else "Bienvenue", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Bold)
+            Text(if (returning) "Autorisations" else "Bienvenue", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(8.dp))
             Text(
                 if (returning) {
-                    "Zenith sait faire de nouvelles choses. Il lui faut quelques autorisations de plus : voici pourquoi chacune est là."
+                    "Il en manque pour que Zenith marche à fond : nouvelles fonctions, ou une autorisation retirée. Voici pourquoi chacune est là."
                 } else {
                     "Zenith a besoin de quelques autorisations pour t'alerter, même écran éteint ou derrière Waze. " +
                         "Android va afficher ses propres fenêtres : voici pourquoi chacune est là."
@@ -128,7 +135,6 @@ fun Onboarding(
                 text = "Pour mesurer ta vitesse et savoir quels radars sont sur ta route. Ta position ne quitte jamais le téléphone. " +
                     "Choisis « Pendant l'utilisation de l'appli ».",
                 granted = permissions.location,
-                required = true,
                 onClick = onLocation,
             )
             Step(
@@ -167,44 +173,58 @@ fun Onboarding(
             }
             Step(
                 title = "Musique",
-                text = "Titre en cours et commandes de Spotify ou de ton lecteur pendant la conduite, sans compte. Android appelle cela " +
-                    "« accès aux notifications » : Zenith n'y lit que le lecteur. Si l'option est grisée : Infos de l'appli Zenith → ⋮ → " +
-                    "Autoriser les paramètres restreints.",
+                text = "Titre et commandes de Spotify, YouTube ou ton lecteur pendant la conduite, sans compte. Android appelle cela " +
+                    "« accès aux notifications » : Zenith n'y lit que le lecteur. Touche Autoriser et active Zenith." +
+                    if (Build.VERSION.SDK_INT >= 33) {
+                        " Si c'est grisé (appli installée hors Play Store) : « Débloquer », puis ⋮ en haut à droite → " +
+                            "Autoriser les paramètres restreints, et recommence."
+                    } else {
+                        ""
+                    },
                 granted = permissions.media,
                 onClick = onMedia,
+                secondary = if (Build.VERSION.SDK_INT >= 33) "Débloquer" to onMediaUnlock else null,
             )
         }
         Spacer(Modifier.height(12.dp))
         Text(
-            if (permissions.location) "C'est parti" else "Autorise d'abord la position",
-            color = if (permissions.location) Color.Black else Dim,
+            when (missing) {
+                0 -> "C'est parti"
+                1 -> "Encore une autorisation"
+                else -> "Encore $missing autorisations"
+            },
+            color = if (missing == 0) Color.Black else Dim,
             fontSize = 18.sp,
             fontWeight = FontWeight.SemiBold,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
-                .background(if (permissions.location) Color.White else Surface)
-                .clickable(enabled = permissions.location, onClick = onDone).padding(vertical = 18.dp),
+                .background(if (missing == 0) Color.White else Surface)
+                .clickable(enabled = missing == 0, onClick = onDone).padding(vertical = 18.dp),
         )
     }
 }
 
 @Composable
-private fun Step(title: String, text: String, granted: Boolean, required: Boolean = false, onClick: () -> Unit) {
+private fun Step(title: String, text: String, granted: Boolean, onClick: () -> Unit, secondary: Pair<String, () -> Unit>? = null) {
     Row(
         Modifier.fillMaxWidth().padding(bottom = 12.dp).clip(RoundedCornerShape(20.dp)).background(Surface)
             .clickable(enabled = !granted, onClick = onClick).padding(18.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            // The label is measured first and stays on one line; a long title wraps in what is left
-            // (it used to take the whole width and squeeze the label into one letter per line).
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f, fill = false))
-                Spacer(Modifier.width(8.dp))
-                Text(if (required) "obligatoire" else "conseillé", color = Dim, fontSize = 13.sp, maxLines = 1, softWrap = false)
-            }
+            Text(title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(4.dp))
             Text(text, color = Color.White.copy(alpha = 0.75f), fontSize = 14.sp)
+            if (!granted && secondary != null) {
+                Text(
+                    secondary.first,
+                    color = Accent,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(top = 6.dp).clip(RoundedCornerShape(50)).clickable(onClick = secondary.second)
+                        .padding(vertical = 6.dp),
+                )
+            }
         }
         Spacer(Modifier.width(14.dp))
         if (granted) {

@@ -178,17 +178,14 @@ class DriveService : Service(), LocationListener {
         }
     }
 
-    /**
-     * Rain mode from the weather: checked every 10 minutes at the car's position (rounded to ~10 km),
-     * spoken when it changes. A tap on the rain chip during the drive leaves it to the driver.
-     */
+    /** Rain mode from the weather: checked every 10 minutes at the car's position (rounded to ~10 km), spoken when it changes. */
     private fun watchWeather() {
         val rain = RainDetector()
         scope.launch(Dispatchers.IO) {
             while (true) {
                 val s = UserSettings.state.value
                 val p = DriveState.snapshot.value?.position
-                if (p == null || !s.autoRain || s.rainManual) {
+                if (p == null || !s.autoRain) {
                     delay(20_000)
                     continue
                 }
@@ -196,7 +193,7 @@ class DriveService : Service(), LocationListener {
                     .onFailure { Log.w("Zenith", "weather", it) }.getOrNull()
                 if (now != null) {
                     val raining = rain.report(now)
-                    if (raining != s.raining && !UserSettings.state.value.rainManual) {
+                    if (raining != s.raining) {
                         UserSettings.update(this@DriveService) { it.copy(raining = raining) }
                         tones.play(Tone.CHIME)
                         if (s.voice) {
@@ -343,7 +340,7 @@ class DriveService : Service(), LocationListener {
         }
         driveExecutor.shutdown()
         // The next drive starts from the weather again, not from this drive's rain.
-        if (started && !demo) UserSettings.update(this) { it.copy(rainManual = false, raining = if (it.autoRain) false else it.raining) }
+        if (started && !demo) UserSettings.update(this) { it.copy(raining = false) }
         DriveState.stopped()
         super.onDestroy()
     }

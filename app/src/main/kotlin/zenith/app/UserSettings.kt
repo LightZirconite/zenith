@@ -18,8 +18,6 @@ data class SettingsState(
     val motionStart: Boolean = true,
     /** Rain mode from the weather (Open-Meteo) while driving. */
     val autoRain: Boolean = true,
-    /** The driver set rain by hand during this drive: the weather no longer changes it. Not kept. */
-    val rainManual: Boolean = false,
     /** Car paired for the automatic start (CompanionDeviceManager association), with its name. */
     val carAssociationId: Int? = null,
     val carName: String? = null,

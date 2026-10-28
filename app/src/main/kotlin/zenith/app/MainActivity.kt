@@ -71,21 +71,10 @@ class MainActivity : ComponentActivity() {
             val navApps = remember(resumeCount) { NavApp.installed(context) }
             var permissionResults by remember { mutableIntStateOf(0) }
             val permissions = remember(resumeCount, permissionResults) { Permissions.read(context) }
-            // Version of the welcome screen last completed (1: before "Démarrage en roulant" and "Musique").
-            var welcomeDone by remember {
-                mutableIntStateOf(prefs.getInt(KEY_WELCOME, if (prefs.getBoolean(KEY_ONBOARDED, false)) 1 else 0))
-            }
-            val onboarded = welcomeDone > 0
-            // A new version of the welcome screen comes back once, if one of its new steps is not granted yet.
-            val newSteps = (permissions.motionAvailable && settings.motionStart && !permissions.motion) || !permissions.media
-            val showWelcome = !onboarded || (welcomeDone < WELCOME_VERSION && newSteps)
-            // Everything new granted (here or in the settings): this version of the welcome is done.
-            LaunchedEffect(onboarded, newSteps) {
-                if (onboarded && !newSteps && welcomeDone < WELCOME_VERSION) {
-                    prefs.edit { putInt(KEY_WELCOME, WELCOME_VERSION) }
-                    welcomeDone = WELCOME_VERSION
-                }
-            }
+            var onboarded by remember { mutableStateOf(prefs.getBoolean(KEY_ONBOARDED, false)) }
+            // Every permission is required: the welcome screen comes back whenever one is missing,
+            // a new one or one taken back (never during a drive).
+            val showWelcome = !running && (!onboarded || permissions.missing(settings.motionStart) > 0)
             // "Car connected · tap to start" notification.
             LaunchedEffect(startNow, permissions.location) {
                 if (startNow && permissions.location) {
@@ -186,12 +175,10 @@ class MainActivity : ComponentActivity() {
                     onBattery = { openSettings(Permissions.batteryIntent(context)) },
                     onMotion = onMotion,
                     onMedia = { openSettings(NowPlaying.accessIntent(context)) },
+                    onMediaUnlock = { openSettings(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) },
                     onDone = {
-                        prefs.edit {
-                            putBoolean(KEY_ONBOARDED, true)
-                            putInt(KEY_WELCOME, WELCOME_VERSION)
-                        }
-                        welcomeDone = WELCOME_VERSION
+                        prefs.edit { putBoolean(KEY_ONBOARDED, true) }
+                        onboarded = true
                     },
                 )
             } else {
@@ -215,20 +202,11 @@ class MainActivity : ComponentActivity() {
                     onOpenNavApp = { it.launch(context) },
                     demo = demo,
                     onDemo = { if (permissions.location) DriveService.startDemo(context) },
-                    raining = settings.raining,
-                    rainAuto = settings.autoRain && !settings.rainManual,
-                    onToggleRain = { UserSettings.update(context) { it.copy(raining = !it.raining, rainManual = true) } },
                     onOpenSettings = { showSettings = true },
                     media = media,
                     onMediaPrevious = NowPlaying::previous,
                     onMediaPlayPause = NowPlaying::playPause,
                     onMediaNext = NowPlaying::next,
-                    hint = when {
-                        permissions.motionAvailable && settings.motionStart && !permissions.motion ->
-                            "Réglages → Démarrage en roulant : Zenith démarrera seul en voiture"
-                        !permissions.media -> "Réglages → Musique : Spotify et ton lecteur pendant la conduite"
-                        else -> null
-                    },
                 )
             }
         }
@@ -306,9 +284,5 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val ACTION_START_DRIVE = "zenith.app.START_DRIVE"
         private const val KEY_ONBOARDED = "onboarded"
-        private const val KEY_WELCOME = "welcome_version"
-
-        /** Raise it when the welcome screen gains a step: it comes back once for the users missing it. */
-        private const val WELCOME_VERSION = 2
     }
 }
