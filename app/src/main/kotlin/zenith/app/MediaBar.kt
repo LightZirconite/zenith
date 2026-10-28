@@ -41,9 +41,6 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.BlendMode
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -84,40 +81,34 @@ private enum class Glyph { PREVIOUS, PLAY, PAUSE, NEXT }
 
 /**
  * Ambience of the drive screen while music plays: the Spotify Canvas looping when the track has one
- * ([canvas] on), else the cover blurred, rising from the bottom of the screen and melting into the
- * black like the map from the top. Dark enough for the speed to stay readable; [calm] while an
- * alert shows, it steps back further.
+ * ([canvas] on), else the cover blurred, rising from the bottom of the screen under the map, which
+ * melts into it. Dark enough for the speed to stay readable; [calm] while an alert shows, it steps
+ * back further. [focus] (music mode, 0 to 1) brings it up the screen, brighter.
  */
 @Composable
-fun MusicBackdrop(media: MediaInfo, canvas: Boolean, calm: Boolean, modifier: Modifier = Modifier) {
+fun MusicBackdrop(media: MediaInfo, canvas: Boolean, calm: Boolean, focus: Float = 0f, modifier: Modifier = Modifier) {
     val video = rememberCanvas(media.spotifyTrackId, canvas)
     var videoShown by remember(video) { mutableStateOf(false) }
     var videoFailed by remember(video) { mutableStateOf(false) }
     val videoAlpha by animateFloatAsState(if (!videoShown) 0f else if (calm) 0.35f else 0.85f, tween(900), label = "canvas")
     val artAlpha by animateFloatAsState(if (calm) 0.25f else 0.5f, tween(600), label = "backdrop")
     val backdrop = remember(media.art) { media.art?.let(::tiny) }
-    // The top fades to transparent (a mask, not a black band): the Canvas melts into the map above.
-    Box(
-        modifier.graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
-            .drawWithContent {
-                drawContent()
-                drawRect(BackdropMask, blendMode = BlendMode.DstIn)
-            },
-    ) {
+    // The top fades to transparent (a mask, not a black band): faint high up, whole where the map has gone.
+    Box(modifier.verticalFade(blendStops(BackdropMask, BackdropMaskFocus, focus))) {
         // Blurred cover: a tiny copy upscaled is already soft, the blur (Android 12+) smooths it out.
         backdrop?.let {
             Image(
                 it.asImageBitmap(),
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize().blur(24.dp).alpha(artAlpha),
+                modifier = Modifier.fillMaxSize().blur(24.dp).alpha((artAlpha + 0.3f * focus).coerceAtMost(1f)),
             )
         }
         if (video != null && !videoFailed) {
             CanvasVideo(
                 video,
                 playing = media.playing,
-                modifier = Modifier.fillMaxSize().alpha(videoAlpha),
+                modifier = Modifier.fillMaxSize().alpha((videoAlpha + 0.15f * focus).coerceAtMost(1f)),
                 onShown = { videoShown = true },
                 onFailed = {
                     videoFailed = true
@@ -125,25 +116,34 @@ fun MusicBackdrop(media: MediaInfo, canvas: Boolean, calm: Boolean, modifier: Mo
                 },
             )
         }
-        Box(Modifier.fillMaxSize().background(BackdropFade))
+        // Darkening for the speed and the buttons to stay readable, stronger at the bottom; lighter in music mode.
+        Box(
+            Modifier.fillMaxSize().background(
+                Brush.verticalGradient(
+                    0f to Color.Black.copy(alpha = 0.35f - 0.2f * focus),
+                    0.5f to Color.Black.copy(alpha = 0.45f - 0.2f * focus),
+                    1f to Color.Black.copy(alpha = 0.75f - 0.05f * focus),
+                ),
+            ),
+        )
     }
 }
 
-/** Darkening for the speed and the buttons to stay readable, stronger at the bottom. */
-private val BackdropFade = Brush.verticalGradient(
-    0f to Color.Black.copy(alpha = 0.35f),
-    0.5f to Color.Black.copy(alpha = 0.45f),
-    1f to Color.Black.copy(alpha = 0.75f),
-)
+/**
+ * Opacity of the backdrop along its height (it starts at a fifth of the screen): a faint tail high
+ * up, whole from the middle of the screen, where the map has melted away.
+ */
+private val BackdropMask = listOf(0f to 0f, 0.125f to 0.5f, 0.275f to 1f, 1f to 1f)
 
-/** Opacity of the backdrop: nothing at its top edge, full from 45 % down. */
-private val BackdropMask = Brush.verticalGradient(0f to Color.Transparent, 0.45f to Color.Black, 1f to Color.Black)
+/** Music mode: whole almost from its top, the map having stepped back. */
+private val BackdropMaskFocus = listOf(0f to 0f, 0.04f to 0.6f, 0.1f to 1f, 1f to 1f)
 
 /**
  * Music controls under the alerts, for any player (Spotify, YouTube, Deezer…): cover, title,
  * artist and the buttons a driver needs, on a translucent strip over [MusicBackdrop]. The heart
  * (Spotify) shows when the strip is wide enough; a thin line at the bottom follows the track. A
- * tap on the cover or the title opens the player. Swiping the strip changes track like on a
+ * tap on the cover or the title switches the music mode, a long press opens the player. A video
+ * (YouTube) shows its thumbnail wide. Swiping the strip changes track like on a
  * phone's lock screen: to the left the next one, to the right the previous one. Never by
  * accident: only a long, clearly sideways swipe counts, a tick and a label tell when it will,
  * coming back before letting go cancels it, and a second change waits a second.
@@ -151,6 +151,9 @@ private val BackdropMask = Brush.verticalGradient(0f to Color.Transparent, 0.45f
 @Composable
 fun MediaBar(
     media: MediaInfo,
+    /** A tap on the cover or the title: music mode. */
+    onTap: () -> Unit = {},
+    /** A long press: the player itself. */
     onOpen: () -> Unit = {},
     onLike: () -> Unit = {},
     onPrevious: () -> Unit,
@@ -222,10 +225,14 @@ fun MediaBar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Row(
-                Modifier.weight(1f).fillMaxHeight().tap(onClick = onOpen).semantics { contentDescription = "Ouvrir le lecteur" },
+                Modifier.weight(1f).fillMaxHeight().tap(onLongClick = onOpen, onClick = onTap)
+                    .semantics { contentDescription = "Mode musique ; appui long : ouvrir le lecteur" },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Box(Modifier.size(52.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFF2C2C30))) {
+                Box(
+                    Modifier.size(width = if (media.video) 84.dp else 52.dp, height = if (media.video) 48.dp else 52.dp)
+                        .clip(RoundedCornerShape(10.dp)).background(Color(0xFF2C2C30)),
+                ) {
                     media.art?.let {
                         Image(it.asImageBitmap(), contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                     }

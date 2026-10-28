@@ -23,6 +23,7 @@ import zenith.core.LikeAction
 import zenith.core.PlaybackProgress
 import zenith.core.PlayerActions
 import zenith.core.SpotifyTrack
+import zenith.core.VideoTitle
 
 /** The track playing in another app (Spotify, Deezer, YouTube, YouTube Music…). */
 data class MediaInfo(
@@ -39,6 +40,8 @@ data class MediaInfo(
     val progress: PlaybackProgress? = null,
     /** Heart button, when the player offers one (Spotify's Liked Songs). */
     val like: LikeAction? = null,
+    /** A video (YouTube, a wide thumbnail): its picture is shown wide on the card. */
+    val video: Boolean = false,
 )
 
 /**
@@ -182,11 +185,14 @@ object NowPlaying {
         }
         val playback = c.playbackState
         val actions = playback?.customActions.orEmpty()
+        val channel = md.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: md.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE)
+        // YouTube: "Artist - Song (Official Video)" by "ArtistVEVO" reads "Song" by "Artist".
+        val (shownTitle, shownArtist) = if (c.packageName == VideoTitle.YOUTUBE) VideoTitle.display(title, channel) else title to channel
         val like = PlayerActions.like(actions.map { it.action })
         likeAction = like?.let { l -> actions.firstOrNull { it.action == l.action } }
         _state.value = MediaInfo(
-            title = title,
-            artist = md.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: md.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE),
+            title = shownTitle,
+            artist = shownArtist,
             art = art,
             playing = playback?.state == PlaybackState.STATE_PLAYING,
             player = c.packageName,
@@ -200,6 +206,7 @@ object NowPlaying {
                 PlaybackProgress.of(it.position, it.lastPositionUpdateTime, it.playbackSpeed, md.getLong(MediaMetadata.METADATA_KEY_DURATION))
             },
             like = like,
+            video = c.packageName == VideoTitle.YOUTUBE || (art?.let { it.width > it.height * 1.3f } ?: false),
         )
     }
 

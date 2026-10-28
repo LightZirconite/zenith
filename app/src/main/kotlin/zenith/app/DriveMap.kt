@@ -113,7 +113,7 @@ fun DriveMap(
 }
 
 /** Long, progressive fade: clear at the top, melting into the black app background below. */
-internal val DriveFade = Brush.verticalGradient(
+private val DriveFade = Brush.verticalGradient(
     0f to Color.Black.copy(alpha = 0.45f),
     0.12f to Color.Transparent,
     0.42f to Color.Transparent,

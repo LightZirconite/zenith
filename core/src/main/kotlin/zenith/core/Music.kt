@@ -69,3 +69,43 @@ object PlayerActions {
         else -> null
     }
 }
+
+/**
+ * What video players (YouTube) publish, made readable on the music card: the video title carries
+ * the artist and tags like "(Official Video)", the "artist" is the channel ("NinhoVEVO",
+ * "Ninho - Topic"). Other players already give clean metadata and are left as they are.
+ */
+object VideoTitle {
+    /** YouTube itself; YouTube Music gives real artists and titles. */
+    const val YOUTUBE = "com.google.android.youtube"
+
+    private val TAG_WORDS = Regex(
+        """(?i)\b(official|officiel(le)?|clip|video|vidéo|audio|lyrics?|paroles|visuali[sz]er|hd|4k|hq|remaster(ed)?|music video)\b""",
+    )
+    private val BRACKETED = Regex("""\s*[(\[]([^()\[\]]*)[)\]]""")
+    private val CHANNEL_SUFFIX = Regex("""(?i)(\s*-\s*(topic|thème|sujet)|vevo|\s+official|\s+officiel)\s*$""")
+
+    /** The title without its tags in brackets: "Ninho - Jefe (Clip officiel)" → "Ninho - Jefe". */
+    fun clean(title: String): String =
+        BRACKETED.replace(title) { m -> if (TAG_WORDS.containsMatchIn(m.groupValues[1])) "" else m.value }.trim().ifEmpty { title.trim() }
+
+    /** The channel as an artist name: "NinhoVEVO" → "Ninho", "Ninho - Topic" → "Ninho". */
+    fun channel(name: String?): String? = name?.let { CHANNEL_SUFFIX.replace(it, "").trim() }?.ifEmpty { null }
+
+    /**
+     * Title and artist for the card from a video's [title] and [channel]: "Artist - Song" is split
+     * when it starts with the channel's artist (or the channel is a VEVO / Topic one).
+     */
+    fun display(title: String, channel: String?): Pair<String, String?> {
+        val cleaned = clean(title)
+        val artist = channel(channel)
+        val dash = cleaned.indexOf(" - ")
+        if (dash > 0) {
+            val left = cleaned.substring(0, dash).trim()
+            val right = cleaned.substring(dash + 3).trim()
+            val labelChannel = channel != null && channel.trim() != artist
+            if (right.isNotEmpty() && (artist == null || labelChannel || left.equals(artist, ignoreCase = true))) return right to left
+        }
+        return cleaned to artist
+    }
+}

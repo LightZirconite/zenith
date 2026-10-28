@@ -28,9 +28,9 @@ Ensuite, Zenith se met à jour tout seul.
 - Radars fixes, feux rouges, tronçons et itinéraires de contrôle, uniquement sur ta route
 - Alertes vocales en français et bips qui s'accélèrent si tu roules trop vite
 - Moyenne en direct sur les radars tronçons
-- Petite carte pour te situer
+- Petite carte pour te situer, et un décollage dans les étoiles le temps de trouver le GPS
 - Petite fenêtre par-dessus Waze ou Maps
-- Musique à l'écran (Spotify, YouTube, Deezer…), avec le Canvas Spotify
+- Musique à l'écran (Spotify, YouTube, Deezer…), avec le Canvas Spotify et un mode musique ; glisse pour changer de titre
 - Démarre seul quand tu roules, s'arrête seul une fois garé
 - Mode pluie automatique
 - Mises à jour automatiques

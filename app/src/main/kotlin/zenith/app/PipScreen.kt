@@ -34,13 +34,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Shadow
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -103,7 +99,7 @@ fun PipScreen(
             s,
             radars,
             zones,
-            Modifier.fillMaxSize().melting(blend),
+            Modifier.fillMaxSize().then(if (blend > 0f) Modifier.verticalFade(MeltStops.map { (y, a) -> y to 1f - blend * (1f - a) }) else Modifier),
             // Split: the car rides in the part of the map that stays.
             carAt = if (split) 0.31 else 0.5,
             overlay = PipMapShade,
@@ -179,17 +175,6 @@ private const val MELT_FROM = 0.4f
  * smoothstep down to nothing at 85 %, so the eye finds no edge where the map ends.
  */
 private val MeltStops = listOf(0f to 1f, MELT_FROM to 1f, 0.51f to 0.84f, 0.62f to 0.5f, 0.74f to 0.16f, 0.85f to 0f, 1f to 0f)
-
-/** Fades the map out toward the bottom by [blend] (0: whole, 1: melted into what lies under it). */
-private fun Modifier.melting(blend: Float): Modifier {
-    if (blend <= 0f) return this
-    val mask = Brush.verticalGradient(*MeltStops.map { (y, a) -> y to Color.Black.copy(alpha = 1f - blend * (1f - a)) }.toTypedArray())
-    return graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-        .drawWithContent {
-            drawContent()
-            drawRect(mask, blendMode = BlendMode.DstIn)
-        }
-}
 
 /** The map, calmer than on the drive screen, darker under the radar pill at the top. */
 private val PipMapShade = Brush.verticalGradient(
