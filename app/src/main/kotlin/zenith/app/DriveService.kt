@@ -113,7 +113,6 @@ class DriveService : Service(), LocationListener {
             ACTION_DEMO -> DriveOrigin.DEMO
             ACTION_AUTO -> DriveOrigin.CAR
             ACTION_MOTION -> DriveOrigin.MOTION
-            ACTION_ANDROID_AUTO -> DriveOrigin.ANDROID_AUTO
             else -> DriveOrigin.HAND
         }
         createChannel()
@@ -126,7 +125,6 @@ class DriveService : Service(), LocationListener {
             when (origin) {
                 DriveOrigin.CAR -> CarLink.notifyTapToStart(this)
                 DriveOrigin.MOTION -> CarLink.notifyTapToStart(this, "En voiture ?")
-                DriveOrigin.ANDROID_AUTO -> CarLink.notifyTapToStart(this, "Android Auto connecté")
                 else -> Unit
             }
             stopSelf()
@@ -140,7 +138,6 @@ class DriveService : Service(), LocationListener {
         tones = TonePlayer(ducker)
         DriveState.started(origin)
         NowPlaying.start(this)
-        AndroidAuto.watch(this)
         if (demo) startDemo() else startLive()
         scope.launch { UserSettings.state.collect { session.profile = it.profile } }
         return if (demo) START_NOT_STICKY else START_STICKY
@@ -262,11 +259,10 @@ class DriveService : Service(), LocationListener {
 
     /**
      * Battery saver: a drive started by hand ends by itself once over (car parked, walking away,
-     * indoors without GPS). A drive started by the car or by Android Auto ends when it disconnects
-     * instead.
+     * indoors without GPS). A drive started by the car ends when the car disconnects instead.
      */
     private fun endByItself() {
-        if (origin == DriveOrigin.CAR || origin == DriveOrigin.ANDROID_AUTO) return
+        if (origin == DriveOrigin.CAR) return
         if (ending || !UserSettings.state.value.autoStop) return
         ending = true
         Log.i("Zenith", "drive over: stopping by itself")
@@ -300,8 +296,6 @@ class DriveService : Service(), LocationListener {
         snapshot.events.forEach(::announce)
         dangerBeep(snapshot)
         refreshNotification(snapshot)
-        // Android Auto showing another app (Waze, Maps): the radar comes up over it.
-        CarAlerts.update(this, snapshot.alerts.firstOrNull()?.takeIf { AndroidAuto.connected.value && !AndroidAuto.screenVisible.value })
     }
 
     /** Tone first, then the spoken text right after it. */
@@ -355,7 +349,6 @@ class DriveService : Service(), LocationListener {
             tones.release()
             ducker.shutdown()
             NowPlaying.stop()
-            CarAlerts.clear(this)
         }
         driveExecutor.shutdown()
         // The next drive starts from the weather again, not from this drive's rain.
@@ -457,7 +450,6 @@ class DriveService : Service(), LocationListener {
         private const val ACTION_AUTO = "zenith.app.AUTO"
         private const val ACTION_MOTION = "zenith.app.MOTION"
         private const val ACTION_MOTION_EXIT = "zenith.app.MOTION_EXIT"
-        private const val ACTION_ANDROID_AUTO = "zenith.app.ANDROID_AUTO"
         private const val ACTION_RESHOW = "zenith.app.RESHOW"
         private const val WEATHER_EVERY_MS = 10 * 60_000L
 
@@ -482,13 +474,7 @@ class DriveService : Service(), LocationListener {
             runCatching { context.startService(Intent(context, DriveService::class.java).setAction(ACTION_MOTION_EXIT)) }
         }
 
-        /** Android Auto connected, or Zenith opened on the car screen: throws when Android forbids the start. */
-        fun startAndroidAuto(context: Context) {
-            if (DriveState.running.value) return
-            context.startForegroundService(Intent(context, DriveService::class.java).setAction(ACTION_ANDROID_AUTO))
-        }
-
-        /** Car or Android Auto gone: ends the drive only if [origin] started it. */
+        /** Car gone: ends the drive only if [origin] started it. */
         fun stopIfStartedBy(context: Context, origin: DriveOrigin) {
             if (DriveState.running.value && DriveState.origin.value == origin) stop(context)
         }

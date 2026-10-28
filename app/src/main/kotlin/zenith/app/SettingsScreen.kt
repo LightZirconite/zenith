@@ -50,7 +50,6 @@ fun SettingsScreen(
     onAllowMedia: () -> Unit = {},
     permissions: Permissions? = null,
     onMotionPermission: () -> Unit = {},
-    androidAutoConnected: Boolean = false,
 ) {
     Column(Modifier.fillMaxSize().background(Color.Black).safeDrawingPadding().padding(horizontal = 20.dp, vertical = 12.dp)) {
         Text(
@@ -111,12 +110,11 @@ fun SettingsScreen(
                     )
                 }
             }
-            AndroidAutoCard(androidAutoConnected)
             Toggle(
                 "Arrêt automatique",
                 "Pour la batterie : Zenith s'arrête seul quand la voiture est garée depuis 10 minutes, quand tu repars à pied " +
                     "ou à l'intérieur sans GPS. Jamais sur autoroute ni pendant un bouchon. Une conduite lancée par la voiture " +
-                    "choisie au-dessus ou par Android Auto s'arrête, elle, avec la voiture.",
+                    "choisie au-dessus s'arrête, elle, avec la voiture.",
                 settings.autoStop,
             ) { on -> onChange { it.copy(autoStop = on) } }
             SectionTitle("Musique et petite fenêtre")
@@ -243,31 +241,6 @@ private fun MotionCard(
                     .padding(horizontal = 16.dp, vertical = 9.dp),
             )
         }
-    }
-}
-
-/** Where Zenith stands in Android Auto: the sound already goes through the car, the screen waits on Google. */
-@Composable
-private fun AndroidAutoCard(connected: Boolean) {
-    Card {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Android Auto", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f, fill = false))
-            if (connected) {
-                Spacer(Modifier.width(10.dp))
-                Box(Modifier.size(8.dp).background(Color(0xFF30D158), CircleShape))
-                Spacer(Modifier.width(6.dp))
-                Text("connecté", color = Color(0xFF30D158), fontSize = 14.sp, maxLines = 1, softWrap = false)
-            }
-        }
-        Spacer(Modifier.height(4.dp))
-        Text(
-            "Les alertes passent déjà par la voiture : bips et voix sortent sur ses haut-parleurs, Waze ou Maps devant. " +
-                "L'écran Zenith sur la voiture (carte, vitesse, alertes) n'apparaît que si Zenith est installé depuis le " +
-                "Play Store : « Sources inconnues » ne vaut pas pour ce type d'appli. Installé en test interne depuis le " +
-                "Play Store, il apparaît dans Android Auto et se met à jour par le Play Store.",
-            color = Color.White.copy(alpha = 0.75f),
-            fontSize = 14.sp,
-        )
     }
 }
 

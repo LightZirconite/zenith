@@ -8,7 +8,6 @@ lifecycle = "2.11.0"
 serializationJson = "1.12.0"
 maplibre = "13.7.1"
 playServicesLocation = "21.3.0"
-carApp = "1.7.0"
 
 [libraries]
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serializationJson" }
@@ -17,7 +16,6 @@ androidx-activity-compose = { module = "androidx.activity:activity-compose", ver
 androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }
 maplibre-android = { module = "org.maplibre.gl:android-sdk", version.ref = "maplibre" }
 play-services-location = { module = "com.google.android.gms:play-services-location", version.ref = "playServicesLocation" }
-androidx-car-app = { module = "androidx.car.app:app", version.ref = "carApp" }
 compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
 compose-ui = { module = "androidx.compose.ui:ui" }
 compose-material3 = { module = "androidx.compose.material3:material3" }

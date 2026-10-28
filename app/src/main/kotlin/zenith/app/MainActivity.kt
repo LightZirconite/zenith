@@ -49,8 +49,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val prefs = getSharedPreferences("zenith", MODE_PRIVATE)
         UserSettings.init(this)
-        // Android Auto connecting while Zenith runs starts the drive.
-        AndroidAuto.watch(this)
         handleIntent(intent)
         setContent {
             val context = LocalContext.current
@@ -67,7 +65,6 @@ class MainActivity : ComponentActivity() {
             val settings by UserSettings.state.collectAsStateWithLifecycle()
             val media by NowPlaying.state.collectAsStateWithLifecycle()
             val startNow by startRequested.collectAsStateWithLifecycle()
-            val carConnected by AndroidAuto.connected.collectAsStateWithLifecycle()
             var showSettings by remember { mutableStateOf(false) }
             val pairLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { }
             BackHandler(enabled = showSettings) { showSettings = false }
@@ -206,7 +203,6 @@ class MainActivity : ComponentActivity() {
                     onAllowMedia = onMedia,
                     permissions = permissions,
                     onMotionPermission = onMotion,
-                    androidAutoConnected = carConnected,
                 )
             } else if (showWelcome) {
                 Onboarding(

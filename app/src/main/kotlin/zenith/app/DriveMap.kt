@@ -49,7 +49,7 @@ import kotlin.math.ln
  * Tilted map at the top of the drive screen: arrow for the car, road ahead, nearby radars as mini
  * limit signs and control itineraries as an orange dashed line. The camera frames the next radar on
  * the road when there is one; dragging or pinching looks around, and the camera comes back on its
- * own after a few seconds. Also drawn on the picture-in-picture window and on the car screen.
+ * own after a few seconds. Also drawn on the picture-in-picture window.
  * Vector tiles from OpenFreeMap (free, no key). Any map failure leaves an empty black box.
  */
 @Composable
@@ -60,8 +60,6 @@ fun DriveMap(
     modifier: Modifier = Modifier,
     /** Height fraction where the car arrow sits, from the top. */
     carAt: Double = 0.45,
-    /** Width fraction where the car arrow sits (the car screen keeps it clear of its side panel). */
-    carX: Double = 0.5,
     /** Drawn over the map; defaults to the drive screen's long fade into black. */
     overlay: Brush = DriveFade,
 ) {
@@ -101,7 +99,7 @@ fun DriveMap(
     }
 
     // Before following: the first camera already puts the car at its place.
-    LaunchedEffect(carAt, carX) { holder.frame(carAt, carX) }
+    LaunchedEffect(carAt) { holder.frame(carAt) }
     LaunchedEffect(snapshot) { snapshot?.let(holder::follow) }
     LaunchedEffect(radars, snapshot?.alerts?.firstOrNull()?.radar?.id) {
         holder.showRadars(radars, snapshot?.alerts?.map { it.radar.id }?.toSet().orEmpty())
@@ -128,7 +126,6 @@ internal val DriveFade = Brush.verticalGradient(
 private class MapHolder {
     private var map: MapLibreMap? = null
     private var carAt = 0.45
-    private var carX = 0.5
     private var style: Style? = null
     private var pendingRadars: String? = null
     private var pendingZones: String? = null
@@ -186,10 +183,9 @@ private class MapHolder {
     }
 
     /** Moves the car to another place in the view (the picture-in-picture making room for the Canvas). */
-    fun frame(at: Double, x: Double) {
-        if (at == carAt && x == carX) return
+    fun frame(at: Double) {
+        if (at == carAt) return
         carAt = at
-        carX = x
         last?.let(::follow)
     }
 
@@ -209,7 +205,6 @@ private class MapHolder {
         val kmh = (s.speedKmh ?: 0).toDouble()
         val speedZoom = 16.3 - ((kmh - 30).coerceIn(0.0, 100.0) / 100.0) * 2.3
         val heightPx = m.height.toDouble().takeIf { it > 0 } ?: (300.0 * density)
-        val widthPx = m.width.toDouble().takeIf { it > 0 } ?: (360.0 * density)
         // Car at [carAt] of the map height: the speed counter covers the faded part below.
         val aheadPx = heightPx * carAt / density
         val framed = s.alerts.firstOrNull()?.distanceM ?: s.upcoming?.takeIf { it.roadName != null }?.distanceM
@@ -229,12 +224,7 @@ private class MapHolder {
             .tilt(tilt)
             .zoom(z)
             // Padding on one side moves the view's center, where the car sits, toward the other.
-            .padding(
-                (widthPx * (2 * carX - 1)).coerceAtLeast(0.0),
-                (heightPx * (2 * carAt - 1)).coerceAtLeast(0.0),
-                (widthPx * (1 - 2 * carX)).coerceAtLeast(0.0),
-                (heightPx * (1 - 2 * carAt)).coerceAtLeast(0.0),
-            )
+            .padding(0.0, (heightPx * (2 * carAt - 1)).coerceAtLeast(0.0), 0.0, (heightPx * (1 - 2 * carAt)).coerceAtLeast(0.0))
             .build()
         val first = lastCamera == null
         lastCamera = camera

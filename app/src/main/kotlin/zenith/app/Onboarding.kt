@@ -61,8 +61,7 @@ data class Permissions(
             location = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
                 PackageManager.PERMISSION_GRANTED,
             notifications = NotificationManagerCompat.from(context).areNotificationsEnabled(),
-            // Installed from Google Play, Zenith does not update itself: nothing to allow.
-            installs = Updater.fromPlay(context) || context.packageManager.canRequestPackageInstalls(),
+            installs = context.packageManager.canRequestPackageInstalls(),
             battery = context.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(context.packageName),
             media = NowPlaying.allowed(context),
             motionAvailable = Motion.available(context),

@@ -4,12 +4,4 @@
     <style name="Theme.Zenith" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">@android:color/black</item>
     </style>
-
-    <!-- Android Auto: the host's buttons in the drive screen's blue. -->
-    <style name="ZenithCarTheme">
-        <item name="carColorPrimary">#0A84FF</item>
-        <item name="carColorPrimaryDark">#0A84FF</item>
-        <item name="carColorSecondary">#30D158</item>
-        <item name="carColorSecondaryDark">#30D158</item>
-    </style>
 </resources>

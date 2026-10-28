@@ -26,7 +26,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ZENITH_BUILD_NUMBER: ${{ github.run_number }}
-      HAS_PLAY: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON != '' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-java@v5
@@ -55,9 +54,8 @@ jobs:
           ZENITH_KEY_ALIAS: ${{ secrets.ZENITH_KEY_ALIAS }}
           ZENITH_KEY_PASSWORD: ${{ secrets.ZENITH_KEY_PASSWORD }}
         run: |
-          ./gradlew :app:assembleRelease :app:bundleRelease
+          ./gradlew :app:assembleRelease
           cp app/build/outputs/apk/release/app-release.apk zenith.apk
-          cp app/build/outputs/bundle/release/app-release.aab zenith.aab
           "$ANDROID_HOME"/build-tools/$(ls "$ANDROID_HOME"/build-tools | sort -V | tail -1)/apksigner verify zenith.apk
 
       - name: Publish
@@ -65,20 +63,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           version="0.1.${ZENITH_BUILD_NUMBER}"
-          gh release create "v$version" zenith.apk zenith.aab \
+          gh release create "v$version" zenith.apk \
             --title "Zenith $version" \
             --notes "$(git log -1 --pretty=%B)" \
             --target "$GITHUB_SHA" \
             --latest
-
-      # Android Auto shows Zenith only when it comes from Google Play: the same build goes to the
-      # Play internal test track (tester: the author) once the secret exists. Skipped without it.
-      - name: Google Play (internal test track)
-        if: env.HAS_PLAY == 'true'
-        uses: r0adkll/upload-google-play@v1
-        with:
-          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
-          packageName: zenith.app
-          releaseFiles: zenith.aab
-          track: internal
-          status: completed

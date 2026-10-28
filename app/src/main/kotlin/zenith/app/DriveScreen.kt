@@ -65,7 +65,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
@@ -278,7 +277,7 @@ private fun StatusRow(
 }
 
 @Composable
-internal fun Chip(text: String, dot: Color, onClick: (() -> Unit)? = null) {
+private fun Chip(text: String, dot: Color, onClick: (() -> Unit)? = null) {
     Row(
         Modifier.then(if (onClick != null) Modifier.tap(onClick = onClick) else Modifier).glass(RoundedCornerShape(50))
             .padding(horizontal = 12.dp, vertical = 6.dp),
@@ -314,7 +313,7 @@ private fun UpdateBanner(update: UpdateState, canInstall: Boolean, onInstall: ()
 }
 
 @Composable
-internal fun Idle(data: DataStatus, onDemo: () -> Unit) {
+private fun Idle(data: DataStatus, onDemo: () -> Unit) {
     // Logo breathing softly, with a red glow behind the needle.
     val breath = rememberInfiniteTransition(label = "logo")
     val scale by breath.animateFloat(0.96f, 1.04f, infiniteRepeatable(tween(2_200), RepeatMode.Reverse), label = "scale")
@@ -433,16 +432,10 @@ internal fun LimitSign(limitKmh: Int, uncertain: Boolean, size: Dp = 104.dp) {
     }
 }
 
-/** Sizes of the alert cards: the phone's, or [CompactCards] for the narrower car panel. */
-internal data class CardSizes(val pad: Dp, val badge: Dp, val title: TextUnit, val distance: TextUnit, val average: TextUnit)
-
-private val PhoneCards = CardSizes(pad = 20.dp, badge = 54.dp, title = 22.sp, distance = 34.sp, average = 30.sp)
-internal val CompactCards = CardSizes(pad = 16.dp, badge = 46.dp, title = 18.sp, distance = 28.sp, average = 26.sp)
-
 /** Section under way, then the radar alert or, without one, the next radar on the road. */
 @Composable
-internal fun AlertArea(s: DriveSnapshot?, sizes: CardSizes = PhoneCards) {
-    s?.section?.let { SectionCard(it, sizes) }
+private fun AlertArea(s: DriveSnapshot?) {
+    s?.section?.let { SectionCard(it) }
     val alert = s?.alerts?.firstOrNull()
     AnimatedVisibility(
         visible = alert != null,
@@ -450,7 +443,7 @@ internal fun AlertArea(s: DriveSnapshot?, sizes: CardSizes = PhoneCards) {
             fadeIn(tween(250)) + scaleIn(spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow), initialScale = 0.92f),
         exit = slideOutVertically(tween(300)) { it / 3 } + fadeOut(tween(250)) + scaleOut(tween(300), targetScale = 0.95f),
     ) {
-        alert?.let { AlertCard(it, sizes) }
+        alert?.let { AlertCard(it) }
     }
     AnimatedVisibility(
         visible = alert == null && s?.upcoming != null,
@@ -462,7 +455,7 @@ internal fun AlertArea(s: DriveSnapshot?, sizes: CardSizes = PhoneCards) {
 }
 
 @Composable
-private fun AlertCard(a: ActiveAlert, sizes: CardSizes) {
+private fun AlertCard(a: ActiveAlert) {
     // Distance at first sight of this radar, to draw the countdown bar.
     var start by remember(a.radar.id) { mutableFloatStateOf(a.distanceM.toFloat()) }
     if (a.distanceM > start) start = a.distanceM.toFloat()
@@ -472,18 +465,18 @@ private fun AlertCard(a: ActiveAlert, sizes: CardSizes) {
     val bg by animateColorAsState(if (a.overLimit) Red else Glass, tween(300), label = "alertBg")
 
     Column(Modifier.fillMaxWidth().glass(RoundedCornerShape(22.dp), bg).alpha(if (a.overLimit) alpha else 1f)) {
-        Row(Modifier.padding(sizes.pad), verticalAlignment = Alignment.CenterVertically) {
-            RadarBadge(a.radar.type, a.limitKmh, sizes.badge)
-            Spacer(Modifier.width(sizes.pad * 0.8f))
+        Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+            RadarBadge(a.radar.type, a.limitKmh, 54.dp)
+            Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
-                Text(a.radar.type.label, color = Color.White, fontSize = sizes.title, fontWeight = FontWeight.Bold)
+                Text(a.radar.type.label, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 val details = listOfNotNull(
                     if (a.radar.directionDeg == null) "sens non vérifié" else null,
                     a.ageMs?.let { "signalé il y a ${(it / 60_000).coerceAtLeast(1)} min" },
                 )
                 if (details.isNotEmpty()) Text(details.joinToString(" · "), color = Color.White.copy(alpha = 0.75f), fontSize = 14.sp)
             }
-            Text(distanceText(a.distanceM), color = Color.White, fontSize = sizes.distance, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+            Text(distanceText(a.distanceM), color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
         }
         Box(Modifier.fillMaxWidth().height(6.dp).background(Color.White.copy(alpha = 0.15f))) {
             Box(Modifier.fillMaxHeight().fillMaxWidth(progress).background(Color.White))
@@ -508,18 +501,18 @@ private fun UpcomingStrip(u: UpcomingRadar) {
 }
 
 @Composable
-private fun SectionCard(s: SectionStatus, sizes: CardSizes) {
+private fun SectionCard(s: SectionStatus) {
     // One number to read (the average, next to the limit sign), one sentence saying what to do.
     val slowDown = s.lost || s.targetKmh < s.limitKmh
     val progress by animateFloatAsState((1 - s.remainingM / s.lengthM).toFloat().coerceIn(0f, 1f), label = "section")
     val bg by animateColorAsState(if (slowDown) Red else Glass, tween(400), label = "sectionBg")
     Column(Modifier.fillMaxWidth().padding(bottom = 12.dp).glass(RoundedCornerShape(22.dp), bg)) {
-        Row(Modifier.padding(start = sizes.pad, end = sizes.pad, top = sizes.pad * 0.9f), verticalAlignment = Alignment.CenterVertically) {
-            RadarBadge(RadarType.SECTION_START, s.limitKmh, sizes.badge)
-            Spacer(Modifier.width(sizes.pad * 0.8f))
+        Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+            RadarBadge(RadarType.SECTION_START, s.limitKmh, 54.dp)
+            Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
                 Text("Ta moyenne sur le tronçon", color = Color.White.copy(alpha = 0.75f), fontSize = 14.sp)
-                Text("${s.averageKmh.roundToInt()} km/h", color = Color.White, fontSize = sizes.average, fontWeight = FontWeight.Bold)
+                Text("${s.averageKmh.roundToInt()} km/h", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text("encore", color = Color.White.copy(alpha = 0.75f), fontSize = 14.sp)
@@ -535,7 +528,7 @@ private fun SectionCard(s: SectionStatus, sizes: CardSizes) {
             color = Color.White,
             fontSize = 16.sp,
             fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(start = sizes.pad, end = sizes.pad, top = 8.dp, bottom = 14.dp),
+            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 14.dp),
         )
         Box(Modifier.fillMaxWidth().height(6.dp).background(Color.White.copy(alpha = 0.15f))) {
             Box(Modifier.fillMaxHeight().fillMaxWidth(progress).background(Color.White))

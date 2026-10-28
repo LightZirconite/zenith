@@ -61,7 +61,5 @@ dependencies {
     implementation(libs.maplibre.android)
     // Activity recognition (vehicle enter / exit) for the automatic start without Bluetooth.
     implementation(libs.play.services.location)
-    // Android Auto: the car screen (Car App Library, navigation category).
-    implementation(libs.androidx.car.app)
     debugImplementation(libs.compose.ui.tooling)
 }

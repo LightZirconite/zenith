@@ -9,7 +9,7 @@ import zenith.core.Radar
 
 /** What started the running drive; a drive started by the car ends with the car. */
 enum class DriveOrigin {
-    /** The Start button (phone or car screen), or the "tap to start" notification. */
+    /** The Start button, or the "tap to start" notification. */
     HAND,
 
     /** The hidden simulated drive. */
@@ -20,9 +20,6 @@ enum class DriveOrigin {
 
     /** The phone started riding in a vehicle (activity recognition). */
     MOTION,
-
-    /** Android Auto connected, or Zenith opened on the car screen. */
-    ANDROID_AUTO,
 }
 
 /** Live state shared between [DriveService] and the UI. */
