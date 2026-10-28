@@ -7,6 +7,24 @@ import zenith.core.ControlZone
 import zenith.core.DriveSnapshot
 import zenith.core.Radar
 
+/** What started the running drive; a drive started by the car ends with the car. */
+enum class DriveOrigin {
+    /** The Start button (phone or car screen), or the "tap to start" notification. */
+    HAND,
+
+    /** The hidden simulated drive. */
+    DEMO,
+
+    /** The paired car's Bluetooth connected. */
+    CAR,
+
+    /** The phone started riding in a vehicle (activity recognition). */
+    MOTION,
+
+    /** Android Auto connected, or Zenith opened on the car screen. */
+    ANDROID_AUTO,
+}
+
 /** Live state shared between [DriveService] and the UI. */
 object DriveState {
     private val _running = MutableStateFlow(false)
@@ -16,7 +34,7 @@ object DriveState {
     private val _nearbyRadars = MutableStateFlow<List<Radar>>(emptyList())
     private val _nearbyZones = MutableStateFlow<List<ControlZone>>(emptyList())
     private val _demo = MutableStateFlow(false)
-    private val _autoStarted = MutableStateFlow(false)
+    private val _origin = MutableStateFlow(DriveOrigin.HAND)
 
     val running: StateFlow<Boolean> = _running
     val snapshot: StateFlow<DriveSnapshot?> = _snapshot
@@ -32,14 +50,14 @@ object DriveState {
     /** The running drive is the hidden simulated one. */
     val demo: StateFlow<Boolean> = _demo
 
-    /** The running drive was started by the car's Bluetooth. */
-    val autoStarted: StateFlow<Boolean> = _autoStarted
+    /** What started the running drive. */
+    val origin: StateFlow<DriveOrigin> = _origin
 
-    internal fun started(demo: Boolean = false, auto: Boolean = false) {
+    internal fun started(origin: DriveOrigin) {
         _snapshot.value = null
         _gps.value = GpsInfo()
-        _demo.value = demo
-        _autoStarted.value = auto
+        _demo.value = origin == DriveOrigin.DEMO
+        _origin.value = origin
         _running.value = true
     }
 
@@ -63,7 +81,7 @@ object DriveState {
         _running.value = false
         _snapshot.value = null
         _demo.value = false
-        _autoStarted.value = false
+        _origin.value = DriveOrigin.HAND
         _nearbyRadars.value = emptyList()
         _nearbyZones.value = emptyList()
     }

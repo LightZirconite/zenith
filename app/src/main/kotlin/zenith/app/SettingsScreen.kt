@@ -50,6 +50,8 @@ fun SettingsScreen(
     onAllowMedia: () -> Unit = {},
     permissions: Permissions? = null,
     onMotionPermission: () -> Unit = {},
+    androidAutoConnected: Boolean = false,
+    onOpenAndroidAuto: () -> Unit = {},
 ) {
     Column(Modifier.fillMaxSize().background(Color.Black).safeDrawingPadding().padding(horizontal = 20.dp, vertical = 12.dp)) {
         Text(
@@ -87,8 +89,8 @@ fun SettingsScreen(
             Toggle(
                 "Arrêt automatique",
                 "Pour la batterie : Zenith s'arrête seul quand la voiture est garée depuis 10 minutes, quand tu repars à pied " +
-                    "ou à l'intérieur sans GPS. Jamais sur autoroute ni pendant un bouchon. Avec ta voiture choisie ci-dessous, " +
-                    "il démarre et s'arrête aussi seul avec elle.",
+                    "ou à l'intérieur sans GPS. Jamais sur autoroute ni pendant un bouchon. Avec ta voiture choisie ci-dessous " +
+                    "ou Android Auto, il démarre et s'arrête aussi seul avec elle.",
                 settings.autoStop,
             ) { on -> onChange { it.copy(autoStop = on) } }
             MotionCard(settings, permissions, onChange, onMotionPermission)
@@ -115,6 +117,7 @@ fun SettingsScreen(
                     )
                 }
             }
+            AndroidAutoCard(androidAutoConnected, onOpenAndroidAuto)
             Card {
                 Text("Musique", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(4.dp))
@@ -231,6 +234,58 @@ private fun MotionCard(
                     .padding(horizontal = 16.dp, vertical = 9.dp),
             )
         }
+    }
+}
+
+/** What Zenith does in Android Auto, and the one-time steps to let a sideloaded app in. */
+@Composable
+private fun AndroidAutoCard(connected: Boolean, onOpen: () -> Unit) {
+    Card {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Android Auto", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f, fill = false))
+            if (connected) {
+                Spacer(Modifier.width(10.dp))
+                Box(Modifier.size(8.dp).background(Color(0xFF30D158), CircleShape))
+                Spacer(Modifier.width(6.dp))
+                Text("connecté", color = Color(0xFF30D158), fontSize = 14.sp, maxLines = 1, softWrap = false)
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "Zenith s'affiche sur l'écran de la voiture comme ici : carte, vitesse, limite et alertes. Android Auto qui se " +
+                "connecte démarre les alertes sur le téléphone, et sa déconnexion les arrête. Si Waze ou Maps occupe " +
+                "l'écran, le prochain radar s'affiche par-dessus. Comme Zenith ne vient pas du Play Store, Android Auto ne " +
+                "le montre qu'après ces réglages, à faire une seule fois :",
+            color = Color.White.copy(alpha = 0.75f),
+            fontSize = 14.sp,
+        )
+        Spacer(Modifier.height(10.dp))
+        listOf(
+            "Ouvre les réglages d'Android Auto (bouton ci-dessous, ou Paramètres du téléphone → cherche « Android Auto »).",
+            "Tout en bas, touche une dizaine de fois « Version » et accepte : le mode développeur s'active.",
+            "⋮ en haut à droite → « Paramètres pour les développeurs » → coche « Sources inconnues ».",
+            "Reviens aux réglages d'Android Auto → « Personnaliser le lanceur » (rubrique Écran) : coche Zenith.",
+            "Branche le téléphone et touche Zenith sur l'écran de la voiture. Android Auto rouvre ensuite seul la " +
+                "dernière appli de navigation utilisée à chaque branchement.",
+            "Zenith n'y est pas ? Débranche, force l'arrêt d'Android Auto (Infos de l'appli → Forcer l'arrêt), rebranche.",
+        ).forEachIndexed { i, step ->
+            Row(Modifier.padding(bottom = 8.dp)) {
+                Box(Modifier.size(22.dp).background(Color(0xFF2C2C30), CircleShape), contentAlignment = Alignment.Center) {
+                    Text("${i + 1}", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+                Spacer(Modifier.width(10.dp))
+                Text(step, color = Color.White.copy(alpha = 0.75f), fontSize = 14.sp)
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "Ouvrir Android Auto",
+            color = Color.White,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.tap(onClick = onOpen).clip(RoundedCornerShape(50)).background(Accent)
+                .padding(horizontal = 16.dp, vertical = 9.dp),
+        )
     }
 }
 

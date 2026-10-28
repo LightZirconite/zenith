@@ -67,13 +67,8 @@ class DriveService : Service(), LocationListener {
     private var parking: ParkDetector? = null
     private var ending = false
     private var started = false
-    private var demo = false
-
-    /** Started by the car's Bluetooth: stops when the car disconnects. */
-    private var auto = false
-
-    /** Started by the activity recognition (phone riding in a vehicle). */
-    private var motion = false
+    private var origin = DriveOrigin.HAND
+    private val demo get() = origin == DriveOrigin.DEMO
     private var lastFixTimeMs = 0L
     private var lastFixWallMs = 0L
     private var lastNotified: Triple<Int?, Int?, String?>? = null
@@ -95,7 +90,7 @@ class DriveService : Service(), LocationListener {
         if (intent?.action == ACTION_MOTION_EXIT) {
             // The phone left the vehicle: a drive it started ends once the car is slow or stopped.
             val slow = (DriveState.snapshot.value?.speedKmh ?: 0) < 10
-            if (started && motion && slow) stopSelf()
+            if (started && origin == DriveOrigin.MOTION && slow) stopSelf()
             if (!started) stopSelf()
             return if (started) START_STICKY else START_NOT_STICKY
         }
@@ -114,9 +109,13 @@ class DriveService : Service(), LocationListener {
             stopSelf()
             return START_NOT_STICKY
         }
-        demo = intent?.action == ACTION_DEMO
-        auto = intent?.action == ACTION_AUTO
-        motion = intent?.action == ACTION_MOTION
+        origin = when (intent?.action) {
+            ACTION_DEMO -> DriveOrigin.DEMO
+            ACTION_AUTO -> DriveOrigin.CAR
+            ACTION_MOTION -> DriveOrigin.MOTION
+            ACTION_ANDROID_AUTO -> DriveOrigin.ANDROID_AUTO
+            else -> DriveOrigin.HAND
+        }
         createChannel()
         val foreground = runCatching {
             ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(null), ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
@@ -124,8 +123,12 @@ class DriveService : Service(), LocationListener {
         if (foreground.isFailure) {
             // Android refused a start from the background (car connected while the phone was idle).
             Log.w("Zenith", "foreground start", foreground.exceptionOrNull())
-            if (auto) CarLink.notifyTapToStart(this)
-            if (motion) CarLink.notifyTapToStart(this, "En voiture ?")
+            when (origin) {
+                DriveOrigin.CAR -> CarLink.notifyTapToStart(this)
+                DriveOrigin.MOTION -> CarLink.notifyTapToStart(this, "En voiture ?")
+                DriveOrigin.ANDROID_AUTO -> CarLink.notifyTapToStart(this, "Android Auto connecté")
+                else -> Unit
+            }
             stopSelf()
             return START_NOT_STICKY
         }
@@ -135,8 +138,9 @@ class DriveService : Service(), LocationListener {
         ducker = AudioDucker(this)
         speaker = Speaker(this, ducker)
         tones = TonePlayer(ducker)
-        DriveState.started(demo, auto)
+        DriveState.started(origin)
         NowPlaying.start(this)
+        AndroidAuto.watch(this)
         if (demo) startDemo() else startLive()
         scope.launch { UserSettings.state.collect { session.profile = it.profile } }
         return if (demo) START_NOT_STICKY else START_STICKY
@@ -185,6 +189,8 @@ class DriveService : Service(), LocationListener {
             while (true) {
                 val s = UserSettings.state.value
                 val p = DriveState.snapshot.value?.position
+                // Setting turned off while it rained: the limits come back at once, not at the next drive.
+                if (!s.autoRain && s.raining) UserSettings.update(this@DriveService) { it.copy(raining = false) }
                 if (p == null || !s.autoRain) {
                     delay(20_000)
                     continue
@@ -256,10 +262,12 @@ class DriveService : Service(), LocationListener {
 
     /**
      * Battery saver: a drive started by hand ends by itself once over (car parked, walking away,
-     * indoors without GPS). A drive started by the car ends when the car disconnects instead.
+     * indoors without GPS). A drive started by the car or by Android Auto ends when it disconnects
+     * instead.
      */
     private fun endByItself() {
-        if (auto || ending || !UserSettings.state.value.autoStop) return
+        if (origin == DriveOrigin.CAR || origin == DriveOrigin.ANDROID_AUTO) return
+        if (ending || !UserSettings.state.value.autoStop) return
         ending = true
         Log.i("Zenith", "drive over: stopping by itself")
         stopSelf()
@@ -292,6 +300,8 @@ class DriveService : Service(), LocationListener {
         snapshot.events.forEach(::announce)
         dangerBeep(snapshot)
         refreshNotification(snapshot)
+        // Android Auto showing another app (Waze, Maps): the radar comes up over it.
+        CarAlerts.update(this, snapshot.alerts.firstOrNull()?.takeIf { AndroidAuto.connected.value && !AndroidAuto.screenVisible.value })
     }
 
     /** Tone first, then the spoken text right after it. */
@@ -345,6 +355,7 @@ class DriveService : Service(), LocationListener {
             tones.release()
             ducker.shutdown()
             NowPlaying.stop()
+            CarAlerts.clear(this)
         }
         driveExecutor.shutdown()
         // The next drive starts from the weather again, not from this drive's rain.
@@ -446,6 +457,7 @@ class DriveService : Service(), LocationListener {
         private const val ACTION_AUTO = "zenith.app.AUTO"
         private const val ACTION_MOTION = "zenith.app.MOTION"
         private const val ACTION_MOTION_EXIT = "zenith.app.MOTION_EXIT"
+        private const val ACTION_ANDROID_AUTO = "zenith.app.ANDROID_AUTO"
         private const val ACTION_RESHOW = "zenith.app.RESHOW"
         private const val WEATHER_EVERY_MS = 10 * 60_000L
 
@@ -470,9 +482,15 @@ class DriveService : Service(), LocationListener {
             runCatching { context.startService(Intent(context, DriveService::class.java).setAction(ACTION_MOTION_EXIT)) }
         }
 
-        /** Car disconnected: ends the drive only if the car started it. */
-        fun stopAuto(context: Context) {
-            if (DriveState.autoStarted.value) stop(context)
+        /** Android Auto connected, or Zenith opened on the car screen: throws when Android forbids the start. */
+        fun startAndroidAuto(context: Context) {
+            if (DriveState.running.value) return
+            context.startForegroundService(Intent(context, DriveService::class.java).setAction(ACTION_ANDROID_AUTO))
+        }
+
+        /** Car or Android Auto gone: ends the drive only if [origin] started it. */
+        fun stopIfStartedBy(context: Context, origin: DriveOrigin) {
+            if (DriveState.running.value && DriveState.origin.value == origin) stop(context)
         }
 
         /** Hidden simulated drive, to see and hear the alerts without driving. */

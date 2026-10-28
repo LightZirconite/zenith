@@ -22,6 +22,9 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Android 16: live speed chip in the status bar while driving. -->
     <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
+    <!-- Android Auto: a navigation app drawing its own car screen (map, speed, alerts). -->
+    <uses-permission android:name="androidx.car.app.NAVIGATION_TEMPLATES" />
+    <uses-permission android:name="androidx.car.app.ACCESS_SURFACE" />
 
     <queries>
         <intent>
@@ -37,6 +40,8 @@
         <package android:name="com.spotify.music" />
         <package android:name="com.google.android.youtube" />
         <package android:name="com.google.android.apps.youtube.music" />
+        <!-- Settings: opens Android Auto's own settings (unknown sources for Zenith). -->
+        <package android:name="com.google.android.projection.gearhead" />
     </queries>
 
     <application
@@ -44,6 +49,17 @@
         android:label="@string/app_name"
         android:theme="@style/Theme.Zenith"
         android:supportsRtl="true">
+        <!-- Android Auto: template app, colors of the host's buttons. -->
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
+        <meta-data
+            android:name="androidx.car.app.minCarApiLevel"
+            android:value="5" />
+        <meta-data
+            android:name="androidx.car.app.theme"
+            android:resource="@style/ZenithCarTheme" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -98,6 +114,15 @@
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter>
                 <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".ZenithCarService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="androidx.car.app.CarAppService" />
+                <category android:name="androidx.car.app.category.NAVIGATION" />
             </intent-filter>
         </service>
 

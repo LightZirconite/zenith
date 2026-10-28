@@ -74,7 +74,7 @@ object CarLink {
         if (!started) notifyTapToStart(context)
     }
 
-    fun carDisconnected(context: Context) = DriveService.stopAuto(context)
+    fun carDisconnected(context: Context) = DriveService.stopIfStartedBy(context, DriveOrigin.CAR)
 
     /** Fallback notification: one tap starts the drive. */
     fun notifyTapToStart(context: Context, title: String = "Voiture connectée") {
