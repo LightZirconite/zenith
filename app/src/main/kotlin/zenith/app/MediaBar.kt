@@ -7,7 +7,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -60,8 +59,6 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import zenith.core.PlaybackProgress
 
-/** Translucent "glass" of the drive screen, shared with its chips, cards and buttons. */
-val Glass = Color(0xA61F1F24)
 private val BarDim = Color(0xFFB0B0B5)
 private val Liked = Color(0xFF1ED760)
 
@@ -139,14 +136,14 @@ fun MediaBar(
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
 ) {
-    BoxWithConstraints(Modifier.fillMaxWidth().padding(bottom = 10.dp).height(72.dp).clip(RoundedCornerShape(20.dp)).background(Glass)) {
+    BoxWithConstraints(Modifier.fillMaxWidth().padding(bottom = 10.dp).height(72.dp).glass(RoundedCornerShape(20.dp))) {
         // Below that width the heart would leave the title almost no room.
         val roomForLike = maxWidth >= 340.dp
 
         val halo = TextStyle(shadow = Shadow(Color.Black.copy(alpha = 0.8f), blurRadius = 12f))
         Row(Modifier.fillMaxSize().padding(start = 12.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Row(
-                Modifier.weight(1f).fillMaxHeight().clickable(onClick = onOpen).semantics { contentDescription = "Ouvrir le lecteur" },
+                Modifier.weight(1f).fillMaxHeight().tap(onClick = onOpen).semantics { contentDescription = "Ouvrir le lecteur" },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(Modifier.size(52.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFF2C2C30))) {
@@ -201,7 +198,7 @@ private fun ProgressLine(progress: PlaybackProgress, playing: Boolean, modifier:
 @Composable
 private fun GlyphButton(glyph: Glyph, label: String, onClick: () -> Unit) {
     Box(
-        Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onClick).semantics { contentDescription = label },
+        Modifier.size(44.dp).tap(onClick = onClick).clip(CircleShape).semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {
         Canvas(Modifier.size(15.dp)) { drawGlyph(glyph, Color.White) }
@@ -212,7 +209,7 @@ private fun GlyphButton(glyph: Glyph, label: String, onClick: () -> Unit) {
 @Composable
 private fun PlayButton(playing: Boolean, onClick: () -> Unit) {
     Box(
-        Modifier.size(48.dp).clip(CircleShape).clickable(onClick = onClick).padding(3.dp).background(Color.White, CircleShape)
+        Modifier.size(48.dp).tap(onClick = onClick).clip(CircleShape).padding(3.dp).background(Color.White, CircleShape)
             .semantics { contentDescription = if (playing) "Pause" else "Lecture" },
         contentAlignment = Alignment.Center,
     ) {
@@ -224,7 +221,7 @@ private fun PlayButton(playing: Boolean, onClick: () -> Unit) {
 @Composable
 private fun HeartButton(liked: Boolean, onClick: () -> Unit) {
     Box(
-        Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onClick)
+        Modifier.size(44.dp).tap(onClick = onClick).clip(CircleShape)
             .semantics { contentDescription = if (liked) "Retirer des titres likés" else "Ajouter aux titres likés" },
         contentAlignment = Alignment.Center,
     ) {

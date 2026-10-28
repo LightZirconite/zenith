@@ -1,9 +1,10 @@
 package zenith.app
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -55,7 +56,7 @@ fun SettingsScreen(
             "‹ Retour",
             color = Accent,
             fontSize = 17.sp,
-            modifier = Modifier.clip(RoundedCornerShape(12.dp)).clickable(onClick = onBack).padding(vertical = 10.dp, horizontal = 4.dp),
+            modifier = Modifier.tap(onClick = onBack).clip(RoundedCornerShape(12.dp)).padding(vertical = 10.dp, horizontal = 4.dp),
         )
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             Spacer(Modifier.height(8.dp))
@@ -107,9 +108,9 @@ fun SettingsScreen(
                         color = Color.White,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.clip(RoundedCornerShape(50))
+                        modifier = Modifier.tap(onClick = if (settings.carName != null) onUnpairCar else onPairCar)
+                            .clip(RoundedCornerShape(50))
                             .background(if (settings.carName != null) Color(0xFF2C2C30) else Accent)
-                            .clickable(onClick = if (settings.carName != null) onUnpairCar else onPairCar)
                             .padding(horizontal = 16.dp, vertical = 9.dp),
                     )
                 }
@@ -136,7 +137,7 @@ fun SettingsScreen(
                         color = Color.White,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.clip(RoundedCornerShape(50)).background(Accent).clickable(onClick = onAllowMedia)
+                        modifier = Modifier.tap(onClick = onAllowMedia).clip(RoundedCornerShape(50)).background(Accent)
                             .padding(horizontal = 16.dp, vertical = 9.dp),
                     )
                 }
@@ -163,7 +164,7 @@ fun SettingsScreen(
                         color = Color.White,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.clip(RoundedCornerShape(50)).background(Accent).clickable(onClick = onShareTrip)
+                        modifier = Modifier.tap(onClick = onShareTrip).clip(RoundedCornerShape(50)).background(Accent)
                             .padding(horizontal = 16.dp, vertical = 9.dp),
                     )
                 }
@@ -196,7 +197,7 @@ private fun MotionCard(
     }
     Card {
         Row(
-            Modifier.fillMaxWidth().clickable(enabled = available) { onChange { it.copy(motionStart = !it.motionStart) } },
+            Modifier.fillMaxWidth().tap(enabled = available) { onChange { it.copy(motionStart = !it.motionStart) } },
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
@@ -226,7 +227,7 @@ private fun MotionCard(
                 color = Color.White,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.clip(RoundedCornerShape(50)).background(Accent).clickable(onClick = onPermission)
+                modifier = Modifier.tap(onClick = onPermission).clip(RoundedCornerShape(50)).background(Accent)
                     .padding(horizontal = 16.dp, vertical = 9.dp),
             )
         }
@@ -235,7 +236,7 @@ private fun MotionCard(
 
 @Composable
 private fun Card(content: @Composable () -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(bottom = 12.dp).clip(RoundedCornerShape(20.dp)).background(Surface).padding(18.dp)) {
+    Column(Modifier.fillMaxWidth().padding(bottom = 12.dp).glass(RoundedCornerShape(20.dp), Surface).padding(18.dp)) {
         content()
     }
 }
@@ -243,8 +244,8 @@ private fun Card(content: @Composable () -> Unit) {
 @Composable
 private fun Toggle(title: String, text: String, on: Boolean, onToggle: (Boolean) -> Unit) {
     Row(
-        Modifier.fillMaxWidth().padding(bottom = 12.dp).clip(RoundedCornerShape(20.dp)).background(Surface)
-            .clickable { onToggle(!on) }.padding(18.dp),
+        Modifier.fillMaxWidth().padding(bottom = 12.dp).tap { onToggle(!on) }
+            .glass(RoundedCornerShape(20.dp), Surface).padding(18.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
@@ -261,7 +262,7 @@ private fun Toggle(title: String, text: String, on: Boolean, onToggle: (Boolean)
 @Composable
 private fun Switch(on: Boolean) {
     val track by animateColorAsState(if (on) Color(0xFF30D158) else Color(0xFF3A3A3C), label = "track")
-    val knob by animateDpAsState(if (on) 20.dp else 0.dp, label = "knob")
+    val knob by animateDpAsState(if (on) 20.dp else 0.dp, spring(dampingRatio = 0.65f, stiffness = Spring.StiffnessMediumLow), label = "knob")
     Box(Modifier.size(width = 50.dp, height = 30.dp).clip(RoundedCornerShape(50)).background(track).padding(3.dp)) {
         Box(Modifier.offset(x = knob).size(24.dp).background(Color.White, CircleShape))
     }

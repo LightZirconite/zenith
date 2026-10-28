@@ -9,7 +9,6 @@ import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -202,8 +201,8 @@ fun Onboarding(
             fontSize = 18.sp,
             fontWeight = FontWeight.SemiBold,
             textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color.White)
-                .clickable(onClick = if (missing == 0) onDone else onNext).padding(vertical = 18.dp),
+            modifier = Modifier.fillMaxWidth().tap(onClick = if (missing == 0) onDone else onNext).clip(RoundedCornerShape(18.dp))
+                .background(Color.White).padding(vertical = 18.dp),
         )
     }
 }
@@ -211,8 +210,8 @@ fun Onboarding(
 @Composable
 private fun Step(title: String, text: String, granted: Boolean, onClick: () -> Unit, action: String = "Autoriser") {
     Row(
-        Modifier.fillMaxWidth().padding(bottom = 12.dp).clip(RoundedCornerShape(20.dp)).background(Surface)
-            .clickable(enabled = !granted, onClick = onClick).padding(18.dp),
+        Modifier.fillMaxWidth().padding(bottom = 12.dp).tap(enabled = !granted, onClick = onClick)
+            .glass(RoundedCornerShape(20.dp), Surface).padding(18.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
