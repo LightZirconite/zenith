@@ -9,7 +9,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * French text-to-speech. [ducker] pauses (or ducks) the music while it speaks; an urgent alert
+ * French text-to-speech. [ducker] lowers (or pauses) the music while it speaks; an urgent alert
  * drops what is still queued instead of waiting behind it, so the driver never hears a stale one.
  */
 class Speaker(context: Context, private val ducker: AudioDucker) : TextToSpeech.OnInitListener {
@@ -52,7 +52,7 @@ class Speaker(context: Context, private val ducker: AudioDucker) : TextToSpeech.
      * the queue; [pauseMusic] pauses the music rather than lowering it.
      */
     @Synchronized
-    fun say(text: String, delayMs: Int = 0, urgent: Boolean = false, pauseMusic: Boolean = true) {
+    fun say(text: String, delayMs: Int = 0, urgent: Boolean = false, pauseMusic: Boolean = false) {
         if (!ready) {
             pending += { say(text, delayMs, urgent, pauseMusic) }
             return

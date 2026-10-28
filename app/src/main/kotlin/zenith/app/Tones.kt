@@ -44,7 +44,9 @@ class TonePlayer(private val ducker: AudioDucker) {
     fun play(tone: Tone) {
         val bluetooth = ducker.bluetooth()
         val track = (if (bluetooth) bluetoothTracks.value else tracks).getValue(tone)
-        ducker.duckFor(durationMs(tone, bluetooth).toLong())
+        val length = durationMs(tone, bluetooth).toLong()
+        // Danger beeps come up to 2 s apart: the music stays down between them instead of pumping.
+        if (tone == Tone.DANGER) ducker.duckFor(length, holdMs = DANGER_HOLD_MS) else ducker.duckFor(length)
         runCatching {
             track.stop()
             track.reloadStaticData()
@@ -100,5 +102,6 @@ class TonePlayer(private val ducker: AudioDucker) {
 
     private companion object {
         const val RATE = 44_100
+        const val DANGER_HOLD_MS = 2_600L
     }
 }
