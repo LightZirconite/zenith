@@ -254,7 +254,10 @@ private fun MotionCard(
     }
     Card(modifier) {
         Row(
-            Modifier.fillMaxWidth().tap(enabled = available) { onChange { it.copy(motionStart = !it.motionStart) } },
+            Modifier.fillMaxWidth().tap(enabled = available, sound = false) {
+                UiSound.toggle(!settings.motionStart)
+                onChange { it.copy(motionStart = !it.motionStart) }
+            },
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
@@ -344,7 +347,10 @@ private fun Pill(text: String, color: Color = Accent, onClick: () -> Unit) {
 @Composable
 private fun Toggle(title: String, text: String, on: Boolean, modifier: Modifier = Modifier, onToggle: (Boolean) -> Unit) {
     Row(
-        modifier.fillMaxWidth().padding(bottom = 12.dp).tap { onToggle(!on) }
+        modifier.fillMaxWidth().padding(bottom = 12.dp).tap(sound = false) {
+            UiSound.toggle(!on)
+            onToggle(!on)
+        }
             .glass(RoundedCornerShape(20.dp), Surface).padding(18.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

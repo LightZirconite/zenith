@@ -194,16 +194,31 @@ private fun Density.collapse(scroll: ScrollState): Float =
     (scroll.value / 56.dp.toPx()).coerceIn(0f, 1f)
 
 /**
- * Clickable that sinks a little under the finger and springs back, instead of the Material ripple.
+ * Clickable that sinks a little under the finger and springs back, instead of the Material ripple,
+ * with a soft tap sound ([UiSound]) unless [sound] is off (a switch plays its own).
  * Put it before the surface's own clip and background so the whole surface moves.
  */
-fun Modifier.tap(enabled: Boolean = true, onClick: () -> Unit): Modifier =
-    clickable(interactionSource = null, indication = PressScale, enabled = enabled, onClick = onClick)
+fun Modifier.tap(enabled: Boolean = true, sound: Boolean = true, onClick: () -> Unit): Modifier =
+    clickable(interactionSource = null, indication = PressScale, enabled = enabled) {
+        if (sound) UiSound.tap()
+        onClick()
+    }
 
 /** [tap] with a long press as well. */
 @OptIn(ExperimentalFoundationApi::class)
 fun Modifier.tap(onLongClick: () -> Unit, onClick: () -> Unit): Modifier =
-    combinedClickable(interactionSource = null, indication = PressScale, onLongClick = onLongClick, onClick = onClick)
+    combinedClickable(
+        interactionSource = null,
+        indication = PressScale,
+        onLongClick = {
+            UiSound.tap()
+            onLongClick()
+        },
+        onClick = {
+            UiSound.tap()
+            onClick()
+        },
+    )
 
 /**
  * Fades the content out along its height: [stops] are (height fraction, opacity), 1 whole, 0 gone.

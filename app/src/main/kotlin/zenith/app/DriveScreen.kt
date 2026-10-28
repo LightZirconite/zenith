@@ -94,6 +94,7 @@ import zenith.core.AlertEvent
 import zenith.core.Cockpit
 import zenith.core.ControlZone
 import zenith.core.DriveSnapshot
+import zenith.core.LatLon
 import zenith.core.LimitSource
 import zenith.core.Radar
 import zenith.core.RadarType
@@ -256,6 +257,9 @@ fun DriveScreen(
     // A drive just ended (seen at the change itself): the stars rush back out of hyperspace.
     val lastRunning = remember { booleanArrayOf(running) }
     val comingHome = remember(running) { (!running && lastRunning[0]).also { lastRunning[0] = running } }
+    // Where the driver is, kept after the drive: the globe dives onto it, and the way back leaves from it.
+    var home by remember { mutableStateOf<LatLon?>(null) }
+    LaunchedEffect(snapshot?.position) { snapshot?.position?.let { home = it } }
     val sound = rememberWarpSound()
     val soundScope = rememberCoroutineScope()
     var heardPhase by remember { mutableStateOf<FlightPhase?>(null) }
@@ -371,6 +375,7 @@ fun DriveScreen(
                 onGone = { flightOver = true },
                 modifier = Modifier.fillMaxSize(),
                 comingHome = comingHome,
+                home = home,
             )
         }
         if (running || sceneUp) {

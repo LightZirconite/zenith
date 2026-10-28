@@ -27,7 +27,7 @@ private val CityLight = Color(0xFFFFB35C)
 private val Locked = Color(0xFF30D158)
 private val Seeking = Color(0xFFE6F0FF)
 
-/** France: the globe turns it to the viewer as the satellites lock, and the beacon lights up there. */
+/** France until the first position: the globe turns home to the viewer as the satellites lock, and the beacon lights up there. */
 private const val HOME_LAT = 46.5
 private const val HOME_LON = 2.5
 private const val TAU = 6.2831855f
@@ -44,8 +44,9 @@ private const val LZ = 0.63f
  * The Earth at the heart of the tunnel, drawn frame by frame: land as a field of dots on a dark
  * ocean lit from the upper left, a halo of atmosphere, city lights on the night side, and the
  * satellites in view on three tilted orbits, each with a short trail. As they lock, the globe slows
- * and turns France to the viewer; a beacon lights up there and every locked satellite beams down to
- * it, a pulse of data running along each beam.
+ * and turns home (the driver's position once known, France before) to the viewer; a beacon lights up
+ * there and every locked satellite beams down to it, a pulse of data running along each beam.
+ * Before the dive it settles exactly on home, so the zoom lands on the driver, not on a neighbour.
  */
 internal class Globe {
     private val px: FloatArray
@@ -56,9 +57,12 @@ internal class Globe {
     private val shades: Array<FloatArray>
     private val shadeCount = IntArray(4)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeCap = Paint.Cap.ROUND }
-    private val home = unit(HOME_LAT, HOME_LON)
-    private val homeSpin = (-Math.toRadians(HOME_LON)).toFloat()
-    private val homeTilt = Math.toRadians(HOME_LAT).toFloat()
+    private var home = unit(HOME_LAT, HOME_LON)
+    private var homeSpin = (-Math.toRadians(HOME_LON)).toFloat()
+    private var homeTilt = Math.toRadians(HOME_LAT).toFloat()
+
+    /** Spin and tilt when the settling on home began; null while not settling. */
+    private var settleFrom: FloatArray? = null
 
     /** France starts a quarter turn away, to the left: it comes into view as the search goes on. */
     private var spin = homeSpin - 1.7f
@@ -87,8 +91,35 @@ internal class Globe {
         shades = Array(4) { FloatArray(px.size * 2) }
     }
 
-    /** Spins while searching, slower with each satellite; locked, it eases France to the front. */
-    fun step(dt: Float, lock: Float) {
+    /** Home is where the driver is: the globe turns there from now on. */
+    fun aimAt(latDeg: Double, lonDeg: Double) {
+        home = unit(latDeg, lonDeg)
+        homeSpin = (-Math.toRadians(lonDeg)).toFloat()
+        homeTilt = Math.toRadians(latDeg).toFloat()
+    }
+
+    /** Home straight in front at once (the way back out of it, at the end of a drive). */
+    fun face() {
+        spin = homeSpin
+        tilt = homeTilt
+        settleFrom = null
+    }
+
+    /**
+     * Spins while searching, slower with each satellite; locked, it eases home to the front.
+     * [settle] (0 to 1, the start of the dive) brings home exactly to the center, always turning the
+     * way it already spins, so the zoom that follows lands on it.
+     */
+    fun step(dt: Float, lock: Float, settle: Float = 0f) {
+        if (settle > 0f) {
+            val from = settleFrom ?: floatArrayOf(spin, tilt).also { settleFrom = it }
+            val k = settle.coerceIn(0f, 1f)
+            val e = k * k * (3 - 2 * k)
+            spin = from[0] + (((homeSpin - from[0]) % TAU + TAU) % TAU) * e
+            tilt = from[1] + (homeTilt - from[1]) * e
+            return
+        }
+        settleFrom = null
         if (lock < 0.98f) {
             spin += dt * SPIN * (1f - 0.7f * lock)
         } else {

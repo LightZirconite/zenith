@@ -190,6 +190,7 @@ fun MediaBar(
                         val now = SystemClock.elapsedRealtime()
                         if (armed && drift < abs(x) / 0.6f * 0.5f && now - lastChangeMs > SWIPE_COOLDOWN_MS) {
                             lastChangeMs = now
+                            UiSound.play(UiSound.Kind.SWIPE)
                             if (x < 0) next() else previous()
                         }
                         settle()
@@ -203,7 +204,10 @@ fun MediaBar(
                     scope.launch { swipe.snapTo(x) }
                     val past = abs(x) >= threshold
                     // A tick when the swipe would now change track, and coming back cancels it.
-                    if (past && !armed) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    if (past && !armed) {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        UiSound.play(UiSound.Kind.ARMED)
+                    }
                     armed = past
                 }
             },

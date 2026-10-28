@@ -70,6 +70,7 @@ import kotlin.math.sin
 import kotlin.math.tanh
 import kotlin.random.Random
 import kotlin.math.cos
+import zenith.core.LatLon
 
 /** Where the start of a drive stands: stars drifting at home, the tunnel while the GPS searches, the jump. */
 enum class FlightPhase { IDLE, SEARCH, ARRIVE }
@@ -85,9 +86,17 @@ internal const val HEART_Y = 0.42f
 /** Radius of the globe at the heart while the GPS searches, as a share of the screen's smaller side. */
 internal const val GLOBE_SHARE = 0.15f
 
-/** Length of the jump, from the first good position to the map; the flash comes at [LANDING]. */
-private const val JUMP_MS = 1_800
-private const val LANDING = 0.68f
+/**
+ * Length of the jump, from the first good position to the map; the flash comes at [LANDING]. The
+ * first [SETTLE] of the dive turns the Earth until home is dead center, approaching slowly; only
+ * then does it rush at the viewer, onto home.
+ */
+private const val JUMP_MS = 3_200
+private const val LANDING = 0.75f
+private const val SETTLE = 0.4f
+
+/** The way back at the end of a drive: out of home, the Earth falling away into the stars. */
+private const val HOMECOMING_MS = 3_400
 
 /** From the start of the jump to its boom, when the music comes back. */
 internal val JUMP_IMPACT_MS: Long = (JUMP_MS * LANDING).toLong()
@@ -96,10 +105,12 @@ internal val JUMP_IMPACT_MS: Long = (JUMP_MS * LANDING).toLong()
  * Space behind the start of a drive, drawn frame by frame. At home, a calm sky drifts by. Once
  * started, a tube of stars forms around the viewer and rushes past, faster as the search goes on
  * and as satellites lock, rings of light marking its walls; at its end the Earth ([Globe]) turns,
- * its satellites locking one by one onto France. At [FlightPhase.ARRIVE] the stars stretch into
- * shooting-star streaks and the Earth rushes at the viewer until it fills the screen; a white flash
- * and the map opens beneath it ([onLanded]), then the stars fade out ([onGone]). [comingHome]: a
- * drive just ended, the stars come back rushing and slow down to the calm of home.
+ * its satellites locking one by one onto [home] (the driver's position; France until known). At
+ * [FlightPhase.ARRIVE] the Earth settles with home dead center, then the stars stretch into
+ * shooting-star streaks and it rushes at the viewer, onto home, until it fills the screen; a white
+ * flash and the map opens beneath it ([onLanded]), then the stars fade out ([onGone]). [comingHome]:
+ * a drive just ended, the reverse: out of home in a flash, the Earth falls away into the stars, which
+ * come back rushing and slow down to the calm of home.
  */
 @Composable
 fun Starfield(
@@ -109,15 +120,20 @@ fun Starfield(
     onGone: () -> Unit,
     modifier: Modifier = Modifier,
     comingHome: Boolean = false,
+    home: LatLon? = null,
 ) {
     val sky = remember { Stars(380, tube = false) }
     val tube = remember { Stars(900, tube = true) }
     val globe = remember { Globe() }
+    LaunchedEffect(home) { home?.let { globe.aimAt(it.lat, it.lon) } }
     val lock by animateFloatAsState((gps.used / 4f).coerceAtMost(1f), tween(900, easing = FastOutSlowInEasing), label = "lock")
     // Out of hyperspace: from a rush down to the drift of home.
     val homecoming = remember { Animatable(if (comingHome) 1f else 0f) }
     LaunchedEffect(Unit) {
-        if (homecoming.value > 0f) homecoming.animateTo(0f, tween(2_600, easing = LinearOutSlowInEasing))
+        if (homecoming.value > 0f) {
+            globe.face()
+            homecoming.animateTo(0f, tween(HOMECOMING_MS, easing = LinearOutSlowInEasing))
+        }
     }
     // The tube forms around the viewer at Start and speeds up the longer the search, the more satellites locked.
     val tunnel by animateFloatAsState(if (phase == FlightPhase.IDLE) 0f else 1f, tween(1_800, easing = FastOutSlowInEasing), label = "tunnel")
@@ -158,7 +174,8 @@ fun Starfield(
                     val dt = ((now - last) / 1e9f).coerceAtMost(0.05f)
                     sky.step(dt, speed * 0.35f + 0.02f)
                     tube.step(dt, speed)
-                    globe.step(dt, lock)
+                    val back = homecoming.value > 0f
+                    globe.step(dt, if (back) 1f else lock, settle = if (back) 0f else (jump.value / LANDING / SETTLE))
                 }
                 last = now
                 frame = now
@@ -180,13 +197,18 @@ fun Starfield(
             tube.draw(this, cx, cy, scale, speed, t, fade * tunnel, twinkle = false)
             // The Earth ahead: out of the distance as the tube forms, a little nearer as satellites
             // lock, then rushing at the viewer through the jump until it fills the screen at the flash.
-            val dive = (j / LANDING).coerceIn(0f, 1f)
-            val r = min(size.width, size.height) * GLOBE_SHARE * (0.2f + 0.8f * tunnel) * (0.92f + 0.08f * lock) *
-                (1f + 14f * dive.pow(2.4f))
+            val r = min(size.width, size.height) * GLOBE_SHARE * (0.2f + 0.8f * tunnel) * (0.92f + 0.08f * lock) * diveScale(j / LANDING)
             globe.draw(this, cx, cy, r, alpha = tunnel * fade, orbits = orbit * fade, t = t, visible = gps.visible, used = gps.used, lock = lock)
         }
-        // Back home: a soft bloom at the heart while the stars slow down.
+        // Back from a drive: the Earth, home in front, falls away from the viewer and fades into the stars.
+        val away = homecoming.value
+        if (away > 0.01f && tunnel < 0.99f) {
+            val r = min(size.width, size.height) * GLOBE_SHARE * (0.35f + 15f * away.pow(2.6f))
+            globe.draw(this, cx, cy, r, alpha = (away / 0.35f).coerceAtMost(1f) * (1f - tunnel), orbits = 0f, t = t, visible = 0, used = 0, lock = 1f)
+        }
+        // Back home: out of the Earth in a flash, then a soft bloom at the heart while the stars slow down.
         val bloom = homecoming.value
+        if (bloom > 0.85f) drawRect(Color.White.copy(alpha = ((bloom - 0.85f) / 0.15f).pow(2) * 0.9f))
         if (bloom > 0.01f) {
             drawRect(
                 Brush.radialGradient(
@@ -213,6 +235,17 @@ fun Starfield(
             )
         }
     }
+}
+
+/**
+ * Size of the Earth through the jump, by [dive] (0 at its start, 1 at the flash): a slow approach
+ * while it settles on home, then the rush, ever faster, until it fills the screen.
+ */
+private fun diveScale(dive: Float): Float {
+    val d = dive.coerceIn(0f, 1f)
+    val approach = (d / SETTLE).coerceAtMost(1f)
+    val rush = ((d - SETTLE) / (1f - SETTLE)).coerceAtLeast(0f)
+    return (1f + 0.4f * approach * approach * (3 - 2 * approach)) * (1f + 14f * rush.pow(2.2f))
 }
 
 /** Rings of light along the tube's wall, rushing toward the viewer: they make the tunnel read as one. */
