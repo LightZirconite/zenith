@@ -2,13 +2,19 @@
 """Builds radars.json by merging every radar source we have.
 
 - Ministère de l'Intérieur list (data.gouv.fr, Licence Ouverte): authoritative position, type, limit.
+- Sécurité routière map (radars.securite-routiere.gouv.fr, the official map's own feed): radars newer
+  than the data.gouv list, section lengths, and the "itinéraires de contrôle" where a movable radar
+  rotates between cabins (published as zones).
 - OSM speed cameras and enforcement relations (ODbL): measured direction, sections, extra radars.
 - Our Lufop database (pipeline/harvest_lufop.py): mobile / roadwork radars and ones missing above.
 
 Usage:
   build_radars.py osm <france.osm.pbf> <osm_radars.json>     weekly, from the OSM extract
-  build_radars.py merge <osm_radars.json> <lufop.json|-> <radars.json>
+  build_radars.py merge <osm_radars.json> <lufop.json|-> <radars.json> [official.json]
   build_radars.py check <previous radars.json|-> <radars.json>   fails if more than 10 % of radars vanished
+
+official.json caches the last good copy of both official sources: when one is down, the merge uses
+its cached copy instead of losing it (the file is rewritten with whatever was fetched fresh).
 
 Every mode appends a short report to $GITHUB_STEP_SUMMARY when it is set (CI job summary).
 """
@@ -18,6 +24,7 @@ import json
 import math
 import os
 import sys
+import time
 import urllib.request
 import re
 from collections import Counter
@@ -25,20 +32,36 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 OFFICIAL_DATASET = "https://www.data.gouv.fr/api/1/datasets/liste-des-radars-fixes-en-france/"
+SR_LIST = "https://radars.securite-routiere.gouv.fr/radars/all?_format=json"
+SR_DETAIL = "https://radars.securite-routiere.gouv.fr/radars/{}?_format=json"
 USER_AGENT = "Zenith/0.1 (https://github.com/LightZirconite/zenith)"
 OFFICIAL_TYPES = {
     "ETF": "FIXED", "ETT": "FIXED", "ETU": "FIXED", "ETD": "DISCRIMINANT",
     "ETFR": "RED_LIGHT", "ETPN": "LEVEL_CROSSING", "ETVM": "SECTION_END",
 }
+SR_TYPES = {
+    "fixes": "FIXED", "urbain": "FIXED", "discriminants": "DISCRIMINANT", "feux": "RED_LIGHT",
+    "niveaux": "LEVEL_CROSSING", "troncons": "SECTION_END",
+}
+SR_PAUSE_S = 0.3  # between two detail requests: a handful per run, stay gentle
+SR_DETAIL_MAX_AGE_S = 30 * 86400
+ZONE_TOLERANCE_M = 12  # zone polylines simplified to this, well under the in-app matching distance
 MERGE_M = 80
 MAX_LOSS = 0.10
 PARIS = ZoneInfo("Europe/Paris")
 
 
-def fetch(url, data=None, timeout=900):
+def fetch(url, data=None, timeout=900, attempts=3):
+    """GET (or POST) with a few retries: a transient error must not cost a source."""
     req = urllib.request.Request(url, data=data, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.read()
+    for attempt in range(attempts):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.read()
+        except Exception:  # noqa: BLE001 - retried, then raised
+            if attempt == attempts - 1:
+                raise
+            time.sleep(5 * (attempt + 1))
 
 
 def distance(a, b):
@@ -79,6 +102,110 @@ def official():
             continue
         out.append({"id": f"fr-{rid}", "pos": pos, "type": OFFICIAL_TYPES.get(kind, "FIXED"), "limit": speed(vma), "src": ["gouv"]})
     return out, latest["url"]
+
+
+def sr_detail(rid):
+    """Limit (light vehicles) and section length of one radar of the Sécurité routière map."""
+    d = json.loads(fetch(SR_DETAIL.format(rid), timeout=60))
+    limit = next((int(m.group(1)) for r in d.get("rulesmesured") or []
+                  if (m := re.fullmatch(r"Vitesse VL (\d+)", (r.get("name") or "").strip()))), None)
+    try:
+        length = round(float(str(d.get("radartronconkm") or "").replace(",", ".")) * 1000)
+    except ValueError:
+        length = None
+    return {"limit": limit, "len": length or None}
+
+
+def securite_routiere(known_ids, details):
+    """Radars and control itineraries of the official map. Details (one request each) only for the
+    sections, whose length the list lacks, and for radars the data.gouv list does not have yet;
+    [details] caches them by id (refreshed after SR_DETAIL_MAX_AGE_S) and is updated in place."""
+    radars, zones = [], []
+    for e in json.loads(fetch(SR_LIST, timeout=120)):
+        try:
+            pos = (float(e["lat"]), float(e["lng"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if e.get("type") == "itineraire":
+            pts = [(float(p[0]), float(p[1])) for p in e.get("geoJson") or [] if isinstance(p, list) and len(p) == 2]
+            if len(pts) >= 2:
+                zones.append({"id": str(e["id"]), "pts": simplify(pts, ZONE_TOLERANCE_M)})
+            continue
+        kind = SR_TYPES.get(e.get("type"))
+        if kind is None:
+            continue
+        radars.append({"id": f"fr-{e['id']}", "pos": pos, "type": kind, "limit": None, "src": ["sr"]})
+    read = 0
+    now = int(time.time())
+    for r in radars:
+        # Without the data.gouv list at all, only the sections: thousands of requests otherwise.
+        if r["type"] != "SECTION_END" and (not known_ids or r["id"] in known_ids):
+            continue
+        cached = details.get(r["id"])
+        if cached is None or now - cached["at"] > SR_DETAIL_MAX_AGE_S:
+            try:
+                cached = details[r["id"]] = {**sr_detail(r["id"][3:]), "at": now}
+                read += 1
+            except Exception as e:  # noqa: BLE001 - one detail missing keeps the radar, without it
+                print(f"détail {r['id']} indisponible : {e}")
+            time.sleep(SR_PAUSE_S)
+        if cached:
+            r.update({k: v for k, v in cached.items() if k != "at"})
+    print(f"Sécurité routière : {len(radars)} radars, {len(zones)} itinéraires, {read} détails lus ({len(details)} en cache)")
+    return radars, zones
+
+
+def simplify(pts, tolerance_m):
+    """Douglas-Peucker on a local plane: drops points closer than tolerance_m to the simplified line."""
+    lat0 = math.radians(pts[0][0])
+    xy = [(p[1] * 111_320 * math.cos(lat0), p[0] * 110_574) for p in pts]
+    keep = [False] * len(pts)
+    keep[0] = keep[-1] = True
+    stack = [(0, len(pts) - 1)]
+    while stack:
+        a, b = stack.pop()
+        (ax, ay), (bx, by) = xy[a], xy[b]
+        dx, dy = bx - ax, by - ay
+        norm = math.hypot(dx, dy)
+        far, far_d = None, tolerance_m
+        for k in range(a + 1, b):
+            px, py = xy[k]
+            d = abs(dx * (ay - py) - dy * (ax - px)) / norm if norm else math.hypot(px - ax, py - ay)
+            if d > far_d:
+                far, far_d = k, d
+        if far is not None:
+            keep[far] = True
+            stack += [(a, far), (far, b)]
+    return [p for p, k in zip(pts, keep) if k]
+
+
+def official_sources(cache_path):
+    """Both official sources, fresh when reachable, else their last good copy from cache_path."""
+    cache = {}
+    if cache_path and os.path.exists(cache_path):
+        cache = json.load(open(cache_path))
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    try:
+        radars, url = official()
+        cache["gouv"] = {"fetched": now, "url": url, "radars": radars}
+    except Exception as e:  # noqa: BLE001 - fall back on the cached copy below
+        print(f"::warning::liste data.gouv indisponible ({e}) : copie du {cache.get('gouv', {}).get('fetched', '-')}")
+    known = {r["id"] for r in cache.get("gouv", {}).get("radars", [])}
+    details = cache.setdefault("sr_details", {})
+    try:
+        radars, zones = securite_routiere(known, details)
+        cache["sr"] = {"fetched": now, "radars": radars, "zones": zones}
+    except Exception as e:  # noqa: BLE001 - fall back on the cached copy below
+        print(f"::warning::carte Sécurité routière indisponible ({e}) : copie du {cache.get('sr', {}).get('fetched', '-')}")
+    if "gouv" not in cache and "sr" not in cache:
+        sys.exit("::error::aucune source officielle disponible, ni en direct ni en cache")
+    if cache_path:
+        with open(cache_path, "w", encoding="utf-8") as f:
+            json.dump(cache, f, separators=(",", ":"), ensure_ascii=False)
+    gouv = cache.get("gouv", {"radars": [], "url": None})
+    sr = cache.get("sr", {"radars": [], "zones": []})
+    tuples = lambda rs: [{**r, "pos": tuple(r["pos"]), "src": list(r["src"])} for r in rs]
+    return tuples(gouv["radars"]), gouv["url"], tuples(sr["radars"]), [{**z, "pts": [tuple(p) for p in z["pts"]]} for z in sr["zones"]]
 
 
 def summary(lines):
@@ -239,6 +366,26 @@ def lufop_items(path):
     return items
 
 
+def merge_official(gouv, sr):
+    """data.gouv list + Sécurité routière map. Same id (or same type within MERGE_M) = same radar;
+    the map adds its newer radars and the section lengths ("end_len", used only without a start)."""
+    by_id = {r["id"]: r for r in gouv}
+    out = list(gouv)
+    for r in sr:
+        g = by_id.get(r["id"]) or min(
+            (o for o in gouv if o["type"] == r["type"] and distance(o["pos"], r["pos"]) <= MERGE_M),
+            key=lambda o: distance(o["pos"], r["pos"]), default=None)
+        if g is None:
+            g = {k: v for k, v in r.items() if k != "len"}
+            out.append(g)
+        else:
+            g["src"].append("sr")
+            g["limit"] = g["limit"] or r.get("limit")
+        if g["type"] == "SECTION_END" and r.get("len"):
+            g["end_len"] = r["len"]
+    return out
+
+
 def merge(official_radars, osm, sections, lufop=()):
     cell = lambda p: (round(p[0] * 100), round(p[1] * 100))  # ~1 km buckets
     grid = {}
@@ -297,17 +444,24 @@ def merge(official_radars, osm, sections, lufop=()):
         for e in ends:
             if e["type"] == "SECTION_END":
                 e["dir"] = e.get("dir") or d
+                e["has_start"] = True
         radars.append({"id": f"sec-{k}", "pos": s["from"], "type": "SECTION_START", "limit": limit, "dir": d, "len": length, "src": ["osm"]})
         if not ends:
             radars.append({"id": f"sec-{k}-end", "pos": s["to"], "type": "SECTION_END", "limit": limit, "dir": d, "src": ["osm"]})
+    # A section end without a known start carries the section length: the app places the start on
+    # the road behind it (and can pick up a section already under way).
+    for r in radars:
+        if r["type"] == "SECTION_END" and r.get("end_len") and not r.get("has_start"):
+            r["len"] = r["end_len"]
     return radars
 
 
-def write_pack(radars, gouv_url, out):
+def write_pack(radars, zones, gouv_url, out):
     doc = {
         "v": 1,
         "generated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "sources": {"gouv": gouv_url, "osm": "OpenStreetMap contributors (ODbL)", "lufop": "Lufop"},
+        "sources": {"gouv": gouv_url, "sr": "https://radars.securite-routiere.gouv.fr",
+                    "osm": "OpenStreetMap contributors (ODbL)", "lufop": "Lufop"},
         "radars": [
             {k: v for k, v in {
                 "id": r["id"], "lat": round(r["pos"][0], 6), "lon": round(r["pos"][1], 6), "type": r["type"],
@@ -316,14 +470,22 @@ def write_pack(radars, gouv_url, out):
             }.items() if v is not None}
             for r in radars
         ],
+        # Control itineraries: flat [lat, lon, lat, lon, ...] polylines, like the road tiles.
+        "zones": [
+            {"id": z["id"], "kind": "ITINERARY", "pts": [round(c, 5) for p in z["pts"] for c in p]}
+            for z in zones
+        ],
     }
     with open(out, "w", encoding="utf-8") as f:
         json.dump(doc, f, separators=(",", ":"))
     by_src = Counter(r["src"] for r in doc["radars"])
     by_type = Counter(r["type"] for r in doc["radars"])
     with_dir = sum(1 for r in doc["radars"] if "dir" in r)
+    zone_km = sum(sum(distance(a, b) for a, b in zip(z["pts"], z["pts"][1:])) for z in zones) / 1000
     summary(
-        [f"### radars.json : {len(doc['radars'])} radars, {with_dir} avec sens", "| source | radars |", "|---|---|"]
+        [f"### radars.json : {len(doc['radars'])} radars, {with_dir} avec sens, "
+         f"{sum(1 for r in doc['radars'] if r['type'] == 'SECTION_END' and 'len' in r)} fins de tronçon sans début avec longueur, "
+         f"{len(zones)} itinéraires de contrôle ({zone_km:.0f} km)", "| source | radars |", "|---|---|"]
         + [f"| {k} | {v} |" for k, v in by_src.most_common()]
         + ["", "| type | radars |", "|---|---|"]
         + [f"| {k} | {v} |" for k, v in by_type.most_common()]
@@ -354,8 +516,9 @@ def main():
         osm = json.load(open(sys.argv[2]))
         items = [{**i, "pos": tuple(i["pos"])} for i in osm["items"]]
         sections = [{**x, "from": tuple(x["from"]), "to": tuple(x["to"])} for x in osm["sections"]]
-        gouv, gouv_url = official()
-        write_pack(merge(gouv, items, sections, lufop_items(sys.argv[3])), gouv_url, sys.argv[4])
+        gouv, gouv_url, sr, zones = official_sources(sys.argv[5] if len(sys.argv) > 5 else None)
+        radars = merge(merge_official(gouv, sr), items, sections, lufop_items(sys.argv[3]))
+        write_pack(radars, zones, gouv_url, sys.argv[4])
     elif mode == "check":
         check(sys.argv[2], sys.argv[3])
     else:
