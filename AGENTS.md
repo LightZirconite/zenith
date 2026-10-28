@@ -21,6 +21,7 @@ Usage personnel de l'auteur, pas grand public. Interface et textes en français.
 ## Décisions prises (ne pas remettre en cause sans demande explicite)
 
 - **Android natif Kotlin uniquement.** Pas d'iOS, pas de PWA, pas de Flutter. Google Play Services seulement pour la détection de conduite (`play-services-location`), facultative : sans eux, tout le reste marche.
+- **Rien de payant** (règle de l'auteur) : ni compte développeur Google Play (25 $), ni service ou matériel payant. Une solution qui coûte de l'argent est écartée d'office.
 - **Aucun serveur, aucune base de données hébergée.** GitHub Actions fabrique les données, publiées comme fichiers de la release `data`. L'app les télécharge et les met en cache. Supabase, Firebase, Cloudflare D1, VPS : écartés.
 - **Dépôt public** (Actions gratuites et illimitées). Rien de secret dans le code : clés en secrets GitHub uniquement.
 - **Radars en position exacte**, toutes sources activées par défaut, le plus de données possible sur la France.
