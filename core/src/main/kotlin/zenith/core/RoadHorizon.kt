@@ -9,6 +9,9 @@ data class RadarOnRoad(val radar: Radar, val segment: RoadSegment, val forward: 
  * Attaches radars to the roads they stand on. Keeps every drivable direction close to the nearest
  * one (two carriageways at similar distance both get the radar), so a wrong pick never hides an
  * alert. A radar without a measured direction on a one-way road inherits the road's direction.
+ * A radar placed a little off its road (some official positions are 30 to 70 m away, on the
+ * verge or a car park) goes to the single nearest road within [farDistanceM] rather than to the
+ * straight-line fallback, which could announce it from a parallel road.
  * Results are cached: build one snapper per [RoadNetwork] instance.
  */
 class RadarSnapper(
@@ -16,15 +19,22 @@ class RadarSnapper(
     private val maxDistanceM: Double = 30.0,
     private val tieM: Double = 10.0,
     private val directionToleranceDeg: Double = 50.0,
+    private val farDistanceM: Double = 75.0,
 ) {
     private val cache = HashMap<String, List<RadarOnRoad>>()
 
     fun snap(radar: Radar): List<RadarOnRoad> = cache.getOrPut(radar.id) {
-        val cands = network.candidates(radar.position, maxDistanceM).filter { c ->
+        val cands = network.candidates(radar.position, farDistanceM).filter { c ->
             radar.directionDeg == null || Geo.headingDiffDeg(c.bearingDeg, radar.directionDeg) <= directionToleranceDeg
         }
-        val nearest = cands.minOfOrNull { it.distanceM } ?: return@getOrPut emptyList()
-        cands.filter { it.distanceM <= nearest + tieM }.map { RadarOnRoad(radar, it.segment, it.forward, it.offsetM) }
+        val nearest = cands.minByOrNull { it.distanceM } ?: return@getOrPut emptyList()
+        val kept = if (nearest.distanceM <= maxDistanceM) {
+            cands.filter { it.distanceM <= nearest.distanceM + tieM }
+        } else {
+            // Far from every road: only the nearest one, both its directions when it has two.
+            cands.filter { it.segment.id == nearest.segment.id }
+        }
+        kept.map { RadarOnRoad(radar, it.segment, it.forward, it.offsetM) }
     }
 }
 

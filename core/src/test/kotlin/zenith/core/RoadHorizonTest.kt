@@ -41,6 +41,19 @@ class RoadHorizonTest {
         }
     }
 
+    @Test
+    fun `radar placed off its road goes to that road, not to the parallel one`() {
+        // 50 m east of D 1 (the D 2 runs 300 m east): the straight-line fallback used to take it.
+        val verge = Radar("verge", Sim.ll(50.0, 2_000.0), RadarType.FIXED, 90)
+        for (seed in seeds) {
+            val onD1 = drive(parallel, listOf(verge), listOf(0.0 to 0.0, 0.0 to 3_000.0), 25.0, seed)
+            assertEquals(listOf("verge"), onD1.approached(), "seed $seed")
+            assertEquals("D 1", onD1.drop(6).first().upcoming?.roadName, "seed $seed")
+            val onD2 = drive(parallel, listOf(verge), listOf(300.0 to 0.0, 300.0 to 3_000.0), 25.0, seed)
+            assertTrue(onD2.approached().isEmpty() && onD2.none { it.upcoming != null }, "seed $seed: announced on D 2")
+        }
+    }
+
     // Northbound motorway A 7 with an exit ramp leaving east at y = 1000.
     private val motorway = RoadNetwork(
         listOf(
