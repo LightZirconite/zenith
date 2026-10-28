@@ -43,7 +43,12 @@ data class MediaInfo(
     val like: LikeAction? = null,
     /** A video (YouTube, a wide thumbnail): its picture is shown wide on the card. */
     val video: Boolean = false,
+    /** Any other music player (Deezer, YouTube Music, Apple Music…): its Canvas is looked up by title. */
+    val canvasQuery: CanvasQuery? = null,
 )
+
+/** A track known by its words, to find its Spotify twin and Canvas. */
+data class CanvasQuery(val title: String, val artist: String, val album: String?, val durationMs: Long?)
 
 /**
  * Music card of the drive screen: Android's media sessions give the track of whatever player is in
@@ -216,6 +221,10 @@ object NowPlaying {
             },
             like = like,
             video = c.packageName == VideoTitle.YOUTUBE || (art?.let { it.width > it.height * 1.3f } ?: false),
+            // Spotify gives its own id; a YouTube video is no song.
+            canvasQuery = shownArtist?.takeIf { c.packageName != SpotifyTrack.PACKAGE && c.packageName != VideoTitle.YOUTUBE }?.let {
+                CanvasQuery(shownTitle, it, md.getString(MediaMetadata.METADATA_KEY_ALBUM), md.getLong(MediaMetadata.METADATA_KEY_DURATION).takeIf { d -> d > 0 })
+            },
         )
     }
 

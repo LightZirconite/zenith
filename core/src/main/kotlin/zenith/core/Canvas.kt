@@ -13,6 +13,9 @@ sealed interface CanvasAnswer {
 
     /** No canvas for this track, or only a still image (the cover already shows). */
     data object None : CanvasAnswer
+
+    /** A search by title found this Spotify track and its video. */
+    data class Found(val match: CanvasMatch) : CanvasAnswer
 }
 
 /** An HTTP answer: status code and body. */
@@ -80,6 +83,40 @@ enum class CanvasService {
     }
 }
 
+/** A Spotify track found from a title, with its canvas video. */
+data class CanvasMatch(val trackId: String, val url: String)
+
+/**
+ * The canvas of a track known only by its words (Deezer, YouTube Music, any player but Spotify):
+ * AuraMusic's server finds the Spotify track matching title, artist, album and length, and its
+ * canvas. Free, no account; a track without a canvas there simply has none.
+ */
+object CanvasSearch {
+    private fun enc(s: String) = java.net.URLEncoder.encode(s, "UTF-8")
+
+    fun url(title: String, artist: String?, album: String?, durationMs: Long?): String = buildString {
+        append("https://canvas.auramusic.site/api/canvas?song=").append(enc(title)).append("&title=").append(enc(title))
+        artist?.let { append("&artist=").append(enc(it)) }
+        album?.let { append("&album=").append(enc(it)) }
+        durationMs?.takeIf { it > 0 }?.let { append("&durationMs=").append(it) }
+    }
+
+    /** The match, [CanvasAnswer.None] when there is none, null when the service failed. */
+    fun parse(answer: HttpAnswer): CanvasAnswer? {
+        if (answer.status == 404 || answer.status == 400) return CanvasAnswer.None
+        if (answer.status != 200) return null
+        val o = runCatching { Json.parseToJsonElement(answer.body) as? JsonObject }.getOrNull() ?: return null
+        if ((o["success"] as? JsonPrimitive)?.content == "false") return CanvasAnswer.None
+        val id = (o["trackId"] as? JsonPrimitive)?.content?.takeIf(SpotifyTrack::isId)
+        val url = ((o["canvasUrl"] ?: o["url"]) as? JsonPrimitive)?.content?.takeIf(CanvasService::isVideoUrl)
+        return if (id != null && url != null) CanvasAnswer.Found(CanvasMatch(id, url)) else CanvasAnswer.None
+    }
+
+    /** Same song, same memo: case, spaces and accents aside. */
+    fun key(title: String, artist: String?): String =
+        "?" + listOf(title, artist.orEmpty()).joinToString("|") { java.text.Normalizer.normalize(it.trim().lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "") }
+}
+
 /**
  * Canvas lookups for the music card. Services are asked in order and their answers kept per track
  * (a video for 3 days, "none" for a day: a canvas may be added later). When every service fails,
@@ -92,7 +129,9 @@ class CanvasFinder(
     private val now: () -> Long = System::currentTimeMillis,
     private val services: List<CanvasService> = CanvasService.entries,
 ) {
-    private class Memo(val url: String?, val atMs: Long)
+    private class Memo(val url: String?, val atMs: Long, val trackId: String? = null) {
+        fun match() = if (url != null && trackId != null) CanvasMatch(trackId, url) else null
+    }
 
     private val memo = object : LinkedHashMap<String, Memo>(64, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Memo>?) = size > MAX_MEMO
@@ -119,6 +158,33 @@ class CanvasFinder(
             val url = (answer as? CanvasAnswer.Video)?.url
             memo[trackId] = Memo(url, now())
             return url
+        }
+    }
+
+    /**
+     * The canvas of a track known by its words: the Spotify match and its video, remembered like
+     * [find] (and under the Spotify id too); null when none or nobody could be asked.
+     */
+    fun search(title: String, artist: String?, album: String?, durationMs: Long?): CanvasMatch? {
+        if (title.isBlank()) return null
+        val key = CanvasSearch.key(title, artist)
+        synchronized(this) {
+            val t = now()
+            memo[key]?.let { m -> if (t - m.atMs < (if (m.url != null) VIDEO_TTL_MS else NONE_TTL_MS)) return m.match() }
+            if (pauseMs > 0 && t - failedAtMs < pauseMs) return null
+        }
+        val answer = runCatching { get(CanvasSearch.url(title, artist, album, durationMs)) }.getOrNull()?.let(CanvasSearch::parse)
+        synchronized(this) {
+            if (answer == null) {
+                pauseMs = (pauseMs * 2).coerceIn(FIRST_PAUSE_MS, MAX_PAUSE_MS)
+                failedAtMs = now()
+                return null
+            }
+            pauseMs = 0
+            val match = (answer as? CanvasAnswer.Found)?.match
+            memo[key] = Memo(match?.url, now(), match?.trackId)
+            match?.let { memo[it.trackId] = Memo(it.url, now()) }
+            return match
         }
     }
 

@@ -149,10 +149,11 @@ fun SettingsScreen(
                 }
             }
             Toggle(
-                "Canvas Spotify",
-                "La courte vidéo en boucle de certains titres Spotify, derrière la carte Musique et dans la petite fenêtre. " +
-                    "Services gratuits non officiels (Spicy Lyrics, AuraMusic) : peut cesser de marcher. Environ 3 Mo par " +
-                    "titre, gardés en cache. Sinon, la pochette floutée.",
+                "Canvas",
+                "La courte vidéo en boucle des titres (celle de Spotify), derrière la carte Musique et dans la petite fenêtre, " +
+                    "quel que soit ton lecteur : Spotify, Deezer, YouTube Music, Apple Music… (pas pour une vidéo YouTube). " +
+                    "Services gratuits non officiels (Spicy Lyrics, AuraMusic) : peut cesser de marcher, et tous les titres " +
+                    "n'en ont pas. Environ 3 Mo par titre, gardés en cache. Sinon, la pochette floutée.",
                 settings.spotifyCanvas,
             ) { on -> onChange { it.copy(spotifyCanvas = on) } }
             Toggle(

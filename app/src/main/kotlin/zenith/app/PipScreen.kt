@@ -77,7 +77,7 @@ fun PipScreen(
         val unit = minOf(maxWidth, maxHeight).value / 100f // 1 % of the window's short side, in dp
         val halo = TextStyle(shadow = Shadow(Color.Black, blurRadius = 18f))
 
-        val video = rememberCanvas(media?.spotifyTrackId, canvas)
+        val video = rememberCanvas(media, canvas)
         var videoShown by remember(video) { mutableStateOf(false) }
         var videoFailed by remember(video) { mutableStateOf(false) }
         // The Canvas shows through only once its first frame is up: never onto black.
@@ -203,7 +203,7 @@ private fun PipCanvas(video: File, media: MediaInfo?, calm: Boolean, onShown: ()
                 onShown()
             },
             onFailed = {
-                media?.spotifyTrackId?.let { SpotifyCanvas.discard(it, video) }
+                SpotifyCanvas.discard(video)
                 onFailed()
             },
         )

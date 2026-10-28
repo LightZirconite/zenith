@@ -88,7 +88,7 @@ private enum class Glyph { PREVIOUS, PLAY, PAUSE, NEXT }
  */
 @Composable
 fun MusicBackdrop(media: MediaInfo, canvas: Boolean, calm: Boolean, focus: Float = 0f, modifier: Modifier = Modifier) {
-    val video = rememberCanvas(media.spotifyTrackId, canvas)
+    val video = rememberCanvas(media, canvas)
     var videoShown by remember(video) { mutableStateOf(false) }
     var videoFailed by remember(video) { mutableStateOf(false) }
     val videoAlpha by animateFloatAsState(if (!videoShown) 0f else if (calm) 0.35f else 0.85f, tween(900), label = "canvas")
@@ -113,7 +113,7 @@ fun MusicBackdrop(media: MediaInfo, canvas: Boolean, calm: Boolean, focus: Float
                 onShown = { videoShown = true },
                 onFailed = {
                     videoFailed = true
-                    media.spotifyTrackId?.let { SpotifyCanvas.discard(it, video) }
+                    SpotifyCanvas.discard(video)
                 },
             )
         }

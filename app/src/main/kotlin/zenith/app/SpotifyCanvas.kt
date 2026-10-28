@@ -61,10 +61,21 @@ object SpotifyCanvas {
         }
     }
 
-    /** Forgets a video that would not play, so the next time asks for it afresh. */
-    fun discard(trackId: String, file: File) {
+    /**
+     * The Canvas of whatever plays: Spotify's own track, else the Spotify twin of the song found by
+     * its title (Deezer, YouTube Music, Apple Music…); null without one.
+     */
+    suspend fun videoFor(context: Context, trackId: String?, query: CanvasQuery?): File? {
+        val id = trackId ?: query?.let { q ->
+            withContext(Dispatchers.IO) { finder.search(q.title, q.artist, q.album, q.durationMs)?.trackId }
+        } ?: return null
+        return video(context, id)
+    }
+
+    /** Forgets a video that would not play (named after its track), so the next time asks for it afresh. */
+    fun discard(file: File) {
         runCatching { file.delete() }
-        finder.forget(trackId)
+        finder.forget(file.nameWithoutExtension)
     }
 
     private fun download(url: String, dir: File, file: File) {
@@ -125,15 +136,17 @@ object SpotifyCanvas {
 }
 
 /**
- * The Canvas video of [trackId] once it is on the phone; null without one, while it downloads, or
- * when [enabled] is off. Each screen asks for itself: the second ask is a file already there.
+ * The Canvas video of what [media] plays once it is on the phone; null without one, while it
+ * downloads, or when [enabled] is off. Each screen asks for itself: the second ask is a file already there.
  */
 @Composable
-fun rememberCanvas(trackId: String?, enabled: Boolean): File? {
+fun rememberCanvas(media: MediaInfo?, enabled: Boolean): File? {
     val context = LocalContext.current.applicationContext
-    val file by produceState<File?>(null, trackId, enabled) {
+    val trackId = media?.spotifyTrackId
+    val query = media?.canvasQuery
+    val file by produceState<File?>(null, trackId, query, enabled) {
         value = null
-        if (enabled && trackId != null) value = SpotifyCanvas.video(context, trackId)
+        if (enabled) value = SpotifyCanvas.videoFor(context, trackId, query)
     }
     return file
 }
