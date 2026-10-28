@@ -47,6 +47,12 @@ SR_PAUSE_S = 0.3  # between two detail requests: a handful per run, stay gentle
 SR_DETAIL_MAX_AGE_S = 30 * 86400
 ZONE_TOLERANCE_M = 12  # zone polylines simplified to this, well under the in-app matching distance
 MERGE_M = 80
+# Same camera from two sources (positions differ more across sources): absorbed into the first one.
+TWIN_M = 150
+# A speed camera this close to a section camera is the section camera itself (OSM tags both).
+SECTION_CAMERA_M = 30
+# FIXED and DISCRIMINANT name the same cabins differently across sources.
+FAMILY = {"DISCRIMINANT": "FIXED"}
 MAX_LOSS = 0.10
 PARIS = ZoneInfo("Europe/Paris")
 
@@ -85,6 +91,12 @@ def speed(value):
         return None
 
 
+def limit_kmh(value):
+    """A speed limit, or None when absent or absurd (typos like 1 or 320 in the sources)."""
+    v = speed(value)
+    return v if v is not None and 5 <= v <= 130 else None
+
+
 def official():
     meta = json.loads(fetch(OFFICIAL_DATASET))
     csvs = [r for r in meta["resources"] if r["format"].lower() == "csv"]
@@ -100,14 +112,14 @@ def official():
             pos = (float(lat), float(lon))
         except ValueError:
             continue
-        out.append({"id": f"fr-{rid}", "pos": pos, "type": OFFICIAL_TYPES.get(kind, "FIXED"), "limit": speed(vma), "src": ["gouv"]})
+        out.append({"id": f"fr-{rid}", "pos": pos, "type": OFFICIAL_TYPES.get(kind, "FIXED"), "limit": limit_kmh(vma), "src": ["gouv"]})
     return out, latest["url"]
 
 
 def sr_detail(rid):
     """Limit (light vehicles) and section length of one radar of the Sécurité routière map."""
     d = json.loads(fetch(SR_DETAIL.format(rid), timeout=60))
-    limit = next((int(m.group(1)) for r in d.get("rulesmesured") or []
+    limit = next((limit_kmh(m.group(1)) for r in d.get("rulesmesured") or []
                   if (m := re.fullmatch(r"Vitesse VL (\d+)", (r.get("name") or "").strip()))), None)
     try:
         length = round(float(str(d.get("radartronconkm") or "").replace(",", ".")) * 1000)
@@ -305,7 +317,7 @@ def osm_items(elements):
             # forward / backward: relative to the way the camera stands on.
             if d is None and "way_bearing" in e and t.get("direction") in ("forward", "backward"):
                 d = round((e["way_bearing"] + (180 if t["direction"] == "backward" else 0)) % 360, 1)
-            items[e["id"]] = {"pos": (e["lat"], e["lon"]), "limit": speed(t.get("maxspeed")), "dir": d, "type": "FIXED"}
+            items[e["id"]] = {"pos": (e["lat"], e["lon"]), "limit": limit_kmh(t.get("maxspeed")), "dir": d, "type": "FIXED"}
     sections = []
     for r in (e for e in elements if e["type"] == "relation"):
         t = r.get("tags", {})
@@ -316,7 +328,7 @@ def osm_items(elements):
         device_ref = next((m["ref"] for m in r["members"] if m["role"] == "device" and m["type"] == "node"), None)
         kind = t.get("enforcement")
         if kind == "average_speed" and "from" in roles and "to" in roles:
-            sections.append({"from": roles["from"], "to": roles["to"], "limit": speed(t.get("maxspeed"))})
+            sections.append({"from": roles["from"], "to": roles["to"], "limit": limit_kmh(t.get("maxspeed"))})
             continue
         device = roles.get("device")
         if device is None:
@@ -325,7 +337,7 @@ def osm_items(elements):
             bearing(device, roles["to"]) if "to" in roles and distance(device, roles["to"]) > 5 else None)
         item = items.setdefault(device_ref, {"pos": device, "limit": None, "dir": None, "type": "FIXED"})
         item["dir"] = direction if direction is not None else item["dir"]
-        item["limit"] = speed(t.get("maxspeed")) or item["limit"]
+        item["limit"] = limit_kmh(t.get("maxspeed")) or item["limit"]
         if kind == "traffic_signals":
             item["type"] = "RED_LIGHT"
     return list(items.values()), sections
@@ -340,21 +352,27 @@ def lufop_items(path):
         name = (r.get("name") or "").lower()
         if "covoiturage" in name and not r.get("vitesse"):
             continue  # lane-occupancy cameras, not speed
+        # Most specific first: "Radar Passage Niveau FR" is not a fixed speed camera.
         if "feu" in name:
             kind = "RED_LIGHT"
+        elif "niveau" in name:
+            kind = "LEVEL_CROSSING"
         elif "chantier" in name:
             kind = "WORKZONE"
         elif "mobile" in name:
             kind = "MOBILE"
         elif "tron" in name:
-            kind = "SECTION_END"
+            kind = "SECTION_START" if "debut" in name or "début" in name else "SECTION_END"
+        elif "discrimin" in name:
+            kind = "DISCRIMINANT"
         else:
             kind = "FIXED"
         try:
             pos = (float(r["lat"]), float(r["lng"]))
         except (KeyError, TypeError, ValueError):
             continue
-        item = {"id": f"lufop-{rid}", "pos": pos, "type": kind, "limit": speed(r.get("vitesse")), "dir": None,
+        limit = limit_kmh(r.get("vitesse")) if kind not in ("RED_LIGHT", "LEVEL_CROSSING") else None
+        item = {"id": f"lufop-{rid}", "pos": pos, "type": kind, "limit": limit, "dir": None,
                 "azimut": speed(r.get("azimut")), "flash": (r.get("flash") or "").strip() or "-"}
         if kind == "MOBILE":
             item["at"] = lufop_time(r.get("update"))  # the app ignores stale mobile reports
@@ -372,8 +390,10 @@ def merge_official(gouv, sr):
     by_id = {r["id"]: r for r in gouv}
     out = list(gouv)
     for r in sr:
+        # Same type nearby, or a FIXED / DISCRIMINANT pair standing on the same spot (the list's type wins).
         g = by_id.get(r["id"]) or min(
-            (o for o in gouv if o["type"] == r["type"] and distance(o["pos"], r["pos"]) <= MERGE_M),
+            (o for o in gouv if distance(o["pos"], r["pos"]) <= (MERGE_M if o["type"] == r["type"] else SECTION_CAMERA_M)
+             and family(o["type"]) == family(r["type"])),
             key=lambda o: distance(o["pos"], r["pos"]), default=None)
         if g is None:
             g = {k: v for k, v in r.items() if k != "len"}
@@ -446,12 +466,11 @@ def merge(official_radars, osm, sections, lufop=()):
         if length < 200:
             continue
         d = bearing(s["from"], s["to"])
-        ends = list(nearby(s["to"], 300))
+        ends = [e for e in nearby(s["to"], 300) if e["type"] == "SECTION_END"]
         limit = s["limit"] or next((e["limit"] for e in ends if e["limit"]), None)
         for e in ends:
-            if e["type"] == "SECTION_END":
-                e["dir"] = e.get("dir") or d
-                e["has_start"] = True
+            e["dir"] = e.get("dir") or d
+            e["has_start"] = True
         radars.append({"id": f"sec-{k}", "pos": s["from"], "type": "SECTION_START", "limit": limit, "dir": d, "len": length, "src": ["osm"]})
         if not ends:
             radars.append({"id": f"sec-{k}-end", "pos": s["to"], "type": "SECTION_END", "limit": limit, "dir": d, "src": ["osm"]})
@@ -460,7 +479,52 @@ def merge(official_radars, osm, sections, lufop=()):
     for r in radars:
         if r["type"] == "SECTION_END" and r.get("end_len") and not r.get("has_start"):
             r["len"] = r["end_len"]
-    return radars
+    return absorb_twins(radars)
+
+
+def family(kind):
+    return FAMILY.get(kind, kind)
+
+
+def twin_of(a, b):
+    """[b] (an extra source) is the same camera as [a]: same kind of camera close by, directions not
+    opposed; or a plain speed camera standing on a section camera."""
+    d = distance(a["pos"], b["pos"])
+    sections = ("SECTION_START", "SECTION_END")
+    if a["type"] in sections and b["type"] == "FIXED":
+        return d <= SECTION_CAMERA_M
+    if family(a["type"]) != family(b["type"]) or d > TWIN_M:
+        return False
+    if a.get("dir") is not None and b.get("dir") is not None:
+        return abs((a["dir"] - b["dir"] + 180) % 360 - 180) <= 90
+    return True
+
+
+def absorb_twins(radars):
+    """Folds the extras (OSM, Lufop) that duplicate a radar kept before them: one camera, one
+    alert, with the trusted source's type and limit. Official radars are never removed."""
+    official = lambda r: bool({"gouv", "sr"} & set(r["src"])) or r["id"].startswith("sec-")
+    ordered = sorted(radars, key=lambda r: not official(r))
+    cell = lambda p: (round(p[0] * 100), round(p[1] * 100))
+    grid, kept, absorbed = {}, [], 0
+    for r in ordered:
+        c = cell(r["pos"])
+        twin = None
+        if not official(r):
+            near = (k for di in (-1, 0, 1) for dj in (-1, 0, 1) for k in grid.get((c[0] + di, c[1] + dj), []))
+            twin = min((k for k in near if twin_of(k, r)), key=lambda k: distance(k["pos"], r["pos"]), default=None)
+        if twin is None:
+            kept.append(r)
+            grid.setdefault(c, []).append(r)
+            continue
+        absorbed += 1
+        twin["src"] = twin["src"] + [s for s in r["src"] if s not in twin["src"]]
+        if twin["type"] not in ("SECTION_START", "SECTION_END"):
+            twin["limit"] = twin.get("limit") or r.get("limit")
+        if twin.get("dir") is None:
+            twin["dir"] = r.get("dir")
+    summary([f"Doublons entre sources fondus : {absorbed}"])
+    return kept
 
 
 def write_pack(radars, zones, gouv_url, out):
@@ -506,10 +570,16 @@ def check(previous, current):
         summary([f"Contrôle : pas de version précédente, {len(new)} radars."])
         return
     old = json.load(open(previous))["radars"]
-    old_ids, new_ids = {r["id"] for r in old}, {r["id"] for r in new}
-    summary([f"Contrôle : {len(old)} → {len(new)} radars, {len(new_ids - old_ids)} ajoutés, {len(old_ids - new_ids)} retirés."])
+    # Compared after folding the old pack's duplicates the same way: removing duplicates is no loss.
+    old = absorb_twins([{**r, "pos": (r["lat"], r["lon"]), "src": r.get("src", "?").split("+")} for r in old])
+    summary([f"Contrôle : {len(old)} → {len(new)} radars (ancienne version sans ses doublons)."])
     if len(new) < len(old) * (1 - MAX_LOSS):
         sys.exit(f"::error::radars.json perd plus de {MAX_LOSS:.0%} des radars ({len(old)} → {len(new)}) : publication refusée")
+    # A whole kind vanishing (a source changed its format) is refused too, even when the total holds.
+    before, after = Counter(r["type"] for r in old), Counter(r["type"] for r in new)
+    for kind, n in before.items():
+        if n >= 200 and after[kind] < n * (1 - 2 * MAX_LOSS):
+            sys.exit(f"::error::radars.json perd trop de radars {kind} ({n} → {after[kind]}) : publication refusée")
 
 
 def main():
@@ -521,7 +591,7 @@ def main():
         print(f"OSM : {len(items)} radars, {len(sections)} tronçons")
     elif mode == "merge":
         osm = json.load(open(sys.argv[2]))
-        items = [{**i, "pos": tuple(i["pos"])} for i in osm["items"]]
+        items = [{**i, "pos": tuple(i["pos"]), "limit": limit_kmh(i["limit"])} for i in osm["items"]]
         sections = [{**x, "from": tuple(x["from"]), "to": tuple(x["to"])} for x in osm["sections"]]
         gouv, gouv_url, sr, zones = official_sources(sys.argv[5] if len(sys.argv) > 5 else None)
         radars = merge(merge_official(gouv, sr), items, sections, lufop_items(sys.argv[3]))

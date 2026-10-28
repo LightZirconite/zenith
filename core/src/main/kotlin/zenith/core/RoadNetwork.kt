@@ -27,8 +27,12 @@ data class RoadSegment(
 
     val lengthM: Double = points.zipWithNext { a, b -> Geo.distanceM(a, b) }.sum()
 
-    fun limitKmh(forward: Boolean): Int? =
-        if (forward) maxspeedForward ?: maxspeedBackward else maxspeedBackward ?: maxspeedForward
+    /** Limit for travel in that direction; a one-way road's single limit holds whichever way it is stored. */
+    fun limitKmh(forward: Boolean): Int? = when {
+        oneway -> maxspeedForward ?: maxspeedBackward
+        forward -> maxspeedForward
+        else -> maxspeedBackward
+    }
 }
 
 /** A segment travelled in a given direction, with the vehicle projected onto it. */

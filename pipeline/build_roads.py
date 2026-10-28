@@ -51,7 +51,8 @@ def parse_speed(value):
     if value in IMPLICIT:
         return IMPLICIT[value], SRC_IMPLICIT
     m = re.fullmatch(r"(\d+)(?: ?km/h)?", value)
-    if m:
+    # Typos (1, 3, 320…) are no limit at all rather than a wrong one.
+    if m and 5 <= int(m.group(1)) <= 130:
         return int(m.group(1)), SRC_EXPLICIT
     return None, None
 
@@ -77,7 +78,8 @@ def limits(tags, highway):
         if inferred:
             return inferred, inferred, SRC_INFERRED
         return None, None, None
-    return fwd if fwd is not None else bwd, bwd if bwd is not None else fwd, src
+    # A limit tagged for one direction only says nothing about the other one.
+    return fwd, bwd, src
 
 
 def oneway_of(tags, highway):

@@ -6,6 +6,9 @@ name: radars
 # never spends more than 150 a day; each run takes a random share of what is left, after a random
 # delay, so a missed schedule is caught up and calls never come at fixed times.
 # The Lufop base is published encrypted (pipeline/lufop_db.sh, secret LUFOP_DB_KEY).
+# GitHub never fired these schedules (0 scheduled run since the workflow exists), so each run also
+# starts the next one after a random 3 to 5 h pause ("next" job): the chain keeps itself going, and
+# a push of this file or a manual run restarts it if it ever breaks.
 on:
   schedule:
     - cron: "17 1 * * *"
@@ -15,19 +18,27 @@ on:
     - cron: "52 17 * * *"
     - cron: "24 21 * * *"
   workflow_dispatch:
+    inputs:
+      chained:
+        description: "Started by the previous run (takes a share of the quota, not all of it)"
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths: [.github/workflows/radars.yml]
 
 permissions:
   contents: write
-
-# Shared with data.yml: both publish radars.json and official.json.
-concurrency:
-  group: data-release
-  cancel-in-progress: false
+  actions: write
 
 jobs:
   radars:
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    # Shared with data.yml: both publish radars.json and official.json.
+    concurrency:
+      group: data-release
+      cancel-in-progress: false
     steps:
       - name: Random delay
         if: github.event_name == 'schedule'
@@ -57,7 +68,7 @@ jobs:
       - name: Lufop harvest
         env:
           LUFOP_API_KEY: ${{ secrets.LUFOP_API_KEY }}
-        run: python pipeline/harvest_lufop.py out/lufop.json 150 ${{ github.event_name == 'workflow_dispatch' && 'all' || '' }}
+        run: python pipeline/harvest_lufop.py out/lufop.json 150 ${{ github.event_name == 'workflow_dispatch' && !inputs.chained && 'all' || '' }}
 
       # Saved before anything else can fail: today's quota is spent, its results must not be lost.
       - name: Save Lufop base
@@ -85,3 +96,23 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload data out/radars.json out/official.json --clobber
+
+  # Outside the data-release group: its long pause must not hold back data.yml.
+  next:
+    needs: radars
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - name: Pause
+        run: sleep $((10800 + RANDOM % 7200))
+      - name: Start the next run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # A newer run (manual, push) carries its own chain: this one stops, so chains never multiply.
+          newer=$(gh run list --workflow radars.yml --limit 20 --json databaseId,status \
+            -q "[.[] | select(.databaseId > ${{ github.run_id }} and .status != \"completed\")] | length")
+          if [ "$newer" != "0" ]; then echo "Une exécution plus récente prend le relais."; exit 0; fi
+          gh workflow run radars.yml --ref main -f chained=true
