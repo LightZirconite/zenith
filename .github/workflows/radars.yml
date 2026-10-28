@@ -8,7 +8,8 @@ name: radars
 # The Lufop base is published encrypted (pipeline/lufop_db.sh, secret LUFOP_DB_KEY).
 # GitHub never fired these schedules (0 scheduled run since the workflow exists), so each run also
 # starts the next one after a random 3 to 5 h pause ("next" job): the chain keeps itself going, and
-# a push of this file or a manual run restarts it if it ever breaks.
+# a push of this file or a manual run restarts it if it ever breaks. The same job starts data.yml
+# once its data is a week old (its own weekly cron never fired either).
 on:
   schedule:
     - cron: "17 1 * * *"
@@ -116,3 +117,12 @@ jobs:
             -q "[.[] | select(.databaseId > ${{ github.run_id }} and .status != \"completed\")] | length")
           if [ "$newer" != "0" ]; then echo "Une exécution plus récente prend le relais."; exit 0; fi
           gh workflow run radars.yml --ref main -f chained=true
+          # data.yml (road tiles, OSM radars) depends on a weekly cron that never fired either:
+          # started from here once its manifest is a week old and no run of it is under way.
+          generated=$(gh release download data -p manifest.json -O - 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin)['generated'])" || echo 1970-01-01T00:00:00+00:00)
+          age=$(( $(date +%s) - $(date -d "$generated" +%s) ))
+          busy=$(gh run list --workflow data.yml --limit 5 --json status -q '[.[] | select(.status != "completed")] | length')
+          if [ "$age" -gt $((7 * 86400)) ] && [ "$busy" = "0" ]; then
+            echo "Données OSM vieilles de $((age / 86400)) jours : data.yml relancé."
+            gh workflow run data.yml --ref main
+          fi
