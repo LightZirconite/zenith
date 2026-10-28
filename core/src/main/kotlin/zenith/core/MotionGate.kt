@@ -6,18 +6,19 @@ enum class Motion { PARKED, STANDING, MOVING }
 /**
  * Tells whether the car is really driving, so a phone lying at home next to a road never announces
  * the radar down the street. Rolling starts once the filtered position has truly moved (net
- * displacement and average speed over a few seconds, accurate fix, Doppler agreeing): GPS noise
+ * displacement and average speed over a few seconds, longer when the fix is poor, Doppler agreeing): GPS noise
  * wanders around a point, it does not travel. Rolling ends after a long standstill, so a red light
  * or a jam keeps the alerts while a parked car drops them.
  */
 class MotionGate(
     private val startMps: Double = 2.5,
-    private val startWindowMs: Long = 8_000,
+    private val startWindowMs: Long = 10_000,
     private val minStartAgeMs: Long = 2_000,
     private val minStartM: Double = 20.0,
     /** Consecutive fixes that must look like driving: one noisy jump is not a start. */
     private val startFixes: Int = 3,
-    private val maxAccuracyM: Double = 30.0,
+    /** Poorer announced accuracy (city canyons) still allows a start, over a distance capped at twice this. */
+    private val accuracyCapM: Double = 40.0,
     private val stopMs: Long = 60_000,
     private val stopRadiusM: Double = 20.0,
 ) {
@@ -52,13 +53,13 @@ class MotionGate(
     private fun started(now: Long, state: KinematicState, fix: GpsFix): Boolean {
         if (state.speedMps < startMps) return false
         if (fix.speedMps != null && fix.speedMps < startMps) return false
-        if ((fix.accuracyM ?: 0.0) > maxAccuracyM) return false
         val (t, p) = samples.firstOrNull { now - it.first <= startWindowMs } ?: return false
         val age = now - t
         if (age < minStartAgeMs) return false
         val moved = Geo.distanceM(p, state.position)
         // Noise grows with the announced accuracy: so must the distance that proves the car moved.
-        return moved >= maxOf(minStartM, 2 * (fix.accuracyM ?: 0.0)) && moved / (age / 1000.0) >= startMps
+        val accuracy = (fix.accuracyM ?: 0.0).coerceAtMost(accuracyCapM)
+        return moved >= maxOf(minStartM, 2 * accuracy) && moved / (age / 1000.0) >= startMps
     }
 
     private fun stopped(now: Long, position: LatLon): Boolean =

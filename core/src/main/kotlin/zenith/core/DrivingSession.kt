@@ -104,8 +104,10 @@ class DrivingSession(
         val net = network()
         val road = matcher.update(state)
         val roadLimit = road?.limitKmh
-        val out = engine.step(state, road, net, motion = motion.update(state, fix))
-        val zone = zoneTracker.step(state)
+        val moving = motion.update(state, fix)
+        val out = engine.step(state, road, net, motion = moving)
+        // A phone at home next to a control itinerary must not enter it either.
+        val zone = if (moving == Motion.MOVING) zoneTracker.step(state) else zoneTracker.idle()
         return DriveSnapshot(
             timeMs = state.timeMs,
             position = state.position,

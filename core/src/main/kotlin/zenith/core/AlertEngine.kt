@@ -133,7 +133,11 @@ class AlertEngine(
         var speedAtMinMps: Double,
         var brakeAnnounced: Boolean = false,
         val silent: Boolean = false,
-    )
+    ) {
+        /** Last distance by road while it was still ahead, and the speed then; null in straight-line mode. */
+        var lastRoadM: Double? = null
+        var speedAtLastRoadMps = 0.0
+    }
 
     /** Where radars stand on the road ahead, for one step. Null fields: no matched road. */
     private class Horizon(
@@ -191,7 +195,9 @@ class AlertEngine(
             lastLimit = limit
         }
 
-        advanceSection(state, events)
+        // Standing (red light, jam): heading and road match are noise, so nothing moves on until the car does.
+        val moving = motion == Motion.MOVING
+        advanceSection(state, moving, events)
         recentlyPassed.entries.removeIf { now - it.value > 5 * 60_000 }
         sectionsHandled.entries.removeIf { now - it.value > 30 * 60_000 }
 
@@ -203,8 +209,6 @@ class AlertEngine(
         var upcoming: UpcomingRadar? = null
         val searchM = if (horizon != null) settings.upcomingRangeM else maxOf(triggerM + 200, settings.fallbackUpcomingM)
         // Virtual section starts are queued behind the radars they come from.
-        // Standing (red light, jam): heading and road match are noise, so nothing moves on until the car does.
-        val moving = motion == Motion.MOVING
         val queue = ArrayDeque(if (moving) radars.near(state.position, searchM) else emptyList())
         while (queue.isNotEmpty()) {
             val r = queue.removeFirst()
@@ -223,7 +227,9 @@ class AlertEngine(
                     sectionWithoutStart(r, onPath.first, horizon.path, now, roadLimit, events)?.let(queue::addLast)
                 }
                 d = horizon.roadDistance(snaps) ?: continue
-                if (onPath == null && d > settings.branchAlertM) continue
+                // A side branch only counts ahead of the car: behind it, it could only be reached by
+                // turning back (roundabout, loop), and its camera measures the other way.
+                if (onPath == null && (d > settings.branchAlertM || behind(state.position, heading, r.position))) continue
             } else {
                 d = Geo.distanceM(state.position, r.position)
                 if (!isAhead(state.position, heading, r.position, d)) continue
@@ -259,14 +265,22 @@ class AlertEngine(
             } else {
                 heading != null && isAhead(state.position, heading, r.position, straight)
             }
-            val passed = (t.minDistanceM < 120 && straight > t.minDistanceM + 25) || (!ahead && straight < 60 && t.minDistanceM < 60)
-            if (passed) {
+            if (roadD != null) {
+                t.lastRoadM = roadD
+                t.speedAtLastRoadMps = v
+            }
+            // Gone by: the road distance was nearly used up when it vanished (two fixes at most), or
+            // without road, the radar is now behind. Otherwise the car turned off before it.
+            val reached = t.lastRoadM?.let { it < maxOf(REACHED_M, 2.5 * t.speedAtLastRoadMps) }
+                ?: (heading == null || behind(state.position, heading, r.position))
+            val leaving = (t.minDistanceM < 120 && straight > t.minDistanceM + 25) || (!ahead && straight < 60 && t.minDistanceM < 60)
+            if (leaving && reached && !ahead) {
                 iterator.remove()
                 recentlyPassed[r.id] = now
                 onPassed(t, now, roadLimit, events)
                 continue
             }
-            if (!ahead && straight > 150) {
+            if (!ahead && (straight > 150 || leaving)) {
                 // Turned off before reaching it.
                 iterator.remove()
                 continue
@@ -343,6 +357,9 @@ class AlertEngine(
         overspeed = level
     }
 
+    private fun behind(p: LatLon, heading: Double, target: LatLon): Boolean =
+        Geo.distanceM(p, target) > 15 && Geo.headingDiffDeg(heading, Geo.bearingDeg(p, target)) > 90
+
     private fun isAhead(p: LatLon, heading: Double, target: LatLon, d: Double): Boolean {
         if (d < 15) return true
         val angle = Geo.headingDiffDeg(heading, Geo.bearingDeg(p, target))
@@ -408,10 +425,13 @@ class AlertEngine(
         }
     }
 
-    private fun advanceSection(state: KinematicState, events: MutableList<AlertEvent>) {
+    /** Standing, GPS noise is no progress (a jam would end the section early); moving, no more than the speed allows. */
+    private fun advanceSection(state: KinematicState, moving: Boolean, events: MutableList<AlertEvent>) {
         val s = section ?: return
         val last = lastPosition ?: return
-        s.advance(Geo.distanceM(last, state.position), state.timeMs)
+        val dtS = (state.timeMs - s.lastTimeMs) / 1000.0
+        val step = if (moving) minOf(Geo.distanceM(last, state.position), state.speedMps * dtS * 1.5 + 5) else 0.0
+        s.advance(step.coerceAtLeast(0.0), state.timeMs)
         if (s.remainingM <= 0) endSection(state.timeMs, events)
     }
 
@@ -429,5 +449,8 @@ class AlertEngine(
     private companion object {
         /** Id suffix of the start placed on the road for a section end without a start camera. */
         const val VIRTUAL_START = ">start"
+
+        /** A tracked radar whose road distance vanishes under this (or two fixes of travel) was reached. */
+        const val REACHED_M = 30.0
     }
 }

@@ -10,13 +10,14 @@ class SectionTracker(
     private val entryTimeMs: Long,
 ) {
     private var travelledM = 0.0
-    private var lastTimeMs = entryTimeMs
+    var lastTimeMs = entryTimeMs
+        private set
 
     val remainingM: Double get() = (lengthM - travelledM).coerceAtLeast(0.0)
 
-    /** Records [deltaM] meters travelled along the section at [timeMs]. */
+    /** Records [deltaM] meters travelled along the section at [timeMs]; a late, older fix is ignored. */
     fun advance(deltaM: Double, timeMs: Long) {
-        require(timeMs >= lastTimeMs) { "time must not go backwards" }
+        if (timeMs < lastTimeMs) return
         travelledM = (travelledM + deltaM).coerceAtMost(lengthM)
         lastTimeMs = timeMs
     }

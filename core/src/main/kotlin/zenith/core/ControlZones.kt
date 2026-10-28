@@ -85,6 +85,12 @@ class ZoneTracker(
         return ZoneStep(current?.let { ZoneStatus(it.zone, it.remainingM) }, events)
     }
 
+    /** A fix while not driving (stopped, or a phone at home): nothing enters, a zone under way goes on. */
+    fun idle(): ZoneStep {
+        pendingId = null
+        return ZoneStep(current?.let { ZoneStatus(it.zone, it.remainingM) }, emptyList())
+    }
+
     /** Closest zone the car runs along, either way, with the distance left to its end. */
     private fun match(p: LatLon, heading: Double): Match? {
         val frame = LocalFrame(p)
