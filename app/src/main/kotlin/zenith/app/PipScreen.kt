@@ -159,7 +159,7 @@ fun PipScreen(
             }
             if (limit != null) {
                 Box(Modifier.padding(bottom = (unit * 3).dp)) {
-                    LimitSign(limit, uncertain = s?.limitSource.isGuess(), size = (unit * 26).dp)
+                    LimitSign(limit, uncertain = s.limitSource.isGuess(), size = (unit * 26).dp)
                 }
             }
         }
