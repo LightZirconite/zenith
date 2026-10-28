@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.roundToInt
 
 private val Surface = Color(0xFF16161A)
 private val Accent = Color(0xFF0A84FF)
@@ -50,6 +51,8 @@ fun SettingsScreen(
     onAllowMedia: () -> Unit = {},
     permissions: Permissions? = null,
     onMotionPermission: () -> Unit = {},
+    update: UpdateState = UpdateState.Idle,
+    onCheckUpdate: () -> Unit = {},
 ) {
     Column(Modifier.fillMaxSize().background(Color.Black).safeDrawingPadding().padding(horizontal = 20.dp, vertical = 12.dp)) {
         Text(
@@ -158,8 +161,9 @@ fun SettingsScreen(
                     "Maps. Activé : une fenêtre carrée, plus grande. Un double appui sur la fenêtre l'agrandit aussi un moment.",
                 settings.pipLarge,
             ) { on -> onChange { it.copy(pipLarge = on) } }
+            SectionTitle("Application")
+            UpdateCard(version, update, onCheckUpdate)
             if (onShareTrip != null) {
-                SectionTitle("Trajets")
                 Card {
                     Text("Dernier trajet", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(4.dp))
@@ -241,6 +245,36 @@ private fun MotionCard(
                     .padding(horizontal = 16.dp, vertical = 9.dp),
             )
         }
+    }
+}
+
+/** Where the self-update stands, with a button to look at once instead of waiting for the next check. */
+@Composable
+private fun UpdateCard(version: String, update: UpdateState, onCheck: () -> Unit) {
+    Card {
+        Text("Mises à jour", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            when (update) {
+                is UpdateState.UpToDate -> "À jour : version ${update.version}."
+                is UpdateState.Downloading -> "Téléchargement de la version ${update.version}… ${(update.progress * 100).roundToInt()} %"
+                is UpdateState.Ready -> "Version ${update.version} téléchargée, elle s'installe."
+                is UpdateState.Installing, is UpdateState.NeedsConfirmation -> "Installation en cours…"
+                is UpdateState.Failed -> update.message
+                UpdateState.Idle -> "Version $version. Zenith regarde seul s'il y a du nouveau à chaque retour dans l'app (5 min au plus entre deux)."
+            },
+            color = Color.White.copy(alpha = 0.75f),
+            fontSize = 14.sp,
+        )
+        Spacer(Modifier.height(12.dp))
+        Text(
+            "Rechercher maintenant",
+            color = Color.White,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.tap(onClick = onCheck).clip(RoundedCornerShape(50)).background(Accent)
+                .padding(horizontal = 16.dp, vertical = 9.dp),
+        )
     }
 }
 

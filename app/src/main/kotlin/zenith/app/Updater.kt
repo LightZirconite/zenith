@@ -29,6 +29,9 @@ sealed interface UpdateState {
     /** Android wants a tap on its own install screen; launched as soon as Zenith is in front. */
     data class NeedsConfirmation(val version: String, val intent: Intent) : UpdateState
     data class Failed(val message: String) : UpdateState
+
+    /** Checked: nothing newer than the installed [version]. */
+    data class UpToDate(val version: String) : UpdateState
 }
 
 /**
@@ -42,22 +45,32 @@ object Updater {
     private val _state = MutableStateFlow<UpdateState>(UpdateState.Idle)
     val state: StateFlow<UpdateState> = _state
 
-    private const val CHECK_EVERY_MS = 30 * 60_000L
+    private const val CHECK_EVERY_MS = 5 * 60_000L
+
+    /** An install that never reported back (screen dismissed, installer killed) stops blocking checks. */
+    private const val INSTALL_TIMEOUT_MS = 2 * 60_000L
 
     @Volatile
     private var lastCheckMs = 0L
 
+    @Volatile
+    private var installingSinceMs = 0L
+
     private fun dir(context: Context) = File(context.cacheDir, "update")
 
-    /** Checks GitHub at most every 30 minutes (each time the app comes to the front). */
+    /** Checks GitHub at most every 5 minutes (each time the app comes to the front). */
     suspend fun checkIfDue(context: Context) {
         if (System.currentTimeMillis() - lastCheckMs < CHECK_EVERY_MS) return
         checkAndDownload(context)
     }
 
-    /** Checks GitHub and downloads a newer APK if there is one. */
+    /** Checks GitHub and downloads a newer APK if there is one; the settings' button calls it directly. */
     suspend fun checkAndDownload(context: Context) = withContext(Dispatchers.IO) {
-        if (_state.value !is UpdateState.Idle && _state.value !is UpdateState.Failed) return@withContext
+        val current = _state.value
+        val stuck = current is UpdateState.Installing && System.currentTimeMillis() - installingSinceMs > INSTALL_TIMEOUT_MS
+        if (current !is UpdateState.Idle && current !is UpdateState.Failed && current !is UpdateState.UpToDate && !stuck) {
+            return@withContext
+        }
         lastCheckMs = System.currentTimeMillis()
         runCatching {
             val release = Json.parseToJsonElement(get(LATEST)).jsonObject
@@ -65,7 +78,10 @@ object Updater {
             val build = tag.substringAfterLast('.').toIntOrNull() ?: return@runCatching
             val installed = PackageInfoCompat.getLongVersionCode(context.packageManager.getPackageInfo(context.packageName, 0))
             cleanup(context)
-            if (build <= installed) return@runCatching
+            if (build <= installed) {
+                _state.value = UpdateState.UpToDate(context.packageManager.getPackageInfo(context.packageName, 0).versionName.orEmpty())
+                return@runCatching
+            }
             val url = release.getValue("assets").jsonArray.map { it.jsonObject }
                 .firstOrNull { it["name"]?.jsonPrimitive?.content == "zenith.apk" }
                 ?.getValue("browser_download_url")?.jsonPrimitive?.content ?: return@runCatching
@@ -99,6 +115,7 @@ object Updater {
                 val callback = PendingIntent.getBroadcast(context, 0, Intent(context, UpdateReceiver::class.java), flags)
                 session.commit(callback.intentSender)
             }
+            installingSinceMs = System.currentTimeMillis()
             _state.value = UpdateState.Installing(ready.version)
         }.onFailure {
             Log.w("Zenith", "update install", it)
@@ -109,6 +126,7 @@ object Updater {
     /** The install screen was shown (or dismissed): wait for the installer result. */
     fun confirmationShown() {
         val pending = _state.value as? UpdateState.NeedsConfirmation ?: return
+        installingSinceMs = System.currentTimeMillis()
         _state.value = UpdateState.Installing(pending.version)
     }
 

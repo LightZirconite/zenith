@@ -24,6 +24,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.FileProvider
@@ -31,6 +32,7 @@ import androidx.core.content.edit
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import java.io.File
 
 class MainActivity : ComponentActivity() {
@@ -66,6 +68,7 @@ class MainActivity : ComponentActivity() {
             val media by NowPlaying.state.collectAsStateWithLifecycle()
             val startNow by startRequested.collectAsStateWithLifecycle()
             var showSettings by remember { mutableStateOf(false) }
+            val scope = rememberCoroutineScope()
             val pairLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { }
             BackHandler(enabled = showSettings) { showSettings = false }
             val navApps = remember(resumeCount) { NavApp.installed(context) }
@@ -203,6 +206,8 @@ class MainActivity : ComponentActivity() {
                     onAllowMedia = onMedia,
                     permissions = permissions,
                     onMotionPermission = onMotion,
+                    update = update,
+                    onCheckUpdate = { scope.launch { Updater.checkAndDownload(context) } },
                 )
             } else if (showWelcome) {
                 Onboarding(
