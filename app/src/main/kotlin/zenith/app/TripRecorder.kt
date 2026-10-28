@@ -7,13 +7,16 @@ import zenith.core.GpsFix
 import zenith.core.Gpx
 import zenith.core.LatLon
 import java.io.File
+import java.io.RandomAccessFile
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
 /**
  * Records the raw fixes of a drive as GPX in the app's external files ("trips" folder), so a
- * trip can be shared from the settings and replayed through DrivingSession. Rewrites the file
- * every [flushEvery] fixes so a crash loses at most that much. Keeps the last [KEEP] trips.
+ * trip can be shared from the settings and replayed through DrivingSession. Every [flushEvery]
+ * fixes, the new points are written over the closing tags, which are written again after them: the
+ * file is always a complete GPX (a crash loses at most that much) and a long drive never rewrites
+ * it whole. Keeps the last [KEEP] trips.
  */
 class TripRecorder(context: Context, private val flushEvery: Int = 30) {
     private val dir = dir(context).apply { mkdirs() }
@@ -23,26 +26,42 @@ class TripRecorder(context: Context, private val flushEvery: Int = 30) {
     }
 
     private val file = File(dir, LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss")) + ".gpx")
-    private val fixes = mutableListOf<GpsFix>()
+    private val pending = StringBuilder()
+    private var count = 0
+    private var started = false
 
     fun add(fix: GpsFix) {
-        fixes += fix
-        if (fixes.size % flushEvery == 0) flush()
+        pending.append(Gpx.point(fix))
+        if (++count % flushEvery == 0) flush()
     }
 
     fun close() {
-        if (fixes.isNotEmpty()) flush()
+        if (pending.isNotEmpty()) flush()
     }
 
     companion object {
         const val KEEP = 10
+        private val FOOTER_BYTES = Gpx.FOOTER.toByteArray()
 
         fun dir(context: Context) = File(context.getExternalFilesDir(null) ?: context.filesDir, "trips")
     }
 
     private fun flush() {
-        runCatching { file.bufferedWriter().use { Gpx.write(fixes, it, file.nameWithoutExtension) } }
-            .onFailure { Log.e("Zenith", "Could not write ${file.name}", it) }
+        runCatching {
+            RandomAccessFile(file, "rw").use { raf ->
+                if (!started) {
+                    raf.setLength(0)
+                    raf.write(Gpx.header(file.nameWithoutExtension).toByteArray())
+                    started = true
+                } else {
+                    raf.seek(raf.length() - FOOTER_BYTES.size)
+                }
+                raf.write(pending.toString().toByteArray())
+                raf.write(FOOTER_BYTES)
+                raf.setLength(raf.filePointer)
+            }
+            pending.clear()
+        }.onFailure { Log.e("Zenith", "Could not write ${file.name}", it) }
     }
 }
 

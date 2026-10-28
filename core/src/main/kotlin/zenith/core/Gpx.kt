@@ -30,20 +30,28 @@ object Gpx {
     }
 
     fun write(fixes: List<GpsFix>, out: Writer, name: String = "Zenith") {
-        out.write("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
-        out.write("<gpx version=\"1.1\" creator=\"Zenith\" xmlns=\"http://www.topografix.com/GPX/1/1\">\n")
-        out.write("<trk><name>${escape(name)}</name><trkseg>\n")
-        for (f in fixes) {
-            out.write("<trkpt lat=\"${f.position.lat}\" lon=\"${f.position.lon}\">")
-            out.write("<time>${Instant.ofEpochMilli(f.timeMs)}</time>")
-            f.accuracyM?.let { out.write("<hdop>${it / 5.0}</hdop>") }
-            f.speedMps?.let { out.write("<speed>$it</speed>") }
-            f.bearingDeg?.let { out.write("<course>$it</course>") }
-            out.write("</trkpt>\n")
-        }
-        out.write("</trkseg></trk>\n</gpx>\n")
+        out.write(header(name))
+        for (f in fixes) out.write(point(f))
+        out.write(FOOTER)
         out.flush()
     }
+
+    /** Start of a file; points then [FOOTER] follow. Lets a recorder append instead of rewriting. */
+    fun header(name: String = "Zenith"): String =
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
+            "<gpx version=\"1.1\" creator=\"Zenith\" xmlns=\"http://www.topografix.com/GPX/1/1\">\n" +
+            "<trk><name>${escape(name)}</name><trkseg>\n"
+
+    fun point(f: GpsFix): String = buildString {
+        append("<trkpt lat=\"${f.position.lat}\" lon=\"${f.position.lon}\">")
+        append("<time>${Instant.ofEpochMilli(f.timeMs)}</time>")
+        f.accuracyM?.let { append("<hdop>${it / 5.0}</hdop>") }
+        f.speedMps?.let { append("<speed>$it</speed>") }
+        f.bearingDeg?.let { append("<course>$it</course>") }
+        append("</trkpt>\n")
+    }
+
+    const val FOOTER = "</trkseg></trk>\n</gpx>\n"
 
     /** Text of the first descendant with [localName], searching extensions too. */
     private fun Element.child(localName: String): String? {

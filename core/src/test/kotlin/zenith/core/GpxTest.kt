@@ -34,6 +34,16 @@ class GpxTest {
     }
 
     @Test
+    fun `appended pieces read like a whole file`() {
+        val fixes = Sim.drive(listOf(0.0 to 0.0, 0.0 to 300.0), 15.0, noiseM = 2.0)
+        // What the trip recorder writes: header, points in batches, closing tags after each batch.
+        val text = Gpx.header("trip") + fixes.joinToString("") { Gpx.point(it) } + Gpx.FOOTER
+        val whole = StringWriter().also { Gpx.write(fixes, it, "trip") }.toString()
+        assertEquals(whole, text)
+        assertEquals(fixes, Gpx.read(text.byteInputStream()))
+    }
+
+    @Test
     fun `replaying a recorded trace gives the same alerts as live`() {
         val radar = Radar("R", Sim.ll(0.0, 800.0), RadarType.FIXED, 50, 0.0)
         val fixes = Sim.drive(listOf(0.0 to 0.0, 0.0 to 1_200.0), 20.0, noiseM = 4.0)
