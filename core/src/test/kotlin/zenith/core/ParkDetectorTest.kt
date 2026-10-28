@@ -56,4 +56,17 @@ class ParkDetectorTest {
         // Never a fix (started indoors).
         assertTrue(ParkDetector(0).onSilence(10 * min))
     }
+
+    @Test
+    fun `automatic start that never drives ends after five minutes`() {
+        // Activity recognition fired at home: the phone wanders a few meters, a few km/h of noise.
+        val home = ParkDetector(0, falseStartMs = 5 * min)
+        val end = run(20 * 60, home, charging = true) { t -> (t % 11).toDouble() to if (t % 5 == 0) 6 else 0 }
+        assertEquals(5 * 60, end)
+        // A real drive started the same way is not cut.
+        val car = ParkDetector(0, falseStartMs = 5 * min)
+        assertEquals(null, run(20 * 60, car, charging = true) { t -> if (t < 240) 0.0 to 0 else (t - 240) * 15.0 to 54 })
+        // Only automatic starts: a drive started by hand may wait longer before leaving.
+        assertEquals(null, run(8 * 60, ParkDetector(0), charging = true) { t -> (t % 11).toDouble() to 0 })
+    }
 }

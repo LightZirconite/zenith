@@ -167,9 +167,16 @@ class AlertEngine(
 
     /**
      * One step of the drive. [road] is the matched road in [network]; both null without road data,
-     * which keeps the straight-line behaviour.
+     * which keeps the straight-line behaviour. [motion] comes from [MotionGate]: while not moving
+     * (stopped at a light, or parked) nothing new is announced and radars already announced are
+     * left as they were; parked (phone at home), nothing is shown either, until the car drives again.
      */
-    fun step(state: KinematicState, road: RoadCandidate? = null, network: RoadNetwork? = null): AlertOutput {
+    fun step(
+        state: KinematicState,
+        road: RoadCandidate? = null,
+        network: RoadNetwork? = null,
+        motion: Motion = Motion.MOVING,
+    ): AlertOutput {
         val events = mutableListOf<AlertEvent>()
         val now = state.timeMs
         val v = state.speedMps
@@ -196,7 +203,9 @@ class AlertEngine(
         var upcoming: UpcomingRadar? = null
         val searchM = if (horizon != null) settings.upcomingRangeM else maxOf(triggerM + 200, settings.fallbackUpcomingM)
         // Virtual section starts are queued behind the radars they come from.
-        val queue = ArrayDeque(radars.near(state.position, searchM))
+        // Standing (red light, jam): heading and road match are noise, so nothing moves on until the car does.
+        val moving = motion == Motion.MOVING
+        val queue = ArrayDeque(if (moving) radars.near(state.position, searchM) else emptyList())
         while (queue.isNotEmpty()) {
             val r = queue.removeFirst()
             if (r.type.mobile && r.reportedAtMs != null && now - r.reportedAtMs > settings.mobileMaxAgeMs) continue
@@ -235,7 +244,7 @@ class AlertEngine(
 
         val distances = HashMap<String, Double>()
         val iterator = tracked.values.iterator()
-        while (iterator.hasNext()) {
+        while (moving && iterator.hasNext()) {
             val t = iterator.next()
             val r = t.radar
             val straight = Geo.distanceM(state.position, r.position)
@@ -278,7 +287,7 @@ class AlertEngine(
         overspeed(now, speedKmh, limit, spoken = sure, events)
 
         lastPosition = state.position
-        val active = tracked.values.map { t ->
+        val active = tracked.values.filter { motion != Motion.PARKED }.map { t ->
             val rl = radarLimit(t.radar, roadLimit)
             ActiveAlert(
                 radar = t.radar,

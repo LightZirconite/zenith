@@ -58,6 +58,7 @@ class DrivingSession(
     private val effective: (Int) -> Int = { SpeedRules.effectiveLimit(it, this.profile.raining, this.profile.probationary) }
     private val engine = AlertEngine(RadarIndex(radars), settings, effective)
     private var zoneTracker = ZoneTracker(zones)
+    private val motion = MotionGate()
 
     /** Swaps in a newer radar list (e.g. after a pack download) without resetting the drive. */
     fun setRadars(radars: List<Radar>) {
@@ -103,7 +104,7 @@ class DrivingSession(
         val net = network()
         val road = matcher.update(state)
         val roadLimit = road?.limitKmh
-        val out = engine.step(state, road, net)
+        val out = engine.step(state, road, net, motion = motion.update(state, fix))
         val zone = zoneTracker.step(state)
         return DriveSnapshot(
             timeMs = state.timeMs,

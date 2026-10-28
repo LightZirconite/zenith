@@ -30,9 +30,12 @@ class AlertEngineTest {
     @Test
     fun `next radar ahead is known long before its alert`() {
         val far = Radar("far", Sim.ll(0.0, 2_400.0), RadarType.FIXED, 90, directionDeg = 0.0)
-        val first = run(listOf(far), 25.0).first()
+        // Shown as soon as the car is known to be driving, a few seconds in.
+        val snaps = run(listOf(far), 25.0)
+        val first = snaps.first { it.upcoming != null }
+        assertTrue(snaps.indexOf(first) <= 5, "shown at fix ${snaps.indexOf(first)}")
         assertEquals("far", first.upcoming?.radar?.id)
-        assertEquals(2_400.0, first.upcoming!!.distanceM, 5.0)
+        assertEquals(2_400.0 - Sim.frame.toXY(first.position).y, first.upcoming!!.distanceM, 5.0)
         assertTrue(first.alerts.isEmpty())
     }
 

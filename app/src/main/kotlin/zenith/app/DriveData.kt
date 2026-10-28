@@ -14,6 +14,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import zenith.core.LatLon
 import zenith.core.RadarData
 import zenith.core.RadarPack
@@ -58,7 +59,8 @@ class DriveData(context: Context, private val scope: CoroutineScope) {
     private val pending = ConcurrentHashMap.newKeySet<RoadTiles.Key>()
     private val failedAtMs = ConcurrentHashMap<RoadTiles.Key, Long>()
     private val mutex = Mutex()
-    private var availableTiles: Set<String>? = null
+    /** Published tiles and their sizes (manifest); null when the manifest could not be read. */
+    private var availableTiles: Map<String, Long?>? = null
 
     @Volatile
     var network: RoadNetwork? = null
@@ -67,10 +69,10 @@ class DriveData(context: Context, private val scope: CoroutineScope) {
     private val _status = MutableStateFlow(DataStatus())
     val status: StateFlow<DataStatus> = _status
 
-    /** Loads cached radars and zones now, refreshes them from GitHub when older than a day. */
+    /** Loads cached radars and zones now, refreshes them from GitHub when older than [RADARS_MAX_AGE_MS]. */
     fun loadRadars(onLoaded: (RadarData) -> Unit) = scope.launch(Dispatchers.IO) {
         if (radarFile.exists()) publishRadars(onLoaded)
-        if (!radarFile.exists() || age(radarFile) > DAY_MS) {
+        if (!radarFile.exists() || age(radarFile) > RADARS_MAX_AGE_MS) {
             runCatching { download("radars.json", radarFile) }
                 .onSuccess { publishRadars(onLoaded) }
                 // With a cached list the drive goes on with it: nothing to warn about.
@@ -94,8 +96,18 @@ class DriveData(context: Context, private val scope: CoroutineScope) {
                     val file = File(tileDir, key.fileName)
                     val segments = runCatching {
                         if (available != null && key.fileName !in available) return@runCatching emptyList()
-                        if (!file.exists() || age(file) > 30 * DAY_MS) download(key.fileName, file)
-                        RoadTiles.parse(GZIPInputStream(file.inputStream()).bufferedReader().use { it.readText() })
+                        // A size different from the manifest's: the tile was rebuilt (weekly), fetch the new one.
+                        val outdated = available?.get(key.fileName)?.let { it != file.length() } ?: (age(file) > 30 * DAY_MS)
+                        if (!file.exists()) {
+                            download(key.fileName, file)
+                        } else if (outdated) {
+                            // Offline: the cached tile still does.
+                            runCatching { download(key.fileName, file) }.onFailure { Log.w("Zenith", "data tile refresh", it) }
+                        }
+                        runCatching { RoadTiles.parse(GZIPInputStream(file.inputStream()).bufferedReader().use { it.readText() }) }
+                            // A damaged cached tile would fail forever: fetched again on the next try.
+                            .onFailure { file.delete() }
+                            .getOrThrow()
                     }.onFailure {
                         Log.w("Zenith", "data tile ${key.fileName}", it)
                         failed = "Données tuile ${key.fileName} indisponibles"
@@ -113,7 +125,7 @@ class DriveData(context: Context, private val scope: CoroutineScope) {
         }
     }
 
-    private fun loadManifest(): Set<String>? {
+    private fun loadManifest(): Map<String, Long?>? {
         if (!manifestFile.exists() || age(manifestFile) > DAY_MS) {
             // Without it every tile is simply tried: a failing tile says so itself.
             runCatching { download("manifest.json", manifestFile) }.onFailure { Log.w("Zenith", "data manifest", it) }
@@ -121,7 +133,7 @@ class DriveData(context: Context, private val scope: CoroutineScope) {
         return runCatching {
             val manifest = Json.parseToJsonElement(manifestFile.readText()).jsonObject
             dropOutdatedTiles(manifest["schema"]?.jsonPrimitive?.intOrNull ?: 1)
-            manifest.getValue("tiles").jsonObject.keys
+            manifest.getValue("tiles").jsonObject.mapValues { (_, size) -> size.jsonPrimitive.longOrNull }
         }.getOrNull().also { availableTiles = it }
     }
 
@@ -171,5 +183,7 @@ class DriveData(context: Context, private val scope: CoroutineScope) {
         const val BASE = "https://github.com/LightZirconite/zenith/releases/download/data"
         const val DAY_MS = 24 * 3_600_000L
         const val RETRY_MS = 60_000L
+        /** radars.json is rebuilt six times a day (new official cameras, Lufop). */
+        const val RADARS_MAX_AGE_MS = 4 * 3_600_000L
     }
 }

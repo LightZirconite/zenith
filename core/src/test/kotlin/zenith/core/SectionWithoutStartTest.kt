@@ -49,7 +49,8 @@ class SectionWithoutStartTest {
             val events = drive(motorway, 3_000.0, seed).flatMap { it.events }
             val started = events.filterIsInstance<AlertEvent.SectionStarted>().single()
             assertTrue(started.resumed, "seed $seed")
-            assertEquals(2_000.0, started.lengthM, 60.0)
+            // Picked up once the car is known to be driving, a few seconds in.
+            assertEquals(1_900.0, started.lengthM, 120.0)
             assertTrue(events.filterIsInstance<AlertEvent.Approach>().none { it.radar.type == RadarType.SECTION_START })
             assertEquals(1, events.filterIsInstance<AlertEvent.SectionEnded>().size)
         }

@@ -79,6 +79,9 @@ class DriveService : Service(), LocationListener {
     @Volatile
     private var zoneBoxes: List<Pair<ControlZone, BBox>> = emptyList()
     private var lastNearbyMs = 0L
+    /** Wall time of a vehicle exit received while still fast; 0 when none is pending. */
+    @Volatile
+    private var vehicleLeftAtMs = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -88,9 +91,12 @@ class DriveService : Service(), LocationListener {
             return START_NOT_STICKY
         }
         if (intent?.action == ACTION_MOTION_EXIT) {
-            // The phone left the vehicle: a drive it started ends once the car is slow or stopped.
+            // The phone left the vehicle: a drive it started ends once the car is slow or stopped,
+            // now or within a few minutes (the event often comes while still rolling into the driveway).
             val slow = (DriveState.snapshot.value?.speedKmh ?: 0) < 10
-            if (started && origin == DriveOrigin.MOTION && slow) stopSelf()
+            if (started && origin == DriveOrigin.MOTION) {
+                if (slow) stopSelf() else vehicleLeftAtMs = System.currentTimeMillis()
+            }
             if (!started) stopSelf()
             return if (started) START_STICKY else START_NOT_STICKY
         }
@@ -148,7 +154,8 @@ class DriveService : Service(), LocationListener {
         data = live
         session = DrivingSession({ live.network }, emptyList())
         recorder = TripRecorder(this)
-        parking = ParkDetector(System.currentTimeMillis())
+        // Activity recognition sometimes fires at home: such a drive ends if it never really drives.
+        parking = ParkDetector(System.currentTimeMillis(), falseStartMs = if (origin == DriveOrigin.MOTION) FALSE_START_MS else null)
         watchWeather()
         scope.launch { live.status.collect(DriveState::data) }
         live.loadRadars { pack ->
@@ -254,6 +261,12 @@ class DriveService : Service(), LocationListener {
             process(fix)
             val s = DriveState.snapshot.value
             if (parking?.onFix(wallMs, fix.position, s?.speedKmh, s?.road?.segment?.roadClass, charging()) == true) endByItself()
+            val left = vehicleLeftAtMs
+            when {
+                left == 0L -> Unit
+                wallMs - left > VEHICLE_EXIT_GRACE_MS -> vehicleLeftAtMs = 0
+                (s?.speedKmh ?: 0) < 10 -> stopSelf()
+            }
         }
     }
 
@@ -452,6 +465,9 @@ class DriveService : Service(), LocationListener {
         private const val ACTION_MOTION_EXIT = "zenith.app.MOTION_EXIT"
         private const val ACTION_RESHOW = "zenith.app.RESHOW"
         private const val WEATHER_EVERY_MS = 10 * 60_000L
+        private const val FALSE_START_MS = 5 * 60_000L
+        /** A vehicle exit received while fast stops the drive at the first slow fix within this delay. */
+        private const val VEHICLE_EXIT_GRACE_MS = 3 * 60_000L
 
         fun start(context: Context) =
             ContextCompat.startForegroundService(context, Intent(context, DriveService::class.java))
