@@ -355,7 +355,7 @@ def lufop_items(path):
         except (KeyError, TypeError, ValueError):
             continue
         item = {"id": f"lufop-{rid}", "pos": pos, "type": kind, "limit": speed(r.get("vitesse")), "dir": None,
-                "azimut": speed(r.get("azimut"))}
+                "azimut": speed(r.get("azimut")), "flash": (r.get("flash") or "").strip() or "-"}
         if kind == "MOBILE":
             item["at"] = lufop_time(r.get("update"))  # the app ignores stale mobile reports
         items.append(item)
@@ -415,6 +415,7 @@ def merge(official_radars, osm, sections, lufop=()):
     # Lufop last: fills limits, confirms, and adds what the others miss (mobile, roadwork…).
     # Its undocumented "azimut" is compared with known directions (report only, not used yet).
     azimut_diffs = []
+    by_flash = {}
     for item in lufop:
         match = min(nearby(item["pos"], MERGE_M), key=lambda o: distance(o["pos"], item["pos"]), default=None)
         if match is None:
@@ -424,14 +425,20 @@ def merge(official_radars, osm, sections, lufop=()):
             match["limit"] = match["limit"] or item["limit"]
             match["src"].append("lufop")
             if match.get("dir") is not None and item.get("azimut") is not None:
-                azimut_diffs.append(abs((item["azimut"] - match["dir"] + 180) % 360 - 180))
+                diff = abs((item["azimut"] - match["dir"] + 180) % 360 - 180)
+                azimut_diffs.append(diff)
+                by_flash.setdefault(item["flash"], []).append(diff)
         else:
-            extra.append({k: v for k, v in item.items() if k != "azimut"} | {"src": ["lufop"]})
+            extra.append({k: v for k, v in item.items() if k not in ("azimut", "flash")} | {"src": ["lufop"]})
     if azimut_diffs:
         same = sum(1 for d in azimut_diffs if d <= 30) / len(azimut_diffs)
         opposite = sum(1 for d in azimut_diffs if d >= 150) / len(azimut_diffs)
         summary([f"### Azimut Lufop contre sens connus : {len(azimut_diffs)} radars comparés, "
-                 f"{same:.0%} dans le même sens (±30°), {opposite:.0%} à l'opposé. Seuil pour s'en servir : 95 %."])
+                 f"{same:.0%} dans le même sens (±30°), {opposite:.0%} à l'opposé. Seuil pour s'en servir : 95 %.",
+                 "", "Par valeur de « flash » (si l'une donne le sens à coup sûr, elle tranche) :",
+                 "| flash | radars | même sens | opposé |", "|---|---|---|---|"]
+                + [f"| {f} | {len(d)} | {sum(1 for x in d if x <= 30) / len(d):.0%} | {sum(1 for x in d if x >= 150) / len(d):.0%} |"
+                   for f, d in sorted(by_flash.items(), key=lambda kv: -len(kv[1]))])
 
     radars = official_radars + extra
     for k, s in enumerate(sections):
