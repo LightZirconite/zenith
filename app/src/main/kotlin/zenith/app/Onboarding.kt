@@ -87,8 +87,9 @@ private val Accent = Color(0xFF0A84FF)
 private val Dim = Color(0xFF8E8E93)
 
 /**
- * First launch: every permission Zenith needs, each with the reason in plain words, so none of
- * Android's prompts comes as a surprise. Only the location is required to start.
+ * First launch, and again once when a new version of Zenith asks for something new: every
+ * permission, each with the reason in plain words, so none of Android's prompts comes as a
+ * surprise. Only the location is required to start.
  */
 @Composable
 fun Onboarding(
@@ -98,17 +99,26 @@ fun Onboarding(
     onInstalls: () -> Unit,
     onBattery: () -> Unit,
     onDone: () -> Unit,
+    /** Shown again for new permissions: "Nouveautés" instead of "Bienvenue". */
+    returning: Boolean = false,
+    motionWanted: Boolean = true,
+    onMotion: () -> Unit = {},
+    onMedia: () -> Unit = {},
 ) {
     Column(
         Modifier.fillMaxSize().background(Bg).safeDrawingPadding().padding(horizontal = 20.dp, vertical = 12.dp),
     ) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             Spacer(Modifier.height(24.dp))
-            Text("Bienvenue", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Bold)
+            Text(if (returning) "Nouveautés" else "Bienvenue", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(8.dp))
             Text(
-                "Zenith a besoin de quelques autorisations pour t'alerter, même écran éteint ou derrière Waze. " +
-                    "Android va afficher ses propres fenêtres : voici pourquoi chacune est là.",
+                if (returning) {
+                    "Zenith sait faire de nouvelles choses. Il lui faut quelques autorisations de plus : voici pourquoi chacune est là."
+                } else {
+                    "Zenith a besoin de quelques autorisations pour t'alerter, même écran éteint ou derrière Waze. " +
+                        "Android va afficher ses propres fenêtres : voici pourquoi chacune est là."
+                },
                 color = Dim,
                 fontSize = 16.sp,
             )
@@ -139,6 +149,29 @@ fun Onboarding(
                 text = "Pour qu'Android ne coupe pas les alertes au milieu d'un long trajet. Zenith ne consomme que pendant la conduite.",
                 granted = permissions.battery,
                 onClick = onBattery,
+            )
+            if (permissions.motionAvailable && motionWanted) {
+                Step(
+                    title = "Démarrage en roulant",
+                    text = when {
+                        !permissions.activity ->
+                            "Zenith démarre seul dès que le téléphone sent que tu roules en voiture, même fermé, presque sans batterie. " +
+                                "D'abord « Activité physique », puis la position « Toujours autoriser »."
+                        !permissions.backgroundLocation ->
+                            "Encore la position « Toujours autoriser » : sans elle, Android coupe le GPS d'une conduite démarrée seule."
+                        else -> "Zenith démarre seul quand tu roules en voiture et s'arrête une fois garé."
+                    },
+                    granted = permissions.motion,
+                    onClick = onMotion,
+                )
+            }
+            Step(
+                title = "Musique",
+                text = "Titre en cours et commandes de Spotify ou de ton lecteur pendant la conduite, sans compte. Android appelle cela " +
+                    "« accès aux notifications » : Zenith n'y lit que le lecteur. Si l'option est grisée : Infos de l'appli Zenith → ⋮ → " +
+                    "Autoriser les paramètres restreints.",
+                granted = permissions.media,
+                onClick = onMedia,
             )
         }
         Spacer(Modifier.height(12.dp))

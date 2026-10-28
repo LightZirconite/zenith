@@ -71,7 +71,21 @@ class MainActivity : ComponentActivity() {
             val navApps = remember(resumeCount) { NavApp.installed(context) }
             var permissionResults by remember { mutableIntStateOf(0) }
             val permissions = remember(resumeCount, permissionResults) { Permissions.read(context) }
-            var onboarded by remember { mutableStateOf(prefs.getBoolean(KEY_ONBOARDED, false)) }
+            // Version of the welcome screen last completed (1: before "Démarrage en roulant" and "Musique").
+            var welcomeDone by remember {
+                mutableIntStateOf(prefs.getInt(KEY_WELCOME, if (prefs.getBoolean(KEY_ONBOARDED, false)) 1 else 0))
+            }
+            val onboarded = welcomeDone > 0
+            // A new version of the welcome screen comes back once, if one of its new steps is not granted yet.
+            val newSteps = (permissions.motionAvailable && settings.motionStart && !permissions.motion) || !permissions.media
+            val showWelcome = !onboarded || (welcomeDone < WELCOME_VERSION && newSteps)
+            // Everything new granted (here or in the settings): this version of the welcome is done.
+            LaunchedEffect(onboarded, newSteps) {
+                if (onboarded && !newSteps && welcomeDone < WELCOME_VERSION) {
+                    prefs.edit { putInt(KEY_WELCOME, WELCOME_VERSION) }
+                    welcomeDone = WELCOME_VERSION
+                }
+            }
             // "Car connected · tap to start" notification.
             LaunchedEffect(startNow, permissions.location) {
                 if (startNow && permissions.location) {
@@ -82,7 +96,19 @@ class MainActivity : ComponentActivity() {
 
             val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
                 permissionResults++
-                if (onboarded && result[Manifest.permission.ACCESS_FINE_LOCATION] == true) DriveService.start(context)
+                if (!showWelcome && result[Manifest.permission.ACCESS_FINE_LOCATION] == true) DriveService.start(context)
+            }
+            // "Démarrage en roulant": activity recognition first, then the location "all the time".
+            val onMotion = {
+                val details = { Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")) }
+                val activity = Motion.activityPermission()
+                when {
+                    !permissions.activity && activity != null -> requestOrSettings(arrayOf(activity), { launcher.launch(it) }, details)
+                    // Android 11+ answers this one with its own settings page ("Toujours autoriser").
+                    !permissions.backgroundLocation && Build.VERSION.SDK_INT >= 29 ->
+                        requestOrSettings(arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION), { launcher.launch(it) }, details)
+                    else -> Unit
+                }
             }
 
             // While driving: screen stays on, and leaving the app opens the picture-in-picture window.
@@ -112,7 +138,7 @@ class MainActivity : ComponentActivity() {
 
             if (pip) {
                 PipScreen(snapshot, radars, zones)
-            } else if (showSettings && onboarded) {
+            } else if (showSettings && !showWelcome) {
                 SettingsScreen(
                     settings = settings,
                     version = remember { runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull().orEmpty() },
@@ -139,20 +165,13 @@ class MainActivity : ComponentActivity() {
                     mediaAllowed = permissions.media,
                     onAllowMedia = { openSettings(NowPlaying.accessIntent(context)) },
                     permissions = permissions,
-                    onMotionPermission = {
-                        val details = { Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")) }
-                        val activity = Motion.activityPermission()
-                        when {
-                            !permissions.activity && activity != null -> requestOrSettings(arrayOf(activity), { launcher.launch(it) }, details)
-                            // Android 11+ answers this one with its own settings page ("Toujours autoriser").
-                            !permissions.backgroundLocation && Build.VERSION.SDK_INT >= 29 ->
-                                requestOrSettings(arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION), { launcher.launch(it) }, details)
-                        }
-                    },
+                    onMotionPermission = onMotion,
                 )
-            } else if (!onboarded) {
+            } else if (showWelcome) {
                 Onboarding(
                     permissions = permissions,
+                    returning = onboarded,
+                    motionWanted = settings.motionStart,
                     onLocation = {
                         requestOrSettings(Permissions.locationPermissions(), { launcher.launch(it) }) {
                             Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
@@ -165,9 +184,14 @@ class MainActivity : ComponentActivity() {
                     },
                     onInstalls = { openSettings(Permissions.installsIntent(context)) },
                     onBattery = { openSettings(Permissions.batteryIntent(context)) },
+                    onMotion = onMotion,
+                    onMedia = { openSettings(NowPlaying.accessIntent(context)) },
                     onDone = {
-                        prefs.edit { putBoolean(KEY_ONBOARDED, true) }
-                        onboarded = true
+                        prefs.edit {
+                            putBoolean(KEY_ONBOARDED, true)
+                            putInt(KEY_WELCOME, WELCOME_VERSION)
+                        }
+                        welcomeDone = WELCOME_VERSION
                     },
                 )
             } else {
@@ -282,5 +306,9 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val ACTION_START_DRIVE = "zenith.app.START_DRIVE"
         private const val KEY_ONBOARDED = "onboarded"
+        private const val KEY_WELCOME = "welcome_version"
+
+        /** Raise it when the welcome screen gains a step: it comes back once for the users missing it. */
+        private const val WELCOME_VERSION = 2
     }
 }
