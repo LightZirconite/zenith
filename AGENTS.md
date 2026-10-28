@@ -7,7 +7,7 @@ Lis ce fichier en entier avant de toucher au projet. Le README décrit le projet
 - **Un Coyote gratuit, natif et minimaliste.** L'app doit être la plus simple et la plus rapide possible : un écran, une vitesse, une limite, la prochaine alerte. Chaque ajout doit justifier sa place à l'écran.
 - **N'annoncer que ce qui est sur la route suivie.** Un radar sur une route parallèle, une bretelle qu'on ne prend pas ou une autre route « devant à vol d'oiseau » ne doit jamais être annoncé ni affiché comme « prochain ». Mieux vaut ne rien afficher qu'une information fausse ; mais un radar réel ne doit jamais être raté (en cas de doute sur la route, on alerte).
 - **Des alertes à la Coyote** : sons forts et progressifs (bips qui s'accélèrent à l'approche quand on est trop vite), voix courte en français, ça marche écran éteint et Waze/Maps devant.
-- **Le maximum de données gratuites, rassemblées par nos scripts.** La CI récupère tout ce qui est gratuit (liste officielle, OSM, Lufop avec la clé de l'auteur, et toute nouvelle source gratuite) et le fusionne dans de simples fichiers de la release `data`. L'app les télécharge régulièrement. Pas de serveur : la base grossit et se met à jour toute seule, jour après jour.
+- **Le maximum de données gratuites, rassemblées par nos scripts.** La CI récupère tout ce qui est gratuit (liste officielle data.gouv, carte officielle Sécurité routière, OSM, Lufop avec la clé de l'auteur, et toute nouvelle source gratuite) et le fusionne dans de simples fichiers de la release `data`. L'app les télécharge régulièrement. Pas de serveur : la base grossit et se met à jour toute seule, jour après jour.
 - **Dépôt public assumé** : la CI GitHub est gratuite et illimitée, il n'y a aucun intérêt à fermer le code.
 
 ## Ce qu'est Zenith
@@ -34,20 +34,23 @@ app/       Android Compose : DriveService (GPS 1 Hz, premier plan), DriveData (t
            DriveScreen, DriveMap (MapLibre), Onboarding (autorisations expliquées), Speaker (TTS FR),
            Tones, TripRecorder (GPX), Updater (auto-mise à jour).
            RoadHorizon : radars accrochés aux routes, chemin le plus probable, routes atteignables.
-pipeline/  Python : build_roads.py (tuiles de limitations), build_radars.py (osm | merge | check),
+pipeline/  Python : build_roads.py (tuiles de limitations, zones bâties), build_radars.py (osm | merge | check),
            harvest_lufop.py (base Lufop qui grossit chaque jour), lufop_db.sh (base chiffrée).
 .github/workflows/
   release.yml    push sur main touchant l'app → tests + APK signé + release vX (latest)
-  build-apk.yml  PR → tests + APK debug
+  build-apk.yml  PR ou lancement manuel → tests + APK debug (sert à valider une branche avant main)
   data.yml       lundi → extrait OSM France → tuiles + osm_radars.json + radars.json
-  radars.yml     chaque jour → récolte Lufop (≤150 requêtes) + fusion → radars.json, lufop.json.enc
+  radars.yml     6 fois par jour, heures irrégulières + délai aléatoire → récolte Lufop (≤150 requêtes
+                 sur 24 h glissantes) + fusion → radars.json, official.json, lufop.json.enc
 ```
+data.yml et radars.yml partagent le groupe de concurrence `data-release` (ils publient les mêmes fichiers).
 
 ### Release `data` (la « base de données »)
 
 | Fichier | Produit par | Contenu |
 |---|---|---|
-| `radars.json` | data.yml, radars.yml | Fusion officiel (data.gouv) + OSM + Lufop, lue par l'app |
+| `radars.json` | data.yml, radars.yml | Fusion officiel (data.gouv + carte Sécurité routière) + OSM + Lufop, lue par l'app ; `zones` = itinéraires de contrôle |
+| `official.json` | data.yml, radars.yml | Dernière copie valide des deux sources officielles et cache des détails de la carte (30 j) : si une source tombe, la fusion reprend sa copie |
 | `osm_radars.json` | data.yml | Radars et relations `enforcement` OSM (sens, tronçons) |
 | `lufop.json.enc` | radars.yml | Notre base Lufop **chiffrée** (AES-256, secret `LUFOP_DB_KEY`) : zones du quadrillage + radars vus (`first`, `seen`, `missing`) |
 | `roads_<i>_<j>.json.gz` | data.yml | Tuiles 0,5° (`i = floor(lat*2)`, `j = floor(lon*2)`) de segments routiers avec limitation |
@@ -55,7 +58,9 @@ pipeline/  Python : build_roads.py (tuiles de limitations), build_radars.py (osm
 
 La release `data` est **prerelease et jamais latest** : sinon `releases/latest/download/zenith.apk` casse.
 
-Format d'un segment de tuile : `[id, from, to, oneway, fwd, bwd, src, classe, nom, [lat, lon, ...]]` avec `src` 0 = explicite, 1 = implicite (`FR:urban`…), 2 = déduit de la classe. Les indices de classe sont dans `pipeline/build_roads.py` (`CLASSES`) et `core/DataPacks.kt` : **les deux listes doivent rester identiques.**
+Format d'un segment de tuile : `[id, from, to, oneway, fwd, bwd, src, classe, nom, [lat, lon, ...]]` avec `src` 0 = explicite, 1 = implicite (`FR:urban`…), 2 = déduit de la classe, 3 = défaut du lieu (route sans aucune limite : 50 en zone bâtie, 80 hors zone sur double sens ; `LimitSource.AREA`, affichée en anneau gris, jamais dite ni prêtée à un radar).
+
+Format d'une zone de `radars.json` : `{"id": "I_01_001", "kind": "ITINERARY", "pts": [lat, lon, ...]}` (itinéraire de contrôle-leurres de la carte officielle : un radar autonome tourne entre plusieurs cabines). Une fin de tronçon (`SECTION_END`) qui porte `len` n'a pas de début connu : l'app le place sur la route. Les indices de classe sont dans `pipeline/build_roads.py` (`CLASSES`) et `core/DataPacks.kt` : **les deux listes doivent rester identiques.**
 
 ## Commandes
 
@@ -65,12 +70,12 @@ Format d'un segment de tuile : `[id, from, to, oneway, fwd, bwd, src, classe, no
 ./gradlew :core:replay --args="trajet.gpx radars.json tuiles/"   # rejoue un trajet partagé depuis l'app
 python pipeline/build_roads.py extrait.osm.pbf out/tiles
 python pipeline/build_radars.py osm extrait.osm.pbf out/osm_radars.json
-python pipeline/build_radars.py merge out/osm_radars.json out/lufop.json out/radars.json   # lufop.json peut être "-"
-LUFOP_API_KEY=... python pipeline/harvest_lufop.py out/lufop.json 150
+python pipeline/build_radars.py merge out/osm_radars.json out/lufop.json out/radars.json out/official.json   # lufop.json peut être "-"
+LUFOP_API_KEY=... python pipeline/harvest_lufop.py out/lufop.json 150 [all]   # 150 sur 24 h glissantes ; all = tout le reste d'un coup
 GH_REPO=LightZirconite/zenith LUFOP_DB_KEY=$(cat ~/.zenith/lufop-db.key) pipeline/lufop_db.sh fetch out/lufop.json
 ```
 
-Tester le pipeline en local sur un petit extrait : `https://download.geofabrik.de/europe/france/corse-latest.osm.pbf` (35 Mo, environ 20 s). `pip install osmium` (pyosmium) n'est nécessaire que pour `build_roads.py` et l'étape `osm`.
+Tester le pipeline en local sur un petit extrait : `https://download.geofabrik.de/europe/france/corse-latest.osm.pbf` (35 Mo, environ 20 s). `pip install osmium` (pyosmium) n'est nécessaire que pour `build_roads.py` et l'étape `osm`. Sans accès à Geofabrik, un petit fichier `.osm` XML écrit à la main se lit pareil (ids triés : nœuds, puis chemins par id croissant).
 
 ## Environnement de l'auteur
 
@@ -83,6 +88,7 @@ Tester le pipeline en local sur un petit extrait : `https://download.geofabrik.d
 
 ## Conventions
 
+- **On travaille directement sur `main`** (demande de l'auteur), pas de PR. Un push sur `main` publie une release que le téléphone installe seul : faire compiler l'APK avant (`build-apk.yml` lancé à la main sur une branche de travail), puis pousser sur `main`.
 - Messages de commit en français, Conventional Commits (`feat:`, `fix:`, `refactor:`, `docs:`…), titre court, puis le détail en puces.
 - **Aucune ligne `Co-Authored-By` ni aucune signature ou mention d'IA** dans les commits, les PR ou le code. L'auteur des commits est `LightZirconite <123307773+LightZirconite@users.noreply.github.com>` (`git config user.name` / `user.email` dans le dépôt).
 - Code et commentaires de code en anglais ; tout texte visible par l'utilisateur en français.
@@ -99,6 +105,9 @@ Tester le pipeline en local sur un petit extrait : `https://download.geofabrik.d
 - **Notification** : solide tant que « Arrêter » n'est pas touché : balayée (permis depuis Android 14), elle revient aussitôt (`setDeleteIntent` → `ACTION_RESHOW`) et elle est reposée toutes les 30 s. Vitesse et limite en titre, prochain radar en texte ; sur Android 16, puce de vitesse dans la barre d'état (`setRequestPromotedOngoing`, `POST_PROMOTED_NOTIFICATIONS`, ne pas la coloriser sinon Android refuse la promotion).
 - **Écran de lancement** : thème `Theme.Zenith` noir, logo sur fond sombre (Android 12+), logo qui respire sur l'écran d'accueil.
 - **Démo cachée** : appui long sur le logo de l'écran d'accueil → `DriveService.startDemo`. `core/DemoDrive.kt` rejoue environ 2 min sur la vraie D 107 (tuile de Corse `core/src/main/resources/demo/roads_85_19.json`, embarquée dans l'APK) : radar 1 passé trop vite, radar 2 à la limite, zone 50 annoncée. Mêmes sons, voix, carte, notification et PiP que la conduite réelle ; ni GPS, ni GPX, ni téléchargement. Puce « Démo » à l'écran. Les limites absentes de la D 107 sont complétées pour la démo seulement.
+- **Itinéraires de contrôle** : puce « Itinéraire de contrôle · 12 km », ligne orange pointillée sur la carte (et en PiP), ligne dans la notification, carillon + « Itinéraire de contrôle sur X km, radar possible » à l'entrée, rien à la sortie.
+- **Sons** (`AudioDucker.kt`) : bips et voix baissent la musique (focus `TRANSIENT_MAY_DUCK` partagé par `TonePlayer` et `Speaker`, un seul propriétaire sinon l'un rend le focus de l'autre), rendu 1,5 s après le dernier son pour que les bips rapides ne fassent pas pomper la musique.
+- **Fil de conduite** : `DriveService` traite chaque fix sur son propre fil (`zenith-drive`, un fix après l'autre) : l'horizon routier et l'écriture du GPX n'encombrent plus l'interface. Une étape qui lève une exception est journalisée et sautée. Les tuiles autour de la dernière position connue se chargent dès le démarrage.
 - **Réglages** (`SettingsScreen.kt`, `UserSettings.kt` ; ne pas nommer l'objet `Settings`, conflit avec `android.provider.Settings`) : jeune permis, pluie (aussi en puce pendant la conduite, non conservée d'un trajet à l'autre), voix ou bips seuls, voiture pour le démarrage auto, partage du dernier trajet GPX (FileProvider). Le profil est appliqué en direct à `DrivingSession.profile`.
 - **Démarrage auto en voiture** (`CarLink.kt`, Android 13+) : la voiture est choisie par l'écran compagnon d'Android (`CompanionDeviceManager`, sans autorisation Bluetooth), puis `CarPresenceService` reçoit connexion et déconnexion. Si Android refuse le service de premier plan depuis l'arrière-plan, une notification « Voiture connectée · touche pour démarrer » prend le relais. À la déconnexion, seule une conduite démarrée par la voiture s'arrête.
 - **Tunnels** : sans fix depuis 2,5 s, `DrivingSession.coast` avance la voiture le long de la route suivie à sa dernière vitesse (60 s max), puce « Tunnel · position estimée ».
@@ -113,6 +122,10 @@ Tester le pipeline en local sur un petit extrait : `https://download.geofabrik.d
 - `mostProbablePath` suit la route (même nom/`ref`, puis même classe, puis virage nettement le plus droit) et **s'arrête au premier embranchement ambigu**. Le « prochain radar » et la prochaine limite ne viennent que de ce chemin, distance par la route.
 - `reachable` : Dijkstra sur toutes les branches jusqu'à 3,2 km, portée constante (sinon un radar suivi sortirait de la portée en ralentissant et serait annoncé deux fois). Un radar hors du chemin probable n'alerte qu'à 500 m (`branchAlertM`) : la bretelle n'alerte pas toute l'autoroute, mais prévient avant la sortie.
 - Repli sûr : radar à plus de 30 m de toute route, ou pas de tuile chargée → ancienne logique du cône devant la voiture (le « prochain » est alors limité à 3 km).
+- **Tronçon sans début** : une fin de tronçon avec `len` crée un début virtuel (`<id>>start`, type `SECTION_START`) placé sur le chemin probable `len` mètres avant la fin ; il est annoncé, affiché comme prochain, et son passage démarre la moyenne. Voiture déjà dans le tronçon (démarrage, tuile chargée tard) : « Tronçon en cours » avec ce qui reste (au moins 300 m). Seulement si le sens est connu (sens mesuré ou chaussée à sens unique) : sinon un tronçon s'afficherait dans l'autre sens.
+- **Doublons** : un radar du même type à moins de 150 m d'un radar déjà annoncé (même caméra, deux sources) est suivi en silence.
+- Les caméras de tronçon ne donnent jamais « flash probable » au passage : seule la moyenne compte.
+- **Itinéraires de contrôle** (`ControlZones.kt`) : la voiture doit rouler à moins de 40 m de la ligne et dans son axe (±35°, les deux sens) pendant 3 fixes pour y entrer, en sortir pendant 5 fixes en roulant (un arrêt ne compte pas). Pas de seconde annonce dans les 3 min (rond-point hors de la ligne).
 
 ## Pièges déjà rencontrés
 
@@ -121,7 +134,9 @@ Tester le pipeline en local sur un petit extrait : `https://download.geofabrik.d
 - **Date des mobiles Lufop** : `update` doit passer dans `radars.json` (`at`, secondes epoch, heure de Paris) ; sans date, un mobile vieux d'une semaine serait annoncé comme en direct. `RadarPack` ne garde la date que pour les types mobiles.
 - **Quota Lufop partagé** : la clé sert à la CI (150/jour) ; des requêtes depuis le téléphone (mobiles en direct) prendraient sur les mêmes 200/jour.
 - **Android 12+** interdit de lancer un service de premier plan `location` depuis l'arrière-plan (démarrage auto au Bluetooth) : passer par `CompanionDeviceManager`.
-- **Maven Central en 429** derrière certains proxys (conteneurs cloud) : un init script local `~/.gradle/init.d/` qui met en premier le miroir `https://maven-central.storage-download.googleapis.com/maven2/` suffit. Ne pas l'ajouter au dépôt.
+- **Maven Central en 429** derrière certains proxys (conteneurs cloud) : un init script local `~/.gradle/init.d/mirror.gradle` qui **remplace** `mavenCentral()` par le miroir `https://maven-central.storage-download.googleapis.com/maven2/` suffit (`settingsEvaluated` : `repos.removeAll { it.name == "MavenRepo" }` puis `repos.maven { url = ... }`, pour `pluginManagement` et `dependencyResolutionManagement`). L'ajouter seulement à la fin ne suffit pas : Gradle s'arrête sur le 429. Ne pas l'ajouter au dépôt.
+- **Crons GitHub non garantis** : le premier créneau quotidien de `radars.yml` (28/10/2026) n'a jamais tourné. D'où les 6 créneaux et le quota glissant : un créneau sauté est rattrapé, le quota jamais dépassé.
+- **Conteneur cloud** : data.gouv.fr, Geofabrik et Open-Meteo y sont injoignables ; l'API de la carte Sécurité routière et les releases GitHub répondent. Tester `merge` en remplaçant `official()` par une fonction qui lève : la copie `official.json` prend le relais.
 
 - **AGP 9** : Kotlin intégré, ne **pas** appliquer `org.jetbrains.kotlin.android` ; `kotlin { compilerOptions { } }` au lieu de `kotlinOptions`.
 - **compileSdk 37** obligatoire avec les AndroidX actuels (targetSdk 36).
@@ -145,22 +160,24 @@ Tester le pipeline en local sur un petit extrait : `https://download.geofabrik.d
 
 ## Données : règles
 
-- Toutes les sources sont bienvenues. Chacune garde sa trace dans le champ `src` du radar (`gouv`, `osm`, `lufop`, combinées par `+`).
-- Fusion : regroupement à 80 m. La liste officielle fait foi pour la position, le type et la limite ; OSM apporte le sens et les tronçons ; Lufop ajoute ce qui manque et confirme.
+- Toutes les sources sont bienvenues. Chacune garde sa trace dans le champ `src` du radar (`gouv`, `sr`, `osm`, `lufop`, combinées par `+`).
+- Fusion : regroupement à 80 m. La liste officielle fait foi pour la position, le type et la limite ; la carte Sécurité routière (`https://radars.securite-routiere.gouv.fr/radars/all?_format=json`, mêmes ids que data.gouv) ajoute ses radars plus récents, les longueurs de tronçon (détail `radars/<id>?_format=json`, `radartronconkm`) et les itinéraires ; OSM apporte le sens et les tronçons ; Lufop ajoute ce qui manque et confirme.
+- Carte Sécurité routière : détails demandés seulement pour les tronçons et les radars absents de data.gouv (une centaine), 0,3 s entre deux, gardés 30 jours dans `official.json`. `radardirection` est un texte (« Paris vers Lille ») : pas encore exploité.
 - Ne jamais deviner une limitation à l'aveugle : une route sans tag reste sans limite plutôt que d'afficher un 80 faux dans un village. Les limites déduites (`src` 2) s'affichent avec un anneau gris.
 - **La base Lufop n'est jamais publiée en clair** (dépôt public : la redistribuer pourrait faire couper la clé). Toujours passer par `pipeline/lufop_db.sh`. Une base présente sur la release doit se relire, sinon le job échoue : jamais de redémarrage silencieux à zéro.
-- Le quota Lufop ne doit jamais être dépassé : budget 150/jour dans `radars.yml`, pause de 6,5 s entre deux appels, arrêt à la première erreur.
+- Le quota Lufop ne doit jamais être dépassé : la base garde l'heure de chaque appel des dernières 24 h (`calls`), jamais plus de 150 sur une fenêtre de 24 h (donc sur un jour), quel que soit le nombre de passages. Chaque passage planifié prend une part aléatoire (30 à 60), pauses aléatoires de 6,5 à 15 s (10/min max), arrêt à la première erreur. Un appel compte dès qu'il part.
 - La base Lufop est sauvegardée **juste après la récolte**, avant la fusion : le quota du jour est dépensé, rien ne doit le faire perdre.
 - `build_radars.py check` refuse de publier un `radars.json` qui perd plus de 10 % des radars ; le résumé du job donne les comptes par source, par type et les noms Lufop.
 
 ## Prochaines étapes connues
 
-Fait : horizon électronique, prochaine limite, date des mobiles Lufop, garde-fou CI, carte, PiP, démo, réglages (probatoire, pluie, voix), démarrage auto en voiture, tunnels, feux rouges sans limite, points en jeu, sens OSM forward/backward, rapport d'azimut Lufop, partage GPX.
+Fait : horizon électronique, prochaine limite, date des mobiles Lufop, garde-fou CI, carte, PiP, démo, réglages (probatoire, pluie, voix), démarrage auto en voiture, tunnels, feux rouges sans limite, points en jeu, sens OSM forward/backward, rapport d'azimut Lufop, partage GPX, zones bâties (50/80), carte Sécurité routière (radars, longueurs de tronçon, itinéraires de contrôle), tronçons sans début et reprise en cours, doublons, musique baissée pendant les alertes, récolte Lufop à heures variables.
 
-1. **Zones bâties** (OSM `traffic_sign=city_limit`, `landuse=residential`, `place`) pour déduire 50/80 sur les routes sans tag.
-2. **Azimut Lufop** : lire le rapport du job `radars` ; au-dessus de 95 % d'accord (direct ou opposé), s'en servir dans `lufop_items`.
-3. **Typage Lufop** : 1 605 radars « fixes » Lufop absents de la liste officielle (frontière, autonomes, leurres ?) ; lire l'histogramme des noms dans le résumé du job `radars` avant de typer plus finement.
-4. **Tronçons** : environ 26 fins de tronçon sans début ; reconstruire le début par l'horizon arrière, reprendre un tronçon en cours après redémarrage.
-5. Radars mobiles Lufop en direct depuis le téléphone (clé saisie dans des réglages, une requête par ~10 km, quota partagé).
-6. Profil moto.
-7. Android Auto (Car App Library).
+1. **Azimut Lufop** : lire le rapport du job `radars` ; au-dessus de 95 % d'accord (direct ou opposé), s'en servir dans `lufop_items`.
+2. **Typage Lufop** : 1 605 radars « fixes » Lufop absents de la liste officielle (frontière, autonomes, leurres ?) ; lire l'histogramme des noms dans le résumé du job `radars` avant de typer plus finement. Beaucoup sont peut-être des cabines d'itinéraires de contrôle : comparer avec les `zones`.
+3. **Sens des tronçons officiels** : `radardirection` (« A vers B ») pourrait donner le sens des fins de tronçon sur route à double sens (aujourd'hui sans début virtuel faute de sens).
+4. **Zones bâties plus fines** : `traffic_sign=city_limit` (panneaux d'entrée) pour caler les limites 50 sur les vrais panneaux.
+5. **Pluie automatique** (Open-Meteo, gratuit, sans clé, position arrondie à ~10 km) : proposer le mode pluie quand il pleut vraiment.
+6. Radars mobiles Lufop en direct depuis le téléphone (clé saisie dans des réglages, une requête par ~10 km, quota partagé).
+7. Profil moto.
+8. Android Auto (Car App Library).
