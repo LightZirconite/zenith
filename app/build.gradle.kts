@@ -59,5 +59,7 @@ dependencies {
     implementation(libs.compose.material3)
     implementation(libs.compose.ui.tooling.preview)
     implementation(libs.maplibre.android)
+    // Activity recognition (vehicle enter / exit) for the automatic start without Bluetooth.
+    implementation(libs.play.services.location)
     debugImplementation(libs.compose.ui.tooling)
 }

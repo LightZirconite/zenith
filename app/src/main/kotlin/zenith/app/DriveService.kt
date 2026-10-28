@@ -39,6 +39,10 @@ import zenith.core.LatLon
 import zenith.core.OverspeedLevel
 import zenith.core.ParkDetector
 import zenith.core.RadarIndex
+import zenith.core.RainDetector
+import zenith.core.Weather
+import java.net.HttpURLConnection
+import java.net.URL
 import java.util.concurrent.Executors
 
 /**
@@ -67,6 +71,9 @@ class DriveService : Service(), LocationListener {
 
     /** Started by the car's Bluetooth: stops when the car disconnects. */
     private var auto = false
+
+    /** Started by the activity recognition (phone riding in a vehicle). */
+    private var motion = false
     private var lastFixTimeMs = 0L
     private var lastFixWallMs = 0L
     private var lastNotified: Triple<Int?, Int?, String?>? = null
@@ -85,6 +92,13 @@ class DriveService : Service(), LocationListener {
             stopSelf()
             return START_NOT_STICKY
         }
+        if (intent?.action == ACTION_MOTION_EXIT) {
+            // The phone left the vehicle: a drive it started ends once the car is slow or stopped.
+            val slow = (DriveState.snapshot.value?.speedKmh ?: 0) < 10
+            if (started && motion && slow) stopSelf()
+            if (!started) stopSelf()
+            return if (started) START_STICKY else START_NOT_STICKY
+        }
         if (intent?.action == ACTION_RESHOW) {
             // The notification was swiped away (allowed since Android 14): the drive goes on, put it back.
             if (!started) {
@@ -102,6 +116,7 @@ class DriveService : Service(), LocationListener {
         }
         demo = intent?.action == ACTION_DEMO
         auto = intent?.action == ACTION_AUTO
+        motion = intent?.action == ACTION_MOTION
         createChannel()
         val foreground = runCatching {
             ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(null), ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
@@ -110,6 +125,7 @@ class DriveService : Service(), LocationListener {
             // Android refused a start from the background (car connected while the phone was idle).
             Log.w("Zenith", "foreground start", foreground.exceptionOrNull())
             if (auto) CarLink.notifyTapToStart(this)
+            if (motion) CarLink.notifyTapToStart(this, "En voiture ?")
             stopSelf()
             return START_NOT_STICKY
         }
@@ -120,6 +136,7 @@ class DriveService : Service(), LocationListener {
         speaker = Speaker(this, ducker)
         tones = TonePlayer(ducker)
         DriveState.started(demo, auto)
+        NowPlaying.start(this)
         if (demo) startDemo() else startLive()
         scope.launch { UserSettings.state.collect { session.profile = it.profile } }
         return if (demo) START_NOT_STICKY else START_STICKY
@@ -131,6 +148,7 @@ class DriveService : Service(), LocationListener {
         session = DrivingSession({ live.network }, emptyList())
         recorder = TripRecorder(this)
         parking = ParkDetector(System.currentTimeMillis())
+        watchWeather()
         scope.launch { live.status.collect(DriveState::data) }
         live.loadRadars { pack ->
             radarIndex = RadarIndex(pack.radars)
@@ -157,6 +175,52 @@ class DriveService : Service(), LocationListener {
                 if (lastFixWallMs > 0 && lost > 2_500) guarded { session.coast(lastFixTimeMs + lost)?.let(::show) }
                 if (parking?.onSilence(System.currentTimeMillis()) == true) endByItself()
             }
+        }
+    }
+
+    /**
+     * Rain mode from the weather: checked every 10 minutes at the car's position (rounded to ~10 km),
+     * spoken when it changes. A tap on the rain chip during the drive leaves it to the driver.
+     */
+    private fun watchWeather() {
+        val rain = RainDetector()
+        scope.launch(Dispatchers.IO) {
+            while (true) {
+                val s = UserSettings.state.value
+                val p = DriveState.snapshot.value?.position
+                if (p == null || !s.autoRain || s.rainManual) {
+                    delay(20_000)
+                    continue
+                }
+                val now = runCatching { Weather.parse(httpGet(Weather.url(p))) }
+                    .onFailure { Log.w("Zenith", "weather", it) }.getOrNull()
+                if (now != null) {
+                    val raining = rain.report(now)
+                    if (raining != s.raining && !UserSettings.state.value.rainManual) {
+                        UserSettings.update(this@DriveService) { it.copy(raining = raining) }
+                        tones.play(Tone.CHIME)
+                        if (s.voice) {
+                            speaker.say(
+                                if (raining) "Pluie, limites abaissées" else "Fin de la pluie, limites normales",
+                                delayMs = tones.durationMs(Tone.CHIME) + 80,
+                            )
+                        }
+                    }
+                }
+                delay(if (now != null) WEATHER_EVERY_MS else 2 * 60_000L)
+            }
+        }
+    }
+
+    private fun httpGet(url: String): String {
+        val conn = URL(url).openConnection() as HttpURLConnection
+        conn.connectTimeout = 15_000
+        conn.readTimeout = 15_000
+        try {
+            check(conn.responseCode == 200) { "HTTP ${conn.responseCode}" }
+            return conn.inputStream.bufferedReader().use { it.readText() }
+        } finally {
+            conn.disconnect()
         }
     }
 
@@ -274,8 +338,11 @@ class DriveService : Service(), LocationListener {
             speaker.shutdown()
             tones.release()
             ducker.shutdown()
+            NowPlaying.stop()
         }
         driveExecutor.shutdown()
+        // The next drive starts from the weather again, not from this drive's rain.
+        if (started && !demo) UserSettings.update(this) { it.copy(rainManual = false, raining = if (it.autoRain) false else it.raining) }
         DriveState.stopped()
         super.onDestroy()
     }
@@ -365,7 +432,10 @@ class DriveService : Service(), LocationListener {
         private const val ACTION_STOP = "zenith.app.STOP"
         private const val ACTION_DEMO = "zenith.app.DEMO"
         private const val ACTION_AUTO = "zenith.app.AUTO"
+        private const val ACTION_MOTION = "zenith.app.MOTION"
+        private const val ACTION_MOTION_EXIT = "zenith.app.MOTION_EXIT"
         private const val ACTION_RESHOW = "zenith.app.RESHOW"
+        private const val WEATHER_EVERY_MS = 10 * 60_000L
 
         fun start(context: Context) =
             ContextCompat.startForegroundService(context, Intent(context, DriveService::class.java))
@@ -374,6 +444,18 @@ class DriveService : Service(), LocationListener {
         fun startAuto(context: Context) {
             if (DriveState.running.value) return
             context.startForegroundService(Intent(context, DriveService::class.java).setAction(ACTION_AUTO))
+        }
+
+        /** Phone riding in a vehicle (activity recognition): throws when Android forbids the start. */
+        fun startMotion(context: Context) {
+            if (DriveState.running.value) return
+            context.startForegroundService(Intent(context, DriveService::class.java).setAction(ACTION_MOTION))
+        }
+
+        /** Phone out of the vehicle: ends a drive the activity recognition started, once slow. */
+        fun motionExit(context: Context) {
+            if (!DriveState.running.value) return
+            runCatching { context.startService(Intent(context, DriveService::class.java).setAction(ACTION_MOTION_EXIT)) }
         }
 
         /** Car disconnected: ends the drive only if the car started it. */

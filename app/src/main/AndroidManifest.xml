@@ -14,6 +14,12 @@
     <uses-permission android:name="android.permission.REQUEST_OBSERVE_COMPANION_DEVICE_PRESENCE" />
     <uses-permission android:name="android.permission.REQUEST_COMPANION_RUN_IN_BACKGROUND" />
     <uses-permission android:name="android.permission.REQUEST_COMPANION_START_FOREGROUND_SERVICES_FROM_BACKGROUND" />
+    <!-- Automatic start when the phone starts riding in a vehicle (Play Services activity recognition):
+         the drive's GPS then needs the location "all the time". -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+    <uses-permission android:name="com.google.android.gms.permission.ACTIVITY_RECOGNITION" android:maxSdkVersion="28" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Android 16: live speed chip in the status bar while driving. -->
     <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
 
@@ -53,6 +59,20 @@
             android:name=".UpdateReceiver"
             android:exported="false" />
 
+        <receiver
+            android:name=".MotionReceiver"
+            android:exported="false" />
+
+        <!-- Activity recognition registrations are lost on reboot and on update: renewed here. -->
+        <receiver
+            android:name=".MotionBootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.files"
@@ -62,6 +82,17 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- Notification access, only to read the media sessions for the music bar. -->
+        <service
+            android:name=".MediaListener"
+            android:exported="false"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
 
         <service
             android:name=".CarPresenceService"

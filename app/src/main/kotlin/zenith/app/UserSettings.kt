@@ -14,6 +14,12 @@ data class SettingsState(
     val voice: Boolean = true,
     /** Battery saver: a drive started by hand ends by itself once the car is parked. */
     val autoStop: Boolean = true,
+    /** Drive started by itself when the phone starts riding in a vehicle (activity recognition). */
+    val motionStart: Boolean = true,
+    /** Rain mode from the weather (Open-Meteo) while driving. */
+    val autoRain: Boolean = true,
+    /** The driver set rain by hand during this drive: the weather no longer changes it. Not kept. */
+    val rainManual: Boolean = false,
     /** Car paired for the automatic start (CompanionDeviceManager association), with its name. */
     val carAssociationId: Int? = null,
     val carName: String? = null,
@@ -39,6 +45,8 @@ object UserSettings {
             raining = false,
             voice = p.getBoolean("voice", true),
             autoStop = p.getBoolean("auto_stop", true),
+            autoRain = p.getBoolean("auto_rain", true),
+            motionStart = p.getBoolean("motion_start", true),
             carAssociationId = p.getInt("car_id", -1).takeIf { it >= 0 },
             carName = p.getString("car_name", null),
         )
@@ -53,6 +61,8 @@ object UserSettings {
             putBoolean("probationary", next.probationary)
             putBoolean("voice", next.voice)
             putBoolean("auto_stop", next.autoStop)
+            putBoolean("auto_rain", next.autoRain)
+            putBoolean("motion_start", next.motionStart)
             putInt("car_id", next.carAssociationId ?: -1)
             putString("car_name", next.carName)
         }

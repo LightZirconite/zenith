@@ -44,7 +44,15 @@ data class Permissions(
     val notifications: Boolean,
     val installs: Boolean,
     val battery: Boolean,
+    /** Notification access, for the music bar (Spotify…). */
+    val media: Boolean = false,
+    /** Automatic start by activity recognition: Play Services present, activity and "all the time" location. */
+    val motionAvailable: Boolean = false,
+    val activity: Boolean = false,
+    val backgroundLocation: Boolean = false,
 ) {
+    val motion: Boolean get() = motionAvailable && activity && backgroundLocation
+
     companion object {
         fun read(context: Context) = Permissions(
             location = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
@@ -52,6 +60,10 @@ data class Permissions(
             notifications = NotificationManagerCompat.from(context).areNotificationsEnabled(),
             installs = context.packageManager.canRequestPackageInstalls(),
             battery = context.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(context.packageName),
+            media = NowPlaying.allowed(context),
+            motionAvailable = Motion.available(context),
+            activity = Motion.hasActivity(context),
+            backgroundLocation = Motion.hasBackgroundLocation(context),
         )
 
         fun locationPermissions() = arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)

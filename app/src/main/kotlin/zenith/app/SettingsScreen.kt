@@ -45,6 +45,10 @@ fun SettingsScreen(
     onUnpairCar: () -> Unit,
     onBack: () -> Unit,
     onShareTrip: (() -> Unit)? = null,
+    mediaAllowed: Boolean = false,
+    onAllowMedia: () -> Unit = {},
+    permissions: Permissions? = null,
+    onMotionPermission: () -> Unit = {},
 ) {
     Column(Modifier.fillMaxSize().background(Color.Black).safeDrawingPadding().padding(horizontal = 20.dp, vertical = 12.dp)) {
         Text(
@@ -63,10 +67,17 @@ fun SettingsScreen(
                 settings.probationary,
             ) { on -> onChange { it.copy(probationary = on) } }
             Toggle(
-                "Pluie",
-                "Limites par temps de pluie : 110 sur autoroute, 100 sur voie rapide, 80 sur route. Aussi en un geste pendant la conduite.",
+                "Pluie automatique",
+                "Pendant la conduite, la météo (Open-Meteo, gratuit) dit s'il pleut et les limites baissent seules : 110 sur " +
+                    "autoroute, 100 sur voie rapide, 80 sur route. Seule une position arrondie à ~10 km est envoyée. " +
+                    "Un appui sur la puce Pluie/Sec reprend la main jusqu'à la fin du trajet.",
+                settings.autoRain,
+            ) { on -> onChange { it.copy(autoRain = on) } }
+            Toggle(
+                "Pluie maintenant",
+                "Limites de pluie tout de suite, sans attendre la météo.",
                 settings.raining,
-            ) { on -> onChange { it.copy(raining = on) } }
+            ) { on -> onChange { it.copy(raining = on, rainManual = true) } }
             Toggle(
                 "Annonces vocales",
                 "Désactivé : seulement les bips, sans voix.",
@@ -79,6 +90,7 @@ fun SettingsScreen(
                     "il démarre et s'arrête aussi seul avec elle.",
                 settings.autoStop,
             ) { on -> onChange { it.copy(autoStop = on) } }
+            MotionCard(settings, permissions, onChange, onMotionPermission)
             Card {
                 Text("Démarrage automatique en voiture", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(4.dp))
@@ -98,6 +110,32 @@ fun SettingsScreen(
                         modifier = Modifier.clip(RoundedCornerShape(50))
                             .background(if (settings.carName != null) Color(0xFF2C2C30) else Accent)
                             .clickable(onClick = if (settings.carName != null) onUnpairCar else onPairCar)
+                            .padding(horizontal = 16.dp, vertical = 9.dp),
+                    )
+                }
+            }
+            Card {
+                Text("Musique", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    if (mediaAllowed) {
+                        "Le titre en cours (Spotify, Deezer, YouTube Music…) et ses commandes s'affichent sous les alertes pendant la conduite."
+                    } else {
+                        "Titre en cours et commandes de Spotify ou de ton lecteur, sous les alertes. Sans compte ni clé. Android appelle " +
+                            "cela « accès aux notifications » : Zenith n'y lit que le lecteur de musique. Si l'option est grisée : " +
+                            "Infos de l'appli Zenith → ⋮ → Autoriser les paramètres restreints."
+                    },
+                    color = Color.White.copy(alpha = 0.75f),
+                    fontSize = 14.sp,
+                )
+                if (!mediaAllowed) {
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        "Autoriser",
+                        color = Color.White,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.clip(RoundedCornerShape(50)).background(Accent).clickable(onClick = onAllowMedia)
                             .padding(horizontal = 16.dp, vertical = 9.dp),
                     )
                 }
@@ -128,6 +166,60 @@ fun SettingsScreen(
                     "Astuce : appui long sur le logo de l'accueil pour un trajet de démo.",
                 color = Dim,
                 fontSize = 12.sp,
+            )
+        }
+    }
+}
+
+/** Automatic start by activity recognition, with the permission still missing if any. */
+@Composable
+private fun MotionCard(
+    settings: SettingsState,
+    permissions: Permissions?,
+    onChange: ((SettingsState) -> SettingsState) -> Unit,
+    onPermission: () -> Unit,
+) {
+    val available = permissions?.motionAvailable == true
+    val missing = when {
+        !available || !settings.motionStart -> null
+        permissions?.activity != true -> "Autoriser l'activité physique"
+        permissions?.backgroundLocation != true -> "Autoriser la position « Toujours »"
+        else -> null
+    }
+    Card {
+        Row(
+            Modifier.fillMaxWidth().clickable(enabled = available) { onChange { it.copy(motionStart = !it.motionStart) } },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Démarrage en roulant", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    when {
+                        !available -> "Nécessite les services Google Play."
+                        missing != null ->
+                            "Zenith démarre seul dès que le téléphone sent que tu roules en voiture, même fermé (services Google, " +
+                                "presque sans batterie). Il faut « Activité physique », puis la position « Toujours autoriser » : " +
+                                "sans elle, Android coupe le GPS d'une conduite démarrée seule."
+                        settings.motionStart -> "Zenith démarre seul quand tu roules en voiture, même fermé, et s'arrête une fois garé."
+                        else -> "Désactivé : Zenith ne démarre seul qu'avec le Bluetooth de ta voiture."
+                    },
+                    color = Color.White.copy(alpha = 0.75f),
+                    fontSize = 14.sp,
+                )
+            }
+            Spacer(Modifier.width(14.dp))
+            Switch(settings.motionStart && available)
+        }
+        if (missing != null) {
+            Spacer(Modifier.height(12.dp))
+            Text(
+                missing,
+                color = Color.White,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.clip(RoundedCornerShape(50)).background(Accent).clickable(onClick = onPermission)
+                    .padding(horizontal = 16.dp, vertical = 9.dp),
             )
         }
     }

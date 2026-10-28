@@ -77,7 +77,7 @@ object CarLink {
     fun carDisconnected(context: Context) = DriveService.stopAuto(context)
 
     /** Fallback notification: one tap starts the drive. */
-    fun notifyTapToStart(context: Context) {
+    fun notifyTapToStart(context: Context, title: String = "Voiture connectée") {
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, "Voiture", NotificationManager.IMPORTANCE_HIGH))
         val open = PendingIntent.getActivity(
@@ -86,7 +86,7 @@ object CarLink {
         )
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("Voiture connectée")
+            .setContentTitle(title)
             .setContentText("Touche pour démarrer Zenith")
             .setContentIntent(open)
             .setAutoCancel(true)

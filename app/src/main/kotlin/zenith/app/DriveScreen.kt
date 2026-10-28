@@ -92,8 +92,15 @@ fun DriveScreen(
     demo: Boolean = false,
     onDemo: () -> Unit = {},
     raining: Boolean = false,
+    /** Rain mode follows the weather (no manual change during this drive). */
+    rainAuto: Boolean = false,
     onToggleRain: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
+    /** Track playing in Spotify or another player (notification access granted). */
+    media: MediaInfo? = null,
+    onMediaPrevious: () -> Unit = {},
+    onMediaPlayPause: () -> Unit = {},
+    onMediaNext: () -> Unit = {},
 ) {
     val showMap = running && snapshot != null
     Box(Modifier.fillMaxSize().background(Bg)) {
@@ -105,7 +112,7 @@ fun DriveScreen(
             modifier = Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 20.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            StatusRow(running, gps, data, demo, snapshot, raining, onToggleRain)
+            StatusRow(running, gps, data, demo, snapshot, raining, rainAuto, onToggleRain)
             UpdateBanner(update, canInstall, onInstallUpdate)
             Column(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -117,6 +124,9 @@ fun DriveScreen(
             }
             AlertArea(snapshot.takeIf { running })
             Spacer(Modifier.height(12.dp))
+            AnimatedVisibility(visible = running && media != null, enter = fadeIn(), exit = fadeOut()) {
+                media?.let { MediaBar(it, onMediaPrevious, onMediaPlayPause, onMediaNext) }
+            }
             AnimatedVisibility(visible = running && navApps.isNotEmpty(), enter = fadeIn(), exit = fadeOut()) {
                 NavApps(navApps, onOpenNavApp)
             }
@@ -154,6 +164,7 @@ private fun StatusRow(
     demo: Boolean,
     snapshot: DriveSnapshot?,
     raining: Boolean,
+    rainAuto: Boolean,
     onToggleRain: () -> Unit,
 ) {
     val estimated = snapshot?.estimated == true
@@ -191,11 +202,15 @@ private fun StatusRow(
         AnimatedVisibility(visible = data.loading || data.error != null, enter = fadeIn(), exit = fadeOut()) {
             Chip(data.error ?: "Chargement des routes…", if (data.error != null) Orange else Dim)
         }
-        // Rain lowers the limits: one tap while driving.
+        // Rain lowers the limits: follows the weather, one tap takes over for the rest of the drive.
         AnimatedVisibility(visible = running, enter = fadeIn(), exit = fadeOut()) {
             Row {
                 Spacer(Modifier.width(8.dp))
-                Chip(if (raining) "Pluie" else "Sec", if (raining) Color(0xFF0A84FF) else Dim, onClick = onToggleRain)
+                Chip(
+                    (if (raining) "Pluie" else "Sec") + if (rainAuto) " · auto" else "",
+                    if (raining) Color(0xFF0A84FF) else Dim,
+                    onClick = onToggleRain,
+                )
             }
         }
     }
@@ -249,11 +264,12 @@ private fun Idle(data: DataStatus, onDemo: () -> Unit) {
             Modifier.size(150.dp).scale(scale)
                 .background(Brush.radialGradient(listOf(Red.copy(alpha = glow), Color.Transparent)), CircleShape),
         )
-        // Hidden: a long press on the logo starts the simulated drive.
+        // Hidden: a long press on the logo starts the simulated drive. The icon drawing leaves a
+        // margin for launcher masks: drawn larger here so the dial keeps its size on screen.
         Image(
             painterResource(R.drawable.ic_logo_foreground),
             contentDescription = null,
-            modifier = Modifier.size(150.dp).scale(scale).pointerInput(Unit) { detectTapGestures(onLongPress = { onDemo() }) },
+            modifier = Modifier.size(174.dp).scale(scale).pointerInput(Unit) { detectTapGestures(onLongPress = { onDemo() }) },
         )
     }
     Text("Zenith", color = Color.White, fontSize = 44.sp, fontWeight = FontWeight.Bold)

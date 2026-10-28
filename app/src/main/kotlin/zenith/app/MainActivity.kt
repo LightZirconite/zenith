@@ -63,6 +63,7 @@ class MainActivity : ComponentActivity() {
             val pip by inPip.collectAsStateWithLifecycle()
             val demo by DriveState.demo.collectAsStateWithLifecycle()
             val settings by UserSettings.state.collectAsStateWithLifecycle()
+            val media by NowPlaying.state.collectAsStateWithLifecycle()
             val startNow by startRequested.collectAsStateWithLifecycle()
             var showSettings by remember { mutableStateOf(false) }
             val pairLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { }
@@ -92,6 +93,10 @@ class MainActivity : ComponentActivity() {
                 else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             }
             LaunchedEffect(resumeCount) { Updater.checkIfDue(context) }
+            // Activity recognition follows the setting and the permissions (renewed at each start too).
+            LaunchedEffect(permissions.motion, settings.motionStart) { Motion.sync(context) }
+            // Music bar: picks up a notification access granted during the drive.
+            LaunchedEffect(resumeCount, running) { if (running) NowPlaying.start(context) }
             // Parked: install as soon as the update is downloaded (silent once Zenith installed itself once).
             // Driving: the banner waits for a tap.
             LaunchedEffect(update, running, permissions.installs) {
@@ -131,6 +136,19 @@ class MainActivity : ComponentActivity() {
                     },
                     onBack = { showSettings = false },
                     onShareTrip = remember(resumeCount) { latestTrip(context) }?.let { trip -> { shareTrip(trip) } },
+                    mediaAllowed = permissions.media,
+                    onAllowMedia = { openSettings(NowPlaying.accessIntent(context)) },
+                    permissions = permissions,
+                    onMotionPermission = {
+                        val details = { Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")) }
+                        val activity = Motion.activityPermission()
+                        when {
+                            !permissions.activity && activity != null -> requestOrSettings(arrayOf(activity), { launcher.launch(it) }, details)
+                            // Android 11+ answers this one with its own settings page ("Toujours autoriser").
+                            !permissions.backgroundLocation && Build.VERSION.SDK_INT >= 29 ->
+                                requestOrSettings(arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION), { launcher.launch(it) }, details)
+                        }
+                    },
                 )
             } else if (!onboarded) {
                 Onboarding(
@@ -174,8 +192,13 @@ class MainActivity : ComponentActivity() {
                     demo = demo,
                     onDemo = { if (permissions.location) DriveService.startDemo(context) },
                     raining = settings.raining,
-                    onToggleRain = { UserSettings.update(context) { it.copy(raining = !it.raining) } },
+                    rainAuto = settings.autoRain && !settings.rainManual,
+                    onToggleRain = { UserSettings.update(context) { it.copy(raining = !it.raining, rainManual = true) } },
                     onOpenSettings = { showSettings = true },
+                    media = media,
+                    onMediaPrevious = NowPlaying::previous,
+                    onMediaPlayPause = NowPlaying::playPause,
+                    onMediaNext = NowPlaying::next,
                 )
             }
         }
