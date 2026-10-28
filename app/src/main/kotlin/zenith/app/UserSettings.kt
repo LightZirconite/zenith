@@ -25,6 +25,8 @@ data class SettingsState(
     val carName: String? = null,
     /** Spotify Canvas behind the music card and in picture-in-picture (unofficial free services). */
     val spotifyCanvas: Boolean = true,
+    /** Square picture-in-picture window, larger; else a compact strip that leaves Waze visible. */
+    val pipLarge: Boolean = false,
 ) {
     val profile: DriverProfile get() = DriverProfile(probationary = probationary, raining = raining)
 }
@@ -53,6 +55,7 @@ object UserSettings {
             carAssociationId = p.getInt("car_id", -1).takeIf { it >= 0 },
             carName = p.getString("car_name", null),
             spotifyCanvas = p.getBoolean("spotify_canvas", true),
+            pipLarge = p.getBoolean("pip_large", false),
         )
         loaded = true
     }
@@ -71,6 +74,7 @@ object UserSettings {
             putInt("car_id", next.carAssociationId ?: -1)
             putString("car_name", next.carName)
             putBoolean("spotify_canvas", next.spotifyCanvas)
+            putBoolean("pip_large", next.pipLarge)
         }
     }
 }

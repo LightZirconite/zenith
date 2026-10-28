@@ -62,18 +62,8 @@ fun SettingsScreen(
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             Spacer(Modifier.height(8.dp))
             Text("Réglages", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(20.dp))
-            Toggle(
-                "Jeune permis",
-                "Limites probatoires : 110 sur autoroute, 100 sur voie rapide, 80 sur route à 90.",
-                settings.probationary,
-            ) { on -> onChange { it.copy(probationary = on) } }
-            Toggle(
-                "Pluie automatique",
-                "Pendant la conduite, la météo (Open-Meteo, gratuit) dit s'il pleut et les limites baissent seules : 110 sur " +
-                    "autoroute, 100 sur voie rapide, 80 sur route. Rien à toucher. Seule une position arrondie à ~10 km est envoyée.",
-                settings.autoRain,
-            ) { on -> onChange { it.copy(autoRain = on) } }
+            Spacer(Modifier.height(8.dp))
+            SectionTitle("Alertes")
             Toggle(
                 "Annonces vocales",
                 "Désactivé : seulement les bips, sans voix.",
@@ -86,12 +76,17 @@ fun SettingsScreen(
                 settings.pauseMusic,
             ) { on -> onChange { it.copy(pauseMusic = on) } }
             Toggle(
-                "Arrêt automatique",
-                "Pour la batterie : Zenith s'arrête seul quand la voiture est garée depuis 10 minutes, quand tu repars à pied " +
-                    "ou à l'intérieur sans GPS. Jamais sur autoroute ni pendant un bouchon. Avec ta voiture choisie ci-dessous " +
-                    "ou Android Auto, il démarre et s'arrête aussi seul avec elle.",
-                settings.autoStop,
-            ) { on -> onChange { it.copy(autoStop = on) } }
+                "Jeune permis",
+                "Limites probatoires : 110 sur autoroute, 100 sur voie rapide, 80 sur route à 90.",
+                settings.probationary,
+            ) { on -> onChange { it.copy(probationary = on) } }
+            Toggle(
+                "Pluie automatique",
+                "Pendant la conduite, la météo (Open-Meteo, gratuit) dit s'il pleut et les limites baissent seules : 110 sur " +
+                    "autoroute, 100 sur voie rapide, 80 sur route. Rien à toucher. Seule une position arrondie à ~10 km est envoyée.",
+                settings.autoRain,
+            ) { on -> onChange { it.copy(autoRain = on) } }
+            SectionTitle("En voiture")
             MotionCard(settings, permissions, onChange, onMotionPermission)
             Card {
                 Text("Démarrage automatique en voiture", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
@@ -117,6 +112,14 @@ fun SettingsScreen(
                 }
             }
             AndroidAutoCard(androidAutoConnected)
+            Toggle(
+                "Arrêt automatique",
+                "Pour la batterie : Zenith s'arrête seul quand la voiture est garée depuis 10 minutes, quand tu repars à pied " +
+                    "ou à l'intérieur sans GPS. Jamais sur autoroute ni pendant un bouchon. Une conduite lancée par la voiture " +
+                    "choisie au-dessus ou par Android Auto s'arrête, elle, avec la voiture.",
+                settings.autoStop,
+            ) { on -> onChange { it.copy(autoStop = on) } }
+            SectionTitle("Musique et petite fenêtre")
             Card {
                 Text("Musique", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(4.dp))
@@ -151,7 +154,14 @@ fun SettingsScreen(
                     "titre, gardés en cache. Sinon, la pochette floutée.",
                 settings.spotifyCanvas,
             ) { on -> onChange { it.copy(spotifyCanvas = on) } }
+            Toggle(
+                "Petite fenêtre carrée",
+                "Désactivé : en quittant Zenith pendant la conduite, un bandeau compact en largeur, qui laisse voir Waze ou " +
+                    "Maps. Activé : une fenêtre carrée, plus grande. Un double appui sur la fenêtre l'agrandit aussi un moment.",
+                settings.pipLarge,
+            ) { on -> onChange { it.copy(pipLarge = on) } }
             if (onShareTrip != null) {
+                SectionTitle("Trajets")
                 Card {
                     Text("Dernier trajet", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(4.dp))
@@ -252,12 +262,26 @@ private fun AndroidAutoCard(connected: Boolean) {
         Spacer(Modifier.height(4.dp))
         Text(
             "Les alertes passent déjà par la voiture : bips et voix sortent sur ses haut-parleurs, Waze ou Maps devant. " +
-                "L'écran Zenith sur la voiture est prêt, mais Google ne l'affiche pas tant que Zenith ne vient pas du " +
-                "Play Store : le réglage « Sources inconnues » d'Android Auto ne vaut pas pour ce type d'appli.",
+                "L'écran Zenith sur la voiture (carte, vitesse, alertes) n'apparaît que si Zenith est installé depuis le " +
+                "Play Store : « Sources inconnues » ne vaut pas pour ce type d'appli. Installé en test interne depuis le " +
+                "Play Store, il apparaît dans Android Auto et se met à jour par le Play Store.",
             color = Color.White.copy(alpha = 0.75f),
             fontSize = 14.sp,
         )
     }
+}
+
+/** Small gray heading over a group of settings, iOS-style. */
+@Composable
+private fun SectionTitle(title: String) {
+    Text(
+        title.uppercase(),
+        color = Dim,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.SemiBold,
+        letterSpacing = 0.6.sp,
+        modifier = Modifier.padding(start = 6.dp, top = 14.dp, bottom = 8.dp),
+    )
 }
 
 @Composable

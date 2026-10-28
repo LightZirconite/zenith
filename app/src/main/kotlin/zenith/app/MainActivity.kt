@@ -157,6 +157,7 @@ class MainActivity : ComponentActivity() {
                 // instead of staying frozen on the last speed over Waze.
                 if (!running && inPip.value) finishAndRemoveTask()
             }
+            LaunchedEffect(settings.pipLarge) { updatePip() }
             LaunchedEffect(resumeCount) { Updater.checkIfDue(context) }
             // Activity recognition follows the setting and the permissions (renewed at each start too).
             LaunchedEffect(permissions.motion, settings.motionStart) { Motion.sync(context) }
@@ -288,8 +289,12 @@ class MainActivity : ComponentActivity() {
         runCatching { setPictureInPictureParams(pipParams()) }
     }
 
+    /**
+     * Android sizes the window from its shape alone: a wide strip stays low over Waze, a square
+     * one is larger (setting). A double tap on the window toggles Android's own bigger size.
+     */
     private fun pipParams(): PictureInPictureParams = PictureInPictureParams.Builder()
-        .setAspectRatio(Rational(1, 1))
+        .setAspectRatio(if (UserSettings.state.value.pipLarge) Rational(1, 1) else Rational(16, 9))
         .apply {
             if (Build.VERSION.SDK_INT >= 31) {
                 setAutoEnterEnabled(pipWanted)
