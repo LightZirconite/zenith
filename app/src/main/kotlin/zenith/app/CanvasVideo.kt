@@ -66,8 +66,8 @@ private class LoopPlayer(private val file: File, private val onShown: () -> Unit
     private var prepared = false
     private var failed = false
     private var released = false
-    private var videoWidth = 0
-    private var videoHeight = 0
+    private var frameWidth = 0
+    private var frameHeight = 0
 
     var started = false
         set(value) {
@@ -97,8 +97,8 @@ private class LoopPlayer(private val file: File, private val onShown: () -> Unit
                     sync()
                 }
                 setOnVideoSizeChangedListener { _, w, h ->
-                    videoWidth = w
-                    videoHeight = h
+                    frameWidth = w
+                    frameHeight = h
                     crop()
                 }
                 setOnInfoListener { _, what, _ ->
@@ -154,9 +154,9 @@ private class LoopPlayer(private val file: File, private val onShown: () -> Unit
         val v = view ?: return
         val w = v.width.toFloat()
         val h = v.height.toFloat()
-        if (w <= 0f || h <= 0f || videoWidth <= 0 || videoHeight <= 0) return
-        val scale = maxOf(w / videoWidth, h / videoHeight)
-        runCatching { v.setTransform(Matrix().apply { setScale(videoWidth * scale / w, videoHeight * scale / h, w / 2, h / 2) }) }
+        if (w <= 0f || h <= 0f || frameWidth <= 0 || frameHeight <= 0) return
+        val scale = maxOf(w / frameWidth, h / frameHeight)
+        runCatching { v.setTransform(Matrix().apply { setScale(frameWidth * scale / w, frameHeight * scale / h, w / 2, h / 2) }) }
     }
 
     private fun releasePlayer() {

@@ -95,6 +95,8 @@ fun MediaBar(
     val backdrop = remember(media.art) { media.art?.let(::tiny) }
 
     BoxWithConstraints(Modifier.fillMaxWidth().padding(bottom = 10.dp).height(80.dp).clip(RoundedCornerShape(20.dp)).background(BarSurface)) {
+        // Below that width the heart would leave the title almost no room.
+        val roomForLike = maxWidth >= 340.dp
         // Blurred cover: a tiny copy upscaled is already soft, the blur (Android 12+) smooths it out.
         backdrop?.let {
             Image(
@@ -144,7 +146,7 @@ fun MediaBar(
                 }
             }
             val like = media.like
-            if (like != null && maxWidth >= 340.dp) HeartButton(like.liked, onLike)
+            if (like != null && roomForLike) HeartButton(like.liked, onLike)
             GlyphButton(Glyph.PREVIOUS, "Précédent", onPrevious)
             PlayButton(media.playing, onPlayPause)
             GlyphButton(Glyph.NEXT, "Suivant", onNext)
@@ -248,7 +250,7 @@ private fun DrawScope.drawGlyph(glyph: Glyph, color: Color) {
 }
 
 /** A 24-pixel-wide copy of the cover: upscaled, it is a soft wash of its colors. */
-private fun tiny(art: Bitmap): Bitmap? = runCatching {
+private fun tiny(art: Bitmap): Bitmap? {
     if (art.width <= 0 || art.height <= 0) return null
-    Bitmap.createScaledBitmap(art, 24, (24 * art.height / art.width).coerceIn(1, 48), true)
-}.getOrNull()
+    return runCatching { Bitmap.createScaledBitmap(art, 24, (24 * art.height / art.width).coerceIn(1, 48), true) }.getOrNull()
+}
