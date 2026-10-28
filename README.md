@@ -38,9 +38,16 @@ Ensuite, Zenith se met à jour tout seul.
 
 ## Android Auto
 
-Les alertes passent déjà par la voiture : bips et voix sortent sur ses haut-parleurs, même avec Waze ou Maps à l'écran.
+Les alertes passent toujours par la voiture : bips et voix sortent sur ses haut-parleurs, même avec Waze ou Maps à l'écran.
 
-L'écran Zenith pour la voiture (carte, vitesse, limite, alertes) est prêt dans l'app, mais Android Auto ne l'affiche pas : Google n'accepte ce type d'appli que si elle vient du Play Store. Le réglage « Sources inconnues » des paramètres développeur d'Android Auto ne vaut pas pour elle ([documentation Google](https://developer.android.com/training/cars/testing)).
+L'écran Zenith sur la voiture (carte, vitesse, limite, alertes, radars par-dessus Waze) n'apparaît que si Zenith est installé depuis le Play Store : Google l'exige pour ce type d'appli, « Sources inconnues » ne suffit pas ([documentation Google](https://developer.android.com/training/cars/testing)). La voie officielle, sans validation de Google, est la piste de **test interne** du Play Store, visible de toi seul :
+
+1. Crée un compte développeur sur [play.google.com/console](https://play.google.com/console) (25 $, une fois).
+2. Crée l'appli « Zenith » (nom de paquet `zenith.app`), puis dans **Tester → Test interne**, ajoute ton adresse comme testeur et envoie le fichier `zenith.aab` de la [dernière release](https://github.com/LightZirconite/zenith/releases/latest). Laisse Google gérer la clé de signature.
+3. Pour que chaque version parte seule sur le Play Store : dans Google Cloud, crée un compte de service avec une clé JSON, invite-le dans la Play Console (**Utilisateurs et autorisations**, droit de publier en test), puis colle le JSON dans le secret GitHub `PLAY_SERVICE_ACCOUNT_JSON`.
+4. Sur le téléphone : désinstalle Zenith, ouvre le lien de test interne et installe-le depuis le Play Store. Dans Android Auto → **Personnaliser le lanceur**, coche Zenith.
+
+Installé depuis le Play Store, Zenith ne se met plus à jour par GitHub : c'est le Play Store qui s'en charge.
 
 ## Autorisations
 

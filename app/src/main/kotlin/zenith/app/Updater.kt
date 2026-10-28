@@ -49,8 +49,24 @@ object Updater {
 
     private fun dir(context: Context) = File(context.cacheDir, "update")
 
+    /**
+     * Installed from Google Play (the only way into Android Auto): Play updates it, and an install
+     * from GitHub would make Android Auto hide it again.
+     */
+    fun fromPlay(context: Context): Boolean = runCatching {
+        val pm = context.packageManager
+        val installer = if (Build.VERSION.SDK_INT >= 30) {
+            pm.getInstallSourceInfo(context.packageName).installingPackageName
+        } else {
+            @Suppress("DEPRECATION")
+            pm.getInstallerPackageName(context.packageName)
+        }
+        installer == "com.android.vending"
+    }.getOrDefault(false)
+
     /** Checks GitHub at most every 30 minutes (each time the app comes to the front). */
     suspend fun checkIfDue(context: Context) {
+        if (fromPlay(context)) return
         if (System.currentTimeMillis() - lastCheckMs < CHECK_EVERY_MS) return
         checkAndDownload(context)
     }
