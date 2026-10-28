@@ -2,11 +2,15 @@ package zenith.app
 
 import android.graphics.Bitmap
 import android.os.SystemClock
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -28,6 +32,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,6 +54,10 @@ import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -57,9 +67,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import zenith.core.PlaybackProgress
+import kotlin.math.abs
 
 private val BarDim = Color(0xFFB0B0B5)
+
+/** How far the strip must travel for a swipe to change track (about 120 dp of finger). */
+private val SWIPE_THRESHOLD = 72.dp
+
+/** No second change within this delay: a quick double swipe skips one track, not two. */
+private const val SWIPE_COOLDOWN_MS = 1_000L
 private val Liked = Color(0xFF1ED760)
 
 private enum class Glyph { PREVIOUS, PLAY, PAUSE, NEXT }
@@ -125,7 +143,10 @@ private val BackdropMask = Brush.verticalGradient(0f to Color.Transparent, 0.45f
  * Music controls under the alerts, for any player (Spotify, YouTube, Deezer…): cover, title,
  * artist and the buttons a driver needs, on a translucent strip over [MusicBackdrop]. The heart
  * (Spotify) shows when the strip is wide enough; a thin line at the bottom follows the track. A
- * tap on the cover or the title opens the player.
+ * tap on the cover or the title opens the player. Swiping the strip changes track like on a
+ * phone's lock screen: to the left the next one, to the right the previous one. Never by
+ * accident: only a long, clearly sideways swipe counts, a tick and a label tell when it will,
+ * coming back before letting go cancels it, and a second change waits a second.
  */
 @Composable
 fun MediaBar(
@@ -136,12 +157,70 @@ fun MediaBar(
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
 ) {
-    BoxWithConstraints(Modifier.fillMaxWidth().padding(bottom = 10.dp).height(72.dp).glass(RoundedCornerShape(20.dp))) {
+    val scope = rememberCoroutineScope()
+    val haptics = LocalHapticFeedback.current
+    val next by rememberUpdatedState(onNext)
+    val previous by rememberUpdatedState(onPrevious)
+    val swipe = remember { Animatable(0f) }
+    val threshold = with(LocalDensity.current) { SWIPE_THRESHOLD.toPx() }
+    BoxWithConstraints(
+        Modifier.fillMaxWidth().padding(bottom = 10.dp).height(72.dp).glass(RoundedCornerShape(20.dp))
+            .pointerInput(Unit) {
+                var drift = 0f
+                var armed = false
+                var lastChangeMs = 0L
+                fun settle() = scope.launch { swipe.animateTo(0f, spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMediumLow)) }
+                detectDragGestures(
+                    onDragStart = { _ ->
+                        drift = 0f
+                        armed = false
+                    },
+                    onDragEnd = {
+                        val x = swipe.value
+                        // Sideways enough (a scroll or a fumble drifts up or down) and not right after a change.
+                        val now = SystemClock.elapsedRealtime()
+                        if (armed && drift < abs(x) / 0.6f * 0.5f && now - lastChangeMs > SWIPE_COOLDOWN_MS) {
+                            lastChangeMs = now
+                            if (x < 0) next() else previous()
+                        }
+                        settle()
+                    },
+                    onDragCancel = { settle() },
+                ) { change, drag ->
+                    change.consume()
+                    drift += abs(drag.y)
+                    // Resistance: the strip moves slower than the finger.
+                    val x = swipe.value + drag.x * 0.6f
+                    scope.launch { swipe.snapTo(x) }
+                    val past = abs(x) >= threshold
+                    // A tick when the swipe would now change track, and coming back cancels it.
+                    if (past && !armed) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    armed = past
+                }
+            },
+    ) {
+        // What letting go will do, revealed on the side the strip leaves.
+        val reveal = (abs(swipe.value) / threshold).coerceIn(0f, 1f)
+        if (swipe.value != 0f) {
+            Text(
+                if (swipe.value < 0) "Suivant ›" else "‹ Précédent",
+                color = Color.White.copy(alpha = if (reveal >= 1f) 0.95f else reveal * 0.5f),
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.align(if (swipe.value < 0) Alignment.CenterEnd else Alignment.CenterStart).padding(horizontal = 18.dp),
+            )
+        }
         // Below that width the heart would leave the title almost no room.
         val roomForLike = maxWidth >= 340.dp
 
         val halo = TextStyle(shadow = Shadow(Color.Black.copy(alpha = 0.8f), blurRadius = 12f))
-        Row(Modifier.fillMaxSize().padding(start = 12.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.fillMaxSize().graphicsLayer {
+                translationX = swipe.value
+                alpha = 1f - (abs(swipe.value) / (threshold * 2.5f)).coerceIn(0f, 0.6f)
+            }.padding(start = 12.dp, end = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Row(
                 Modifier.weight(1f).fillMaxHeight().tap(onClick = onOpen).semantics { contentDescription = "Ouvrir le lecteur" },
                 verticalAlignment = Alignment.CenterVertically,
