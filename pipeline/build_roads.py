@@ -6,6 +6,11 @@ Each drivable OSM way is split at junction nodes into segments carrying their sp
 to 0.5° tiles: roads_<i>_<j>.json.gz with i = floor(lat * 2), j = floor(lon * 2). A segment
 crossing a tile edge is written to every tile it touches (same id), so tiles stand alone.
 
+Roads with no limit at all get the French default of where they are: 50 in a built-up area,
+80 outside on a two-way road (since 2018). Built-up areas come from landuse polygons, rasterised
+on a ~100 m grid; small isolated patches (farms, hamlets without entry signs) are dropped. Such
+roads are also cut where they enter or leave a built-up area.
+
 Usage: build_roads.py <extract.osm.pbf> <out_dir>
 """
 import gzip
@@ -14,6 +19,7 @@ import math
 import os
 import re
 import sys
+from collections import deque
 
 import osmium
 import osmium.index
@@ -25,7 +31,16 @@ CLASSES = [
 ]
 CLASS_INDEX = {c: i for i, c in enumerate(CLASSES)}
 IMPLICIT = {"FR:urban": 50, "FR:rural": 80, "FR:motorway": 130, "FR:zone30": 30, "FR:walk": 6}
-SRC_EXPLICIT, SRC_IMPLICIT, SRC_INFERRED = 0, 1, 2
+SRC_EXPLICIT, SRC_IMPLICIT, SRC_INFERRED, SRC_AREA = 0, 1, 2, 3
+
+# Built-up areas (see module doc).
+BUILTUP_LANDUSE = {"residential", "retail", "commercial"}
+AREA_CLASSES = {"trunk", "primary", "secondary", "tertiary", "unclassified"}
+CELL_LAT, CELL_LON = 1 / 1000, 1 / 700  # ~110 m both ways across France
+MIN_PATCH_CELLS = 4  # ~5 ha
+MIN_RUN_M = 100  # shorter in/out runs inside a way are noise along a boundary
+URBAN_KMH, RURAL_KMH = 50, 80
+ROW = 1_000_000  # cell key = row * ROW + column
 
 
 def parse_speed(value):
@@ -76,13 +91,91 @@ def oneway_of(tags, highway):
     return 1 if highway in ("motorway", "motorway_link") or tags.get("junction") == "roundabout" else 0
 
 
+def cell_key(lat, lon):
+    return math.floor(lat / CELL_LAT) * ROW + math.floor(lon / CELL_LON)
+
+
+def fill(rings, cells):
+    """Adds the cells whose centre lies inside [rings] (even-odd rule: inner rings are holes)."""
+    edges = [(a, b) for ring in rings for a, b in zip(ring, ring[1:] + ring[:1]) if a[0] != b[0]]
+    if not edges:
+        return
+    lats = [p[0] for ring in rings for p in ring]
+    for i in range(math.floor(min(lats) / CELL_LAT), math.floor(max(lats) / CELL_LAT) + 1):
+        y = (i + 0.5) * CELL_LAT
+        xs = sorted(a[1] + (y - a[0]) * (b[1] - a[1]) / (b[0] - a[0]) for a, b in edges if (a[0] <= y) != (b[0] <= y))
+        for x0, x1 in zip(xs[0::2], xs[1::2]):
+            for j in range(math.ceil(x0 / CELL_LON - 0.5), math.floor(x1 / CELL_LON - 0.5) + 1):
+                cells.add(i * ROW + j)
+
+
+def drop_small_patches(cells, min_cells):
+    """Removes the 4-connected groups of fewer than [min_cells] cells."""
+    seen = set()
+    for start in list(cells):
+        if start in seen:
+            continue
+        group, queue = [start], deque([start])
+        seen.add(start)
+        while queue:
+            k = queue.popleft()
+            for n in (k + 1, k - 1, k + ROW, k - ROW):
+                if n in cells and n not in seen:
+                    seen.add(n)
+                    group.append(n)
+                    queue.append(n)
+        if len(group) < min_cells:
+            cells.difference_update(group)
+
+
+class BuiltUp:
+    """Built-up grid. A point counts as built-up when its cell or one of the 4 next to it is: roads
+    often run between landuse polygons, on cells left out of them."""
+
+    def __init__(self, cells):
+        self.cells = cells
+
+    def covers(self, lat, lon):
+        k = cell_key(lat, lon)
+        return any(n in self.cells for n in (k, k + 1, k - 1, k + ROW, k - ROW))
+
+
+def smooth(flags, coords):
+    """Flips in/out runs shorter than MIN_RUN_M between two runs of the other state."""
+    runs, start = [], 0
+    for k in range(1, len(flags) + 1):
+        if k == len(flags) or flags[k] != flags[start]:
+            runs.append((start, k))
+            start = k
+    out = list(flags)
+    for n, (a, b) in enumerate(runs[1:-1], 1):
+        length = sum(math.dist((coords[k][0] * 111_000, coords[k][1] * 78_000), (coords[k + 1][0] * 111_000, coords[k + 1][1] * 78_000))
+                     for k in range(max(a - 1, 0), b))
+        if length < MIN_RUN_M:
+            out[a:b] = [not flags[a]] * (b - a)
+    return out
+
+
 class JunctionCounter(osmium.SimpleHandler):
-    """Pass 1: finds nodes used more than once by drivable ways."""
+    """Pass 1: finds nodes used more than once by drivable ways, and the built-up areas."""
 
     def __init__(self):
         super().__init__()
         self.seen = osmium.index.IdSet()
         self.junction = osmium.index.IdSet()
+        self.cells = set()
+
+    def area(self, a):
+        if a.tags.get("landuse") not in BUILTUP_LANDUSE:
+            return
+        try:
+            rings = []
+            for outer in a.outer_rings():
+                rings.append([(n.lat, n.lon) for n in outer])
+                rings.extend([(n.lat, n.lon) for n in inner] for inner in a.inner_rings(outer))
+        except osmium.InvalidLocationError:
+            return
+        fill(rings, self.cells)
 
     def way(self, w):
         if w.tags.get("highway") not in CLASS_INDEX:
@@ -131,12 +224,14 @@ class TileWriter:
 
 
 class SegmentBuilder(osmium.SimpleHandler):
-    """Pass 2: splits ways at junctions and writes segments to tiles."""
+    """Pass 2: splits ways at junctions (and built-up edges) and writes segments to tiles."""
 
-    def __init__(self, junction, writer):
+    def __init__(self, junction, builtup, writer):
         super().__init__()
         self.junction = junction
+        self.builtup = builtup
         self.writer = writer
+        self.area_segments = 0
 
     def way(self, w):
         highway = w.tags.get("highway")
@@ -155,17 +250,28 @@ class SegmentBuilder(osmium.SimpleHandler):
             fwd, bwd = bwd, fwd
             oneway = 1
         name = tags.get("ref") or tags.get("name")
+        # No limit at all: default of the place, 50 built-up, 80 outside on a two-way road.
+        flags = None
+        if fwd is None and bwd is None and highway in AREA_CLASSES:
+            coords = [(loc.lat, loc.lon) for _, loc in nodes]
+            flags = smooth([self.builtup.covers(*c) for c in coords], coords)
         start = 0
         piece = 0
         for k in range(1, len(nodes)):
-            if k == len(nodes) - 1 or nodes[k][0] in self.junction:
+            edge = flags is not None and flags[k] != flags[k - 1]
+            if k == len(nodes) - 1 or nodes[k][0] in self.junction or edge:
                 part = nodes[start:k + 1]
                 coords = []
                 for _, loc in part:
                     coords += [round(loc.lat, 6), round(loc.lon, 6)]
+                seg_fwd, seg_bwd, seg_src = fwd, bwd, src
+                if flags is not None:
+                    seg_fwd = seg_bwd = URBAN_KMH if flags[start] else (RURAL_KMH if not oneway else None)
+                    seg_src = SRC_AREA if seg_fwd else None
+                    self.area_segments += seg_fwd is not None
                 seg_id = w.id * 1000 + piece
                 self.writer.write(
-                    [seg_id, part[0][0], part[-1][0], oneway, fwd, bwd, src, CLASS_INDEX[highway], name, coords],
+                    [seg_id, part[0][0], part[-1][0], oneway, seg_fwd, seg_bwd, seg_src, CLASS_INDEX[highway], name, coords],
                     coords,
                 )
                 start = k
@@ -176,11 +282,16 @@ def main():
     pbf, out_dir = sys.argv[1], sys.argv[2]
     os.makedirs(out_dir, exist_ok=True)
     counter = JunctionCounter()
-    counter.apply_file(pbf)
+    counter.apply_file(pbf, locations=True, idx="flex_mem")
+    cells = counter.cells
+    raw = len(cells)
+    drop_small_patches(cells, MIN_PATCH_CELLS)
+    print(f"zones bâties : {len(cells)} cellules de ~110 m ({raw - len(cells)} isolées retirées)")
     writer = TileWriter(out_dir)
-    SegmentBuilder(counter.junction, writer).apply_file(pbf, locations=True, idx="flex_mem")
+    builder = SegmentBuilder(counter.junction, BuiltUp(cells), writer)
+    builder.apply_file(pbf, locations=True, idx="flex_mem")
     writer.close()
-    print(f"{writer.count} segments, {len(writer.files)} tiles")
+    print(f"{writer.count} segments ({builder.area_segments} avec la limite par défaut du lieu), {len(writer.files)} tiles")
 
 
 if __name__ == "__main__":
