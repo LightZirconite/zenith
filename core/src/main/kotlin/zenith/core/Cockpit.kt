@@ -4,8 +4,9 @@ package zenith.core
  * What the drive screen gives room to, from the speed: the same rules on the phone and in the small
  * window. Slow (stopped, a jam, a light), the music's Canvas rises up the screen; from town speeds
  * on, the map has it. An alert or a section always gives the map back. A tap on the music card
- * overrides the speed until the speed agrees with it again: big at a stop, then the car drives off
- * and it shrinks; small on the road, then the car stops and it grows.
+ * overrides the speed until the speed agrees with it again (big at a stop, then the car drives off
+ * and it shrinks; small on the road, then the car stops and it grows), or until [CHOICE_MS] without
+ * a new tap: then the speed leads again, through the usual smooth animation.
  */
 object Cockpit {
     /** Under this speed the music has the screen… */
@@ -19,6 +20,9 @@ object Cockpit {
 
     /** …and come back under this one (apart, so they do not flicker in town). */
     const val CRUISE_UNDER_KMH = 12
+
+    /** A tap's choice lasts at most this long without a new tap. */
+    const val CHOICE_MS = 3 * 60_000L
 
     /** The music's share of the screen by [speedKmh] alone, 0 to 1; unknown speed: the map. */
     fun musicBySpeed(speedKmh: Int?): Float {
@@ -34,8 +38,12 @@ object Cockpit {
         else -> musicBySpeed(speedKmh)
     }
 
-    /** A tap's choice lasts until the speed alone gives the same; then the speed leads again (null). */
-    fun keepChoice(choice: Boolean?, speedKmh: Int?): Boolean? = when {
+    /**
+     * A tap's choice lasts until the speed alone gives the same, or [CHOICE_MS] after the tap
+     * ([ageMs]); then the speed leads again (null).
+     */
+    fun keepChoice(choice: Boolean?, speedKmh: Int?, ageMs: Long = 0): Boolean? = when {
+        choice != null && ageMs >= CHOICE_MS -> null
         choice == true && musicBySpeed(speedKmh) >= 1f -> null
         choice == false && speedKmh != null && musicBySpeed(speedKmh) <= 0f -> null
         else -> choice

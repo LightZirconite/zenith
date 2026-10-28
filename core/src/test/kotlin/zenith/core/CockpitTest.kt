@@ -45,6 +45,10 @@ class CockpitTest {
         // Unknown speed: nothing changes.
         assertEquals(false, Cockpit.keepChoice(false, null))
         assertNull(Cockpit.keepChoice(null, 50))
+        // Three minutes without a new tap: the speed leads again, whatever was asked.
+        assertEquals(true, Cockpit.keepChoice(true, 90, ageMs = Cockpit.CHOICE_MS - 1))
+        assertNull(Cockpit.keepChoice(true, 90, ageMs = Cockpit.CHOICE_MS))
+        assertNull(Cockpit.keepChoice(false, 0, ageMs = Cockpit.CHOICE_MS))
         // The tap flips what is shown.
         assertTrue(Cockpit.toggle(0.2f))
         assertFalse(Cockpit.toggle(0.8f))

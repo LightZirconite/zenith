@@ -34,6 +34,8 @@ object DriveState {
     private val _demo = MutableStateFlow(false)
     private val _origin = MutableStateFlow(DriveOrigin.HAND)
     private val _musicChoice = MutableStateFlow<Boolean?>(null)
+    @Volatile
+    private var musicChoiceAtMs = 0L
 
     val running: StateFlow<Boolean> = _running
     val snapshot: StateFlow<DriveSnapshot?> = _snapshot
@@ -54,12 +56,13 @@ object DriveState {
 
     /**
      * The music's room on screen chosen by a tap (true: the Canvas up the screen), until the speed
-     * agrees with it ([Cockpit.keepChoice]); null: the speed decides. Shared by the drive screen
+     * agrees with it or for [Cockpit.CHOICE_MS] at most ([Cockpit.keepChoice]); null: the speed decides. Shared by the drive screen
      * and the small window.
      */
     val musicChoice: StateFlow<Boolean?> = _musicChoice
 
     fun chooseMusic(big: Boolean) {
+        musicChoiceAtMs = System.currentTimeMillis()
         _musicChoice.value = big
     }
 
@@ -74,7 +77,7 @@ object DriveState {
 
     internal fun update(snapshot: DriveSnapshot) {
         _snapshot.value = snapshot
-        _musicChoice.update { Cockpit.keepChoice(it, snapshot.speedKmh) }
+        _musicChoice.update { Cockpit.keepChoice(it, snapshot.speedKmh, System.currentTimeMillis() - musicChoiceAtMs) }
         _gps.update { it.copy(accuracyM = snapshot.gpsAccuracyM, lastFixMs = System.currentTimeMillis()) }
     }
 
