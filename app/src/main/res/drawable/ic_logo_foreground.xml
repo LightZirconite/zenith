@@ -5,8 +5,15 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Drawing spans y 26.5–69.5: moved down 6 so it sits on the canvas center (54). -->
-    <group android:translateY="6">
+    <!-- Drawing spans x 27.25–80.75, y 27.25–68.75 (center 54, 48). Scaled to 0.86 around that center
+         and moved down 7: centered at (54, 55), a touch low for the top-heavy dial, with room to
+         breathe inside every launcher mask (it used to nearly touch the circle). -->
+    <group
+        android:pivotX="54"
+        android:pivotY="48"
+        android:scaleX="0.86"
+        android:scaleY="0.86"
+        android:translateY="7">
         <path
             android:pathData="M33.22,66 A24,24 0 1,1 74.78,66"
             android:strokeWidth="5.5"
