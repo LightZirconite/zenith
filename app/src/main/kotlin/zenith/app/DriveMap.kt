@@ -131,6 +131,8 @@ private class MapHolder(private val carAt: Double) {
 
     /** The driver is looking around: the camera stops following until then. */
     private var freeUntilMs = 0L
+    private var gesture = false
+    private var last: DriveSnapshot? = null
 
     fun create(context: Context): View = runCatching {
         density = context.resources.displayMetrics.density
@@ -145,10 +147,25 @@ private class MapHolder(private val carAt: Double) {
                 m.uiSettings.setAttributionEnabled(false)
                 m.uiSettings.setRotateGesturesEnabled(false)
                 m.uiSettings.setTiltGesturesEnabled(false)
+                // A drag or a pinch frees the camera; it comes back on its own LOOK_AROUND_MS after the
+                // gesture ends (fling included), never in the middle of it. A tap brings it back at once.
                 m.addOnCameraMoveStartedListener { reason ->
                     if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
+                        gesture = true
+                        freeUntilMs = SystemClock.elapsedRealtime() + GESTURE_MAX_MS // if the idle event never comes
+                    }
+                }
+                m.addOnCameraIdleListener {
+                    if (gesture) {
+                        gesture = false
                         freeUntilMs = SystemClock.elapsedRealtime() + LOOK_AROUND_MS
                     }
+                }
+                m.addOnMapClickListener {
+                    gesture = false
+                    freeUntilMs = 0L
+                    last?.let(::follow)
+                    true
                 }
                 lastCamera?.let(m::setCameraPosition)
                 m.setStyle(Style.Builder().fromUri(STYLE)) { s ->
@@ -166,6 +183,7 @@ private class MapHolder(private val carAt: Double) {
      * with speed, and further when needed to frame the next radar on the road (up to 4 km).
      */
     fun follow(s: DriveSnapshot) {
+        last = s
         runCatching {
             style?.getSourceAs<GeoJsonSource>(SRC_ME)?.setGeoJson(point(s.position, """{"h":${s.headingDeg ?: lastCamera?.bearing ?: 0.0}}"""))
             style?.getSourceAs<GeoJsonSource>(SRC_AHEAD)?.setGeoJson(line(s.ahead))
@@ -353,6 +371,7 @@ private class MapHolder(private val carAt: Double) {
         const val SRC_AHEAD = "ahead"
         const val SRC_RADARS = "radars"
         const val SRC_ZONES = "zones"
-        const val LOOK_AROUND_MS = 8_000L
+        const val LOOK_AROUND_MS = 5_000L
+        const val GESTURE_MAX_MS = 30_000L
     }
 }

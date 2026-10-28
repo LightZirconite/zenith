@@ -12,14 +12,14 @@ data class SettingsState(
     val raining: Boolean = false,
     /** False: alert tones only, no voice. */
     val voice: Boolean = true,
+    /** The music pauses while the voice speaks (else it only gets quieter). */
+    val pauseMusic: Boolean = true,
     /** Battery saver: a drive started by hand ends by itself once the car is parked. */
     val autoStop: Boolean = true,
     /** Drive started by itself when the phone starts riding in a vehicle (activity recognition). */
     val motionStart: Boolean = true,
     /** Rain mode from the weather (Open-Meteo) while driving. */
     val autoRain: Boolean = true,
-    /** The driver set rain by hand during this drive: the weather no longer changes it. Not kept. */
-    val rainManual: Boolean = false,
     /** Car paired for the automatic start (CompanionDeviceManager association), with its name. */
     val carAssociationId: Int? = null,
     val carName: String? = null,
@@ -43,9 +43,10 @@ object UserSettings {
         val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         _state.value = SettingsState(
             probationary = p.getBoolean("probationary", false),
-            // Rain is not kept from one drive to the next: it is a quick toggle for today.
+            // Set by the weather during a drive, never kept from one drive to the next.
             raining = false,
             voice = p.getBoolean("voice", true),
+            pauseMusic = p.getBoolean("pause_music", true),
             autoStop = p.getBoolean("auto_stop", true),
             autoRain = p.getBoolean("auto_rain", true),
             motionStart = p.getBoolean("motion_start", true),
@@ -63,6 +64,7 @@ object UserSettings {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
             putBoolean("probationary", next.probationary)
             putBoolean("voice", next.voice)
+            putBoolean("pause_music", next.pauseMusic)
             putBoolean("auto_stop", next.autoStop)
             putBoolean("auto_rain", next.autoRain)
             putBoolean("motion_start", next.motionStart)

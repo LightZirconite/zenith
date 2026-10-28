@@ -63,6 +63,7 @@ import zenith.core.ControlZone
 import zenith.core.DriveSnapshot
 import zenith.core.LimitSource
 import zenith.core.Radar
+import zenith.core.RadarType
 import zenith.core.SectionStatus
 import zenith.core.UpcomingRadar
 import kotlin.math.roundToInt
@@ -91,10 +92,6 @@ fun DriveScreen(
     onOpenNavApp: (NavApp) -> Unit = {},
     demo: Boolean = false,
     onDemo: () -> Unit = {},
-    raining: Boolean = false,
-    /** Rain mode follows the weather (no manual change during this drive). */
-    rainAuto: Boolean = false,
-    onToggleRain: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
     /** Track playing in Spotify or another player (notification access granted). */
     media: MediaInfo? = null,
@@ -105,8 +102,6 @@ fun DriveScreen(
     onMediaPrevious: () -> Unit = {},
     onMediaPlayPause: () -> Unit = {},
     onMediaNext: () -> Unit = {},
-    /** One line on the home screen pointing to a setting still waiting for a permission. */
-    hint: String? = null,
 ) {
     val showMap = running && snapshot != null
     Box(Modifier.fillMaxSize().background(Bg)) {
@@ -118,7 +113,7 @@ fun DriveScreen(
             modifier = Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 20.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            StatusRow(running, gps, data, demo, snapshot, raining, rainAuto, onToggleRain)
+            StatusRow(running, gps, data, demo, snapshot)
             UpdateBanner(update, canInstall, onInstallUpdate)
             Column(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -126,7 +121,7 @@ fun DriveScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 // A little lower than the middle, so the car arrow on the map stays clear.
-                if (running) Dashboard(snapshot, Modifier.padding(top = if (showMap) 72.dp else 0.dp)) else Idle(data, onDemo, hint, onOpenSettings)
+                if (running) Dashboard(snapshot, Modifier.padding(top = if (showMap) 72.dp else 0.dp)) else Idle(data, onDemo)
             }
             AlertArea(snapshot.takeIf { running })
             Spacer(Modifier.height(12.dp))
@@ -181,9 +176,6 @@ private fun StatusRow(
     data: DataStatus,
     demo: Boolean,
     snapshot: DriveSnapshot?,
-    raining: Boolean,
-    rainAuto: Boolean,
-    onToggleRain: () -> Unit,
 ) {
     val estimated = snapshot?.estimated == true
     val gpsGood = (gps.accuracyM ?: 99.0) <= 15
@@ -219,17 +211,6 @@ private fun StatusRow(
         Spacer(Modifier.weight(1f))
         AnimatedVisibility(visible = data.loading || data.error != null, enter = fadeIn(), exit = fadeOut()) {
             Chip(data.error ?: "Chargement des routes…", if (data.error != null) Orange else Dim)
-        }
-        // Rain lowers the limits: follows the weather, one tap takes over for the rest of the drive.
-        AnimatedVisibility(visible = running, enter = fadeIn(), exit = fadeOut()) {
-            Row {
-                Spacer(Modifier.width(8.dp))
-                Chip(
-                    (if (raining) "Pluie" else "Sec") + if (rainAuto) " · auto" else "",
-                    if (raining) Color(0xFF0A84FF) else Dim,
-                    onClick = onToggleRain,
-                )
-            }
         }
     }
 }
@@ -272,7 +253,7 @@ private fun UpdateBanner(update: UpdateState, canInstall: Boolean, onInstall: ()
 }
 
 @Composable
-private fun Idle(data: DataStatus, onDemo: () -> Unit, hint: String? = null, onHint: () -> Unit = {}) {
+private fun Idle(data: DataStatus, onDemo: () -> Unit) {
     // Logo breathing softly, with a red glow behind the needle.
     val breath = rememberInfiniteTransition(label = "logo")
     val scale by breath.animateFloat(0.96f, 1.04f, infiniteRepeatable(tween(2_200), RepeatMode.Reverse), label = "scale")
@@ -302,15 +283,6 @@ private fun Idle(data: DataStatus, onDemo: () -> Unit, hint: String? = null, onH
         fontSize = 16.sp,
         textAlign = TextAlign.Center,
     )
-    if (hint != null) {
-        Text(
-            hint,
-            color = Color(0xFF0A84FF),
-            fontSize = 14.sp,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = 14.dp).clip(RoundedCornerShape(12.dp)).clickable(onClick = onHint).padding(8.dp),
-        )
-    }
 }
 
 /** Shortcuts to the navigation apps installed: Zenith keeps alerting from behind them. */
@@ -459,14 +431,38 @@ private fun UpcomingStrip(u: UpcomingRadar) {
 
 @Composable
 private fun SectionCard(s: SectionStatus) {
-    val over = s.averageKmh > s.limitKmh
+    // One number to read (the average, next to the limit sign), one sentence saying what to do.
+    val slowDown = s.lost || s.targetKmh < s.limitKmh
+    val progress by animateFloatAsState((1 - s.remainingM / s.lengthM).toFloat().coerceIn(0f, 1f), label = "section")
     Column(
-        Modifier.fillMaxWidth().padding(bottom = 12.dp).clip(RoundedCornerShape(22.dp))
-            .background(if (over) Red else Surface).padding(20.dp),
+        Modifier.fillMaxWidth().padding(bottom = 12.dp).clip(RoundedCornerShape(22.dp)).background(if (slowDown) Red else Surface),
     ) {
-        Text("Tronçon · moyenne ${s.averageKmh.roundToInt()} / ${s.limitKmh}", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        val target = s.maxSpeedToFinishKmh?.let { "max ${it.roundToInt()} km/h jusqu'à la fin" } ?: "aucune contrainte"
-        Text("${distanceText(s.remainingM)} restants · $target", color = Color.White.copy(alpha = 0.8f), fontSize = 15.sp)
+        Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+            RadarBadge(RadarType.SECTION_START, s.limitKmh, 54.dp)
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Ta moyenne sur le tronçon", color = Color.White.copy(alpha = 0.75f), fontSize = 14.sp)
+                Text("${s.averageKmh.roundToInt()} km/h", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text("encore", color = Color.White.copy(alpha = 0.75f), fontSize = 14.sp)
+                Text(distanceText(s.remainingM), color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+        Text(
+            when {
+                s.lost -> "Moyenne trop haute : elle finira au-dessus de ${s.limitKmh}"
+                slowDown -> "Pour finir sous ${s.limitKmh} : pas plus de ${s.targetKmh} jusqu'au bout"
+                else -> "Moyenne bonne : roule jusqu'à ${s.limitKmh}, pas plus"
+            },
+            color = Color.White,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 14.dp),
+        )
+        Box(Modifier.fillMaxWidth().height(6.dp).background(Color.White.copy(alpha = 0.15f))) {
+            Box(Modifier.fillMaxHeight().fillMaxWidth(progress).background(Color.White))
+        }
     }
 }
 

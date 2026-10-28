@@ -19,10 +19,10 @@ object Announcer {
             null
         }
         is AlertEvent.SectionStarted ->
-            if (event.resumed) "Tronçon en cours, moyenne à ${event.limitKmh}"
-            else "Tronçon de ${spokenDistance(event.lengthM)}, moyenne à ${event.limitKmh}"
+            if (event.resumed) "Radar tronçon en cours, limite ${event.limitKmh} en moyenne"
+            else "Radar tronçon sur ${spokenDistance(event.lengthM)}, limite ${event.limitKmh} en moyenne"
         is AlertEvent.SectionEnded ->
-            "Fin du tronçon, moyenne ${event.averageKmh.roundToInt()}" + if (event.wouldFlash) ", au-dessus de la limite" else ""
+            "Fin du tronçon, ta moyenne : ${event.averageKmh.roundToInt()}" + if (event.wouldFlash) ", trop rapide" else ", c'est bon"
         is AlertEvent.Overspeed -> if (event.level == OverspeedLevel.WARN) "Limite ${event.limitKmh}" else null
         is AlertEvent.LimitChanged -> null
         is AlertEvent.ZoneEntered -> "Itinéraire de contrôle sur ${spokenDistance(event.remainingM)}, radar possible"

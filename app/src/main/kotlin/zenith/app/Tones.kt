@@ -30,17 +30,21 @@ enum class Tone(val notes: List<Note>) {
 
 data class Note(val hz: Double, val ms: Int)
 
-/** Plays the tones; [ducker] lowers the music while they sound. */
+/** Plays the tones; [ducker] lowers the music while they sound and says when Bluetooth needs a lead-in. */
 class TonePlayer(private val ducker: AudioDucker) {
     private val attributes = AudioAttributes.Builder()
         .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
         .build()
-    private val tracks = Tone.entries.associateWith(::build)
+    private val tracks = Tone.entries.associateWith { build(it, leadMs = 0) }
+
+    /** Same tones after a short silence, for a Bluetooth output that swallows its first samples. */
+    private val bluetoothTracks = lazy { Tone.entries.associateWith { build(it, AudioDucker.BLUETOOTH_LEAD_MS) } }
 
     fun play(tone: Tone) {
-        val track = tracks.getValue(tone)
-        ducker.duckFor(durationMs(tone).toLong())
+        val bluetooth = ducker.bluetooth()
+        val track = (if (bluetooth) bluetoothTracks.value else tracks).getValue(tone)
+        ducker.duckFor(durationMs(tone, bluetooth).toLong())
         runCatching {
             track.stop()
             track.reloadStaticData()
@@ -48,13 +52,17 @@ class TonePlayer(private val ducker: AudioDucker) {
         }
     }
 
-    /** Total length of [tone], to start speech right after it. */
-    fun durationMs(tone: Tone) = tone.notes.sumOf { it.ms }
+    /** Total length of [tone] as played (Bluetooth lead-in included), to start speech right after it. */
+    fun durationMs(tone: Tone, bluetooth: Boolean = ducker.bluetooth()) =
+        tone.notes.sumOf { it.ms } + if (bluetooth) AudioDucker.BLUETOOTH_LEAD_MS else 0
 
-    fun release() = tracks.values.forEach { it.release() }
+    fun release() {
+        tracks.values.forEach { it.release() }
+        if (bluetoothTracks.isInitialized()) bluetoothTracks.value.values.forEach { it.release() }
+    }
 
-    private fun build(tone: Tone): AudioTrack {
-        val pcm = synthesize(tone.notes)
+    private fun build(tone: Tone, leadMs: Int): AudioTrack {
+        val pcm = ShortArray(leadMs * RATE / 1000) + synthesize(tone.notes)
         val track = AudioTrack.Builder()
             .setAudioAttributes(attributes)
             .setAudioFormat(

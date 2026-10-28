@@ -69,20 +69,20 @@ fun SettingsScreen(
             Toggle(
                 "Pluie automatique",
                 "Pendant la conduite, la météo (Open-Meteo, gratuit) dit s'il pleut et les limites baissent seules : 110 sur " +
-                    "autoroute, 100 sur voie rapide, 80 sur route. Seule une position arrondie à ~10 km est envoyée. " +
-                    "Un appui sur la puce Pluie/Sec reprend la main jusqu'à la fin du trajet.",
+                    "autoroute, 100 sur voie rapide, 80 sur route. Rien à toucher. Seule une position arrondie à ~10 km est envoyée.",
                 settings.autoRain,
             ) { on -> onChange { it.copy(autoRain = on) } }
-            Toggle(
-                "Pluie maintenant",
-                "Limites de pluie tout de suite, sans attendre la météo.",
-                settings.raining,
-            ) { on -> onChange { it.copy(raining = on, rainManual = true) } }
             Toggle(
                 "Annonces vocales",
                 "Désactivé : seulement les bips, sans voix.",
                 settings.voice,
             ) { on -> onChange { it.copy(voice = on) } }
+            Toggle(
+                "Musique en pause pendant la voix",
+                "Spotify, YouTube ou la radio s'arrêtent le temps d'une annonce puis reprennent, pour tout comprendre même en " +
+                    "Bluetooth. Désactivé : la musique baisse seulement. Les bips, eux, baissent toujours la musique.",
+                settings.pauseMusic,
+            ) { on -> onChange { it.copy(pauseMusic = on) } }
             Toggle(
                 "Arrêt automatique",
                 "Pour la batterie : Zenith s'arrête seul quand la voiture est garée depuis 10 minutes, quand tu repars à pied " +

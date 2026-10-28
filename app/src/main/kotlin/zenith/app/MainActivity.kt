@@ -72,6 +72,9 @@ class MainActivity : ComponentActivity() {
             var permissionResults by remember { mutableIntStateOf(0) }
             val permissions = remember(resumeCount, permissionResults) { Permissions.read(context) }
             var onboarded by remember { mutableStateOf(prefs.getBoolean(KEY_ONBOARDED, false)) }
+            // Every permission is required: the welcome screen comes back whenever one is missing,
+            // a new one or one taken back (never during a drive).
+            val showWelcome = !running && (!onboarded || permissions.missing(settings.motionStart) > 0)
             // "Car connected · tap to start" notification.
             LaunchedEffect(startNow, permissions.location) {
                 if (startNow && permissions.location) {
@@ -82,7 +85,19 @@ class MainActivity : ComponentActivity() {
 
             val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
                 permissionResults++
-                if (onboarded && result[Manifest.permission.ACCESS_FINE_LOCATION] == true) DriveService.start(context)
+                if (!showWelcome && result[Manifest.permission.ACCESS_FINE_LOCATION] == true) DriveService.start(context)
+            }
+            // "Démarrage en roulant": activity recognition first, then the location "all the time".
+            val onMotion = {
+                val details = { Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")) }
+                val activity = Motion.activityPermission()
+                when {
+                    !permissions.activity && activity != null -> requestOrSettings(arrayOf(activity), { launcher.launch(it) }, details)
+                    // Android 11+ answers this one with its own settings page ("Toujours autoriser").
+                    !permissions.backgroundLocation && Build.VERSION.SDK_INT >= 29 ->
+                        requestOrSettings(arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION), { launcher.launch(it) }, details)
+                    else -> Unit
+                }
             }
 
             // While driving: screen stays on, and leaving the app opens the picture-in-picture window.
@@ -112,7 +127,7 @@ class MainActivity : ComponentActivity() {
 
             if (pip) {
                 PipScreen(snapshot, radars, zones, media = media, canvas = settings.spotifyCanvas)
-            } else if (showSettings && onboarded) {
+            } else if (showSettings && !showWelcome) {
                 SettingsScreen(
                     settings = settings,
                     version = remember { runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull().orEmpty() },
@@ -139,20 +154,13 @@ class MainActivity : ComponentActivity() {
                     mediaAllowed = permissions.media,
                     onAllowMedia = { openSettings(NowPlaying.accessIntent(context)) },
                     permissions = permissions,
-                    onMotionPermission = {
-                        val details = { Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")) }
-                        val activity = Motion.activityPermission()
-                        when {
-                            !permissions.activity && activity != null -> requestOrSettings(arrayOf(activity), { launcher.launch(it) }, details)
-                            // Android 11+ answers this one with its own settings page ("Toujours autoriser").
-                            !permissions.backgroundLocation && Build.VERSION.SDK_INT >= 29 ->
-                                requestOrSettings(arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION), { launcher.launch(it) }, details)
-                        }
-                    },
+                    onMotionPermission = onMotion,
                 )
-            } else if (!onboarded) {
+            } else if (showWelcome) {
                 Onboarding(
                     permissions = permissions,
+                    returning = onboarded,
+                    motionWanted = settings.motionStart,
                     onLocation = {
                         requestOrSettings(Permissions.locationPermissions(), { launcher.launch(it) }) {
                             Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
@@ -165,6 +173,9 @@ class MainActivity : ComponentActivity() {
                     },
                     onInstalls = { openSettings(Permissions.installsIntent(context)) },
                     onBattery = { openSettings(Permissions.batteryIntent(context)) },
+                    onMotion = onMotion,
+                    onMedia = { openSettings(NowPlaying.accessIntent(context)) },
+                    onMediaUnlock = { openSettings(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) },
                     onDone = {
                         prefs.edit { putBoolean(KEY_ONBOARDED, true) }
                         onboarded = true
@@ -191,9 +202,6 @@ class MainActivity : ComponentActivity() {
                     onOpenNavApp = { it.launch(context) },
                     demo = demo,
                     onDemo = { if (permissions.location) DriveService.startDemo(context) },
-                    raining = settings.raining,
-                    rainAuto = settings.autoRain && !settings.rainManual,
-                    onToggleRain = { UserSettings.update(context) { it.copy(raining = !it.raining, rainManual = true) } },
                     onOpenSettings = { showSettings = true },
                     media = media,
                     mediaCanvas = settings.spotifyCanvas,
@@ -202,12 +210,6 @@ class MainActivity : ComponentActivity() {
                     onMediaPrevious = NowPlaying::previous,
                     onMediaPlayPause = NowPlaying::playPause,
                     onMediaNext = NowPlaying::next,
-                    hint = when {
-                        permissions.motionAvailable && settings.motionStart && !permissions.motion ->
-                            "Réglages → Démarrage en roulant : Zenith démarrera seul en voiture"
-                        !permissions.media -> "Réglages → Musique : Spotify et ton lecteur pendant la conduite"
-                        else -> null
-                    },
                 )
             }
         }

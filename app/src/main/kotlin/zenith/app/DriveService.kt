@@ -178,17 +178,14 @@ class DriveService : Service(), LocationListener {
         }
     }
 
-    /**
-     * Rain mode from the weather: checked every 10 minutes at the car's position (rounded to ~10 km),
-     * spoken when it changes. A tap on the rain chip during the drive leaves it to the driver.
-     */
+    /** Rain mode from the weather: checked every 10 minutes at the car's position (rounded to ~10 km), spoken when it changes. */
     private fun watchWeather() {
         val rain = RainDetector()
         scope.launch(Dispatchers.IO) {
             while (true) {
                 val s = UserSettings.state.value
                 val p = DriveState.snapshot.value?.position
-                if (p == null || !s.autoRain || s.rainManual) {
+                if (p == null || !s.autoRain) {
                     delay(20_000)
                     continue
                 }
@@ -196,13 +193,14 @@ class DriveService : Service(), LocationListener {
                     .onFailure { Log.w("Zenith", "weather", it) }.getOrNull()
                 if (now != null) {
                     val raining = rain.report(now)
-                    if (raining != s.raining && !UserSettings.state.value.rainManual) {
+                    if (raining != s.raining) {
                         UserSettings.update(this@DriveService) { it.copy(raining = raining) }
                         tones.play(Tone.CHIME)
                         if (s.voice) {
                             speaker.say(
                                 if (raining) "Pluie, limites abaissées" else "Fin de la pluie, limites normales",
                                 delayMs = tones.durationMs(Tone.CHIME) + 80,
+                                pauseMusic = s.pauseMusic,
                             )
                         }
                     }
@@ -310,13 +308,20 @@ class DriveService : Service(), LocationListener {
             is AlertEvent.ZoneLeft -> null
         }
         tone?.let(tones::play)
-        if (!UserSettings.state.value.voice) return
-        Announcer.text(event)?.let { speaker.say(it, delayMs = tone?.let(tones::durationMs)?.plus(80) ?: 0) }
+        val settings = UserSettings.state.value
+        if (!settings.voice) return
+        // What changes the driver's speed now goes first, dropping older announcements still queued.
+        val urgent = event is AlertEvent.Brake || (event is AlertEvent.Overspeed && event.level == OverspeedLevel.WARN) ||
+            (event is AlertEvent.Passed && event.wouldFlash)
+        Announcer.text(event)?.let {
+            speaker.say(it, delayMs = tone?.let { t -> tones.durationMs(t) + 80 } ?: 0, urgent = urgent, pauseMusic = settings.pauseMusic)
+        }
     }
 
     /** Like Coyote: while over the limit near a radar, beeps get faster as it gets closer. */
     private fun dangerBeep(s: DriveSnapshot) {
         val alert = s.alerts.firstOrNull { it.overLimit } ?: return
+        if (speaker.speaking) return // never over the voice
         val interval = when {
             alert.distanceM < 200 -> 500L
             alert.distanceM < 500 -> 1_000L
@@ -343,7 +348,7 @@ class DriveService : Service(), LocationListener {
         }
         driveExecutor.shutdown()
         // The next drive starts from the weather again, not from this drive's rain.
-        if (started && !demo) UserSettings.update(this) { it.copy(rainManual = false, raining = if (it.autoRain) false else it.raining) }
+        if (started && !demo) UserSettings.update(this) { it.copy(raining = false) }
         DriveState.stopped()
         super.onDestroy()
     }
@@ -353,7 +358,7 @@ class DriveService : Service(), LocationListener {
      * re-posts it every 30 s anyway so it comes back if it was dismissed.
      */
     private fun refreshNotification(s: DriveSnapshot) {
-        val key = Triple(s.speedKmh, s.limitKmh, listOfNotNull(nextRadarText(s), zoneText(s)).joinToString())
+        val key = Triple(s.speedKmh, s.limitKmh, listOfNotNull(sectionText(s), nextRadarText(s), zoneText(s)).joinToString())
         val stale = s.timeMs - lastNotifiedAtMs >= 30_000
         if (!stale && (key == lastNotified || s.timeMs - lastNotifiedAtMs < 2_000)) return
         lastNotified = key
@@ -386,12 +391,13 @@ class DriveService : Service(), LocationListener {
             else -> "$speed km/h"
         }
         val zone = s?.let(::zoneText)
-        val text = next ?: zone ?: s?.road?.segment?.name ?: "Aucun radar sur ta route pour l'instant"
+        val section = s?.let(::sectionText)
+        val text = section ?: next ?: zone ?: s?.road?.segment?.name ?: "Aucun radar sur ta route pour l'instant"
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
             .setContentText(text)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(listOfNotNull(next, zone, s?.road?.segment?.name).joinToString("\n").ifEmpty { text }))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(listOfNotNull(section, next, zone, s?.road?.segment?.name).joinToString("\n").ifEmpty { text }))
             .setContentIntent(open)
             .setDeleteIntent(reshow)
             .addAction(0, "Arrêter", stop)
@@ -416,6 +422,11 @@ class DriveService : Service(), LocationListener {
         }
         val km = "%.1f".format(distanceM / 1_000).replace('.', ',')
         return "$label · $km km"
+    }
+
+    /** "Tronçon : moyenne 67, limite 70 · encore 0,8 km", tenths of km so it changes rarely. */
+    private fun sectionText(s: DriveSnapshot): String? = s.section?.let {
+        "Tronçon : moyenne ${it.averageKmh.toInt()}, limite ${it.limitKmh} · encore ${"%.1f".format(it.remainingM / 1_000).replace('.', ',')} km"
     }
 
     /** "Itinéraire de contrôle · 12 km", whole kilometers so it changes rarely. */
