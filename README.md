@@ -12,6 +12,16 @@ Alertes radars gratuites pour Android, simples et sans compte. Zenith tourne en 
   <a href="https://github.com/LightZirconite/zenith/releases/latest/download/zenith.apk"><b>⬇ Télécharger la dernière version</b></a>
 </p>
 
+## Installation
+
+Zenith ne vient pas du Play Store : Play Protect peut bloquer l'installation, parce que l'app demande des autorisations sensibles (accès aux notifications pour la musique, position en arrière-plan, installation des mises à jour).
+
+1. Ouvre le Play Store → ta photo de profil → **Play Protect** → ⚙ → désactive **Analyser les applications avec Play Protect**.
+2. Télécharge et installe l'APK.
+3. Réactive Play Protect.
+
+Ensuite, Zenith se met à jour tout seul.
+
 ## Fonctionnalités
 
 - Ta vitesse et la limitation de la route, en grand
