@@ -57,6 +57,7 @@ class MainActivity : ComponentActivity() {
             val gps by DriveState.gps.collectAsStateWithLifecycle()
             val data by DriveState.data.collectAsStateWithLifecycle()
             val radars by DriveState.nearbyRadars.collectAsStateWithLifecycle()
+            val zones by DriveState.nearbyZones.collectAsStateWithLifecycle()
             val update by Updater.state.collectAsStateWithLifecycle()
             val resumeCount by resumes.collectAsStateWithLifecycle()
             val pip by inPip.collectAsStateWithLifecycle()
@@ -105,7 +106,7 @@ class MainActivity : ComponentActivity() {
             }
 
             if (pip) {
-                PipScreen(snapshot, radars)
+                PipScreen(snapshot, radars, zones)
             } else if (showSettings && onboarded) {
                 SettingsScreen(
                     settings = settings,
@@ -156,6 +157,7 @@ class MainActivity : ComponentActivity() {
                     running = running,
                     snapshot = snapshot,
                     radars = radars,
+                    zones = zones,
                     gps = gps,
                     data = data,
                     update = update,

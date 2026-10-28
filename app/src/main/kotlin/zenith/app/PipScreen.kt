@@ -39,6 +39,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import zenith.core.ControlZone
 import zenith.core.DriveSnapshot
 import zenith.core.Radar
 import kotlin.math.roundToInt
@@ -60,7 +61,7 @@ private val PipFade = Brush.verticalGradient(
  * Everything scales with the window size. Over the limit near a radar, a red frame pulses.
  */
 @Composable
-fun PipScreen(s: DriveSnapshot?, radars: List<Radar>) {
+fun PipScreen(s: DriveSnapshot?, radars: List<Radar>, zones: List<ControlZone> = emptyList()) {
     val alert = s?.alerts?.firstOrNull()
     val limit = s?.limitKmh
     val speed = s?.speedKmh
@@ -81,7 +82,7 @@ fun PipScreen(s: DriveSnapshot?, radars: List<Radar>) {
         val unit = minOf(maxWidth, maxHeight).value / 100f // 1 % of the window's short side, in dp
         val halo = TextStyle(shadow = Shadow(Color.Black, blurRadius = 18f))
 
-        DriveMap(s, radars, Modifier.fillMaxSize(), carAt = 0.5, overlay = PipFade)
+        DriveMap(s, radars, zones, Modifier.fillMaxSize(), carAt = 0.5, overlay = PipFade)
 
         // Next radar: pill at the top, red while too fast for it.
         val next = alert?.let { Triple(it.radar, it.limitKmh, it.distanceM) }
@@ -133,7 +134,8 @@ fun PipScreen(s: DriveSnapshot?, radars: List<Radar>) {
             if (limit != null) {
                 val sign = (unit * 26).dp
                 Box(
-                    Modifier.padding(bottom = (unit * 3).dp).size(sign).background(Color.White, CircleShape).border(sign / 9, Red, CircleShape),
+                    Modifier.padding(bottom = (unit * 3).dp).size(sign).background(Color.White, CircleShape)
+                        .border(sign / 9, if (s?.limitSource.isGuess()) Color(0xFF8E8E93) else Red, CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(

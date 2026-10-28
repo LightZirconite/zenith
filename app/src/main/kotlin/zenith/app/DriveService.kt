@@ -22,25 +22,35 @@ import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import zenith.core.AlertEvent
 import zenith.core.Announcer
+import zenith.core.BBox
+import zenith.core.ControlZone
 import zenith.core.DemoDrive
 import zenith.core.DriveSnapshot
 import zenith.core.DrivingSession
 import zenith.core.GpsFix
+import zenith.core.LatLon
 import zenith.core.OverspeedLevel
 import zenith.core.RadarIndex
+import java.util.concurrent.Executors
 
 /**
  * Foreground service running a drive: 1 Hz GPS → DrivingSession → shared state, sounds, voice
- * and GPX. Keeps alerting with the screen off or Waze / Maps in front.
+ * and GPX. Keeps alerting with the screen off or Waze / Maps in front. The pipeline runs on its own
+ * thread, one fix after the other (the road horizon is too heavy for the UI thread), and a failing
+ * step is logged and skipped: a drive never stops on an error.
  */
 class DriveService : Service(), LocationListener {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val driveExecutor = Executors.newSingleThreadExecutor { Thread(it, "zenith-drive") }
+    private val drive = driveExecutor.asCoroutineDispatcher()
     private lateinit var session: DrivingSession
+    private lateinit var ducker: AudioDucker
     private lateinit var speaker: Speaker
     private lateinit var tones: TonePlayer
 
@@ -60,6 +70,8 @@ class DriveService : Service(), LocationListener {
     private var lastDangerBeepMs = 0L
     @Volatile
     private var radarIndex = RadarIndex(emptyList())
+    @Volatile
+    private var zoneBoxes: List<Pair<ControlZone, BBox>> = emptyList()
     private var lastNearbyMs = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -100,8 +112,9 @@ class DriveService : Service(), LocationListener {
         started = true
         CarLink.cancelTapToStart(this)
         UserSettings.init(this)
-        speaker = Speaker(this)
-        tones = TonePlayer()
+        ducker = AudioDucker(this)
+        speaker = Speaker(this, ducker)
+        tones = TonePlayer(ducker)
         DriveState.started(demo, auto)
         if (demo) startDemo() else startLive()
         scope.launch { UserSettings.state.collect { session.profile = it.profile } }
@@ -114,20 +127,29 @@ class DriveService : Service(), LocationListener {
         session = DrivingSession({ live.network }, emptyList())
         recorder = TripRecorder(this)
         scope.launch { live.status.collect(DriveState::data) }
-        live.loadRadars { radars ->
-            radarIndex = RadarIndex(radars)
-            lastNearbyMs = 0L
-            scope.launch { session.setRadars(radars) }
+        live.loadRadars { pack ->
+            radarIndex = RadarIndex(pack.radars)
+            zoneBoxes = pack.zones.map { it to BBox.of(it.points) }
+            scope.launch(drive) {
+                lastNearbyMs = 0L
+                session.setRadars(pack.radars)
+                session.setZones(pack.zones)
+            }
         }
         val manager = getSystemService(LocationManager::class.java)
+        // Road tiles around the last known position load while the GPS gets its first fix.
+        runCatching {
+            listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.PASSIVE_PROVIDER)
+                .firstNotNullOfOrNull { manager.getLastKnownLocation(it) }
+        }.getOrNull()?.let { live.ensureTiles(LatLon(it.latitude, it.longitude)) }
         gpsStatus = GpsStatusWatcher(manager, DriveState::satellites).also { it.start() }
         manager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1_000L, 0f, this, Looper.getMainLooper())
         // Tunnel: no fix for 2.5 s → the car keeps moving along the road (DrivingSession.coast).
-        scope.launch {
+        scope.launch(drive) {
             while (true) {
                 delay(1_000)
                 val lost = System.currentTimeMillis() - lastFixWallMs
-                if (lastFixWallMs > 0 && lost > 2_500) session.coast(lastFixTimeMs + lost)?.let(::show)
+                if (lastFixWallMs > 0 && lost > 2_500) guarded { session.coast(lastFixTimeMs + lost)?.let(::show) }
             }
         }
     }
@@ -137,7 +159,7 @@ class DriveService : Service(), LocationListener {
         val scenario = DemoDrive.load()
         session = DrivingSession(scenario.network, scenario.radars)
         radarIndex = RadarIndex(scenario.radars)
-        scope.launch {
+        scope.launch(drive) {
             val t0 = System.currentTimeMillis()
             for (fix in scenario.fixes) {
                 val at = t0 + fix.timeMs
@@ -151,22 +173,37 @@ class DriveService : Service(), LocationListener {
 
     override fun onLocationChanged(location: Location) {
         val fix = location.toFix()
-        recorder?.add(fix)
         data?.ensureTiles(fix.position)
-        lastFixTimeMs = fix.timeMs
-        lastFixWallMs = System.currentTimeMillis()
-        process(fix)
+        val wallMs = System.currentTimeMillis()
+        scope.launch(drive) {
+            recorder?.add(fix)
+            lastFixTimeMs = fix.timeMs
+            lastFixWallMs = wallMs
+            process(fix)
+        }
     }
 
-    private fun process(fix: GpsFix) {
-        session.process(fix)?.let(::show)
+    /** Drive thread only. */
+    private fun process(fix: GpsFix) = guarded { session.process(fix)?.let(::show) }
+
+    /** A failing step must not end the drive (nor crash the app, which could then no longer update). */
+    private inline fun guarded(block: () -> Unit) {
+        try {
+            block()
+        } catch (e: Exception) {
+            Log.e("Zenith", "drive step", e)
+        }
     }
 
     private fun show(snapshot: DriveSnapshot) {
         DriveState.update(snapshot)
         if (snapshot.timeMs - lastNearbyMs >= 3_000 || lastNearbyMs == 0L) {
             lastNearbyMs = snapshot.timeMs
-            DriveState.nearbyRadars(radarIndex.near(snapshot.position, 3_000.0))
+            val around = BBox.around(snapshot.position, 4_000.0)
+            val zones = zoneBoxes.filter { (_, b) ->
+                b.minLat <= around.maxLat && b.maxLat >= around.minLat && b.minLon <= around.maxLon && b.maxLon >= around.minLon
+            }.map { it.first }
+            DriveState.nearby(radarIndex.near(snapshot.position, 3_000.0), zones)
         }
         snapshot.events.forEach(::announce)
         dangerBeep(snapshot)
@@ -183,6 +220,8 @@ class DriveService : Service(), LocationListener {
             is AlertEvent.Passed -> Tone.PASSED.takeIf { event.wouldFlash }
             is AlertEvent.SectionEnded -> Tone.PASSED
             is AlertEvent.LimitChanged -> null
+            is AlertEvent.ZoneEntered -> Tone.CHIME
+            is AlertEvent.ZoneLeft -> null
         }
         tone?.let(tones::play)
         if (!UserSettings.state.value.voice) return
@@ -204,14 +243,18 @@ class DriveService : Service(), LocationListener {
     }
 
     override fun onDestroy() {
+        scope.cancel()
         if (started) {
             if (!demo) getSystemService(LocationManager::class.java).removeUpdates(this)
             gpsStatus?.stop()
-            recorder?.close()
+            val trip = recorder
+            // After the pending fixes, on the drive thread that owns the recorder.
+            driveExecutor.execute { trip?.close() }
             speaker.shutdown()
             tones.release()
+            ducker.shutdown()
         }
-        scope.cancel()
+        driveExecutor.shutdown()
         DriveState.stopped()
         super.onDestroy()
     }
@@ -221,7 +264,7 @@ class DriveService : Service(), LocationListener {
      * re-posts it every 30 s anyway so it comes back if it was dismissed.
      */
     private fun refreshNotification(s: DriveSnapshot) {
-        val key = Triple(s.speedKmh, s.limitKmh, nextRadarText(s))
+        val key = Triple(s.speedKmh, s.limitKmh, listOfNotNull(nextRadarText(s), zoneText(s)).joinToString())
         val stale = s.timeMs - lastNotifiedAtMs >= 30_000
         if (!stale && (key == lastNotified || s.timeMs - lastNotifiedAtMs < 2_000)) return
         lastNotified = key
@@ -253,12 +296,13 @@ class DriveService : Service(), LocationListener {
             limit != null -> "$speed km/h · limite $limit"
             else -> "$speed km/h"
         }
-        val text = next ?: s?.road?.segment?.name ?: "Aucun radar sur ta route pour l'instant"
+        val zone = s?.let(::zoneText)
+        val text = next ?: zone ?: s?.road?.segment?.name ?: "Aucun radar sur ta route pour l'instant"
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
             .setContentText(text)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(listOfNotNull(next, s?.road?.segment?.name).joinToString("\n").ifEmpty { text }))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(listOfNotNull(next, zone, s?.road?.segment?.name).joinToString("\n").ifEmpty { text }))
             .setContentIntent(open)
             .setDeleteIntent(reshow)
             .addAction(0, "Arrêter", stop)
@@ -284,6 +328,10 @@ class DriveService : Service(), LocationListener {
         val km = "%.1f".format(distanceM / 1_000).replace('.', ',')
         return "$label · $km km"
     }
+
+    /** "Itinéraire de contrôle · 12 km", whole kilometers so it changes rarely. */
+    private fun zoneText(s: DriveSnapshot): String? =
+        s.zone?.let { "Itinéraire de contrôle · ${(it.remainingM / 1_000).toInt().coerceAtLeast(1)} km" }
 
     private fun createChannel() {
         val channel = NotificationChannel(CHANNEL_ID, "Conduite", NotificationManager.IMPORTANCE_LOW)

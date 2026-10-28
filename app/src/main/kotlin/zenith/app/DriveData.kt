@@ -13,7 +13,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import zenith.core.LatLon
-import zenith.core.Radar
+import zenith.core.RadarData
 import zenith.core.RadarPack
 import zenith.core.RoadNetwork
 import zenith.core.RoadSegment
@@ -27,6 +27,8 @@ import java.util.zip.GZIPInputStream
 /** What the data layer has loaded, for the UI. */
 data class DataStatus(
     val radarCount: Int = 0,
+    /** Control itineraries (official map) in memory. */
+    val zoneCount: Int = 0,
     val radarsUpdatedMs: Long? = null,
     val tilesLoaded: Int = 0,
     val loading: Boolean = false,
@@ -56,8 +58,8 @@ class DriveData(context: Context, private val scope: CoroutineScope) {
     private val _status = MutableStateFlow(DataStatus())
     val status: StateFlow<DataStatus> = _status
 
-    /** Loads cached radars now, refreshes them from GitHub when older than a day. */
-    fun loadRadars(onLoaded: (List<Radar>) -> Unit) = scope.launch(Dispatchers.IO) {
+    /** Loads cached radars and zones now, refreshes them from GitHub when older than a day. */
+    fun loadRadars(onLoaded: (RadarData) -> Unit) = scope.launch(Dispatchers.IO) {
         if (radarFile.exists()) publishRadars(onLoaded)
         if (!radarFile.exists() || age(radarFile) > DAY_MS) {
             runCatching { download("radars.json", radarFile) }
@@ -105,10 +107,10 @@ class DriveData(context: Context, private val scope: CoroutineScope) {
         }.getOrNull().also { availableTiles = it }
     }
 
-    private fun publishRadars(onLoaded: (List<Radar>) -> Unit) {
-        val radars = runCatching { RadarPack.parse(radarFile.readText()) }.onFailure { fail("radars", it) }.getOrNull() ?: return
-        _status.update { it.copy(radarCount = radars.size, radarsUpdatedMs = radarFile.lastModified(), error = null) }
-        onLoaded(radars)
+    private fun publishRadars(onLoaded: (RadarData) -> Unit) {
+        val pack = runCatching { RadarPack.parseAll(radarFile.readText()) }.onFailure { fail("radars", it) }.getOrNull() ?: return
+        _status.update { it.copy(radarCount = pack.radars.size, zoneCount = pack.zones.size, radarsUpdatedMs = radarFile.lastModified(), error = null) }
+        onLoaded(pack)
     }
 
     private fun fail(what: String, e: Throwable) {

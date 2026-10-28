@@ -3,6 +3,7 @@ package zenith.app
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import zenith.core.ControlZone
 import zenith.core.DriveSnapshot
 import zenith.core.Radar
 
@@ -13,6 +14,7 @@ object DriveState {
     private val _gps = MutableStateFlow(GpsInfo())
     private val _data = MutableStateFlow(DataStatus())
     private val _nearbyRadars = MutableStateFlow<List<Radar>>(emptyList())
+    private val _nearbyZones = MutableStateFlow<List<ControlZone>>(emptyList())
     private val _demo = MutableStateFlow(false)
     private val _autoStarted = MutableStateFlow(false)
 
@@ -23,6 +25,9 @@ object DriveState {
 
     /** Radars around the car, for the map. */
     val nearbyRadars: StateFlow<List<Radar>> = _nearbyRadars
+
+    /** Control itineraries around the car, for the map. */
+    val nearbyZones: StateFlow<List<ControlZone>> = _nearbyZones
 
     /** The running drive is the hidden simulated one. */
     val demo: StateFlow<Boolean> = _demo
@@ -45,8 +50,9 @@ object DriveState {
 
     internal fun satellites(used: Int, visible: Int) = _gps.update { it.copy(used = used, visible = visible) }
 
-    internal fun nearbyRadars(radars: List<Radar>) {
+    internal fun nearby(radars: List<Radar>, zones: List<ControlZone>) {
         _nearbyRadars.value = radars
+        _nearbyZones.value = zones
     }
 
     internal fun data(status: DataStatus) {
@@ -59,5 +65,6 @@ object DriveState {
         _demo.value = false
         _autoStarted.value = false
         _nearbyRadars.value = emptyList()
+        _nearbyZones.value = emptyList()
     }
 }

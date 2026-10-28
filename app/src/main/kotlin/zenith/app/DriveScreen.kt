@@ -59,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import zenith.core.ActiveAlert
+import zenith.core.ControlZone
 import zenith.core.DriveSnapshot
 import zenith.core.LimitSource
 import zenith.core.Radar
@@ -78,6 +79,7 @@ fun DriveScreen(
     running: Boolean,
     snapshot: DriveSnapshot?,
     radars: List<Radar>,
+    zones: List<ControlZone> = emptyList(),
     gps: GpsInfo,
     data: DataStatus,
     update: UpdateState,
@@ -97,13 +99,13 @@ fun DriveScreen(
     Box(Modifier.fillMaxSize().background(Bg)) {
         // Tilted map over the top of the screen, melting progressively into the background.
         AnimatedVisibility(visible = showMap, enter = fadeIn(tween(1_200)), exit = fadeOut(tween(600))) {
-            DriveMap(snapshot, radars, Modifier.fillMaxWidth().fillMaxHeight(0.62f))
+            DriveMap(snapshot, radars, zones, Modifier.fillMaxWidth().fillMaxHeight(0.62f))
         }
         Column(
             modifier = Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 20.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            StatusRow(running, gps, data, demo, snapshot?.estimated == true, raining, onToggleRain)
+            StatusRow(running, gps, data, demo, snapshot, raining, onToggleRain)
             UpdateBanner(update, canInstall, onInstallUpdate)
             Column(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -150,10 +152,11 @@ private fun StatusRow(
     gps: GpsInfo,
     data: DataStatus,
     demo: Boolean,
-    estimated: Boolean,
+    snapshot: DriveSnapshot?,
     raining: Boolean,
     onToggleRain: () -> Unit,
 ) {
+    val estimated = snapshot?.estimated == true
     val gpsGood = (gps.accuracyM ?: 99.0) <= 15
     var showGps by remember { mutableStateOf(true) }
     LaunchedEffect(gpsGood, running) {
@@ -171,7 +174,12 @@ private fun StatusRow(
         AnimatedVisibility(visible = running && !demo && estimated, enter = fadeIn(), exit = fadeOut()) {
             Chip("Tunnel · position estimée", Orange)
         }
-        AnimatedVisibility(visible = running && !demo && !estimated && showGps, enter = fadeIn(), exit = fadeOut()) {
+        // Control itinerary: a movable radar may be anywhere along it.
+        val zone = snapshot?.zone
+        AnimatedVisibility(visible = running && zone != null && !estimated, enter = fadeIn(), exit = fadeOut()) {
+            Chip("Itinéraire de contrôle · ${((zone?.remainingM ?: 0.0) / 1_000).roundToInt().coerceAtLeast(1)} km", Orange)
+        }
+        AnimatedVisibility(visible = running && !demo && !estimated && zone == null && showGps, enter = fadeIn(), exit = fadeOut()) {
             val text = when {
                 gps.accuracyM == null -> "Satellites ${gps.used}/${gps.visible} · recherche"
                 gpsGood -> "GPS ±${gps.accuracyM.roundToInt()} m · ${gps.used} sat."
@@ -251,9 +259,14 @@ private fun Idle(data: DataStatus, onDemo: () -> Unit) {
     Text("Zenith", color = Color.White, fontSize = 44.sp, fontWeight = FontWeight.Bold)
     Spacer(Modifier.height(8.dp))
     Text(
-        if (data.radarCount > 0) "${"%,d".format(data.radarCount).replace(',', ' ')} radars en mémoire" else "Radars et limitations chargés au démarrage",
+        when {
+            data.radarCount == 0 -> "Radars et limitations chargés au démarrage"
+            data.zoneCount == 0 -> "${thousands(data.radarCount)} radars en mémoire"
+            else -> "${thousands(data.radarCount)} radars · ${thousands(data.zoneCount)} itinéraires de contrôle"
+        },
         color = Dim,
         fontSize = 16.sp,
+        textAlign = TextAlign.Center,
     )
 }
 
@@ -312,7 +325,7 @@ private fun Dashboard(s: DriveSnapshot?, modifier: Modifier = Modifier) {
                 Row {
                     Spacer(Modifier.width(20.dp))
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        LimitSign(limit ?: 0, uncertain = s?.limitSource == LimitSource.INFERRED)
+                        LimitSign(limit ?: 0, uncertain = s?.limitSource.isGuess())
                         val ahead = s?.limitAhead
                         Text(
                             ahead?.let { "${it.limitKmh} dans ${distanceText(it.distanceM)}" } ?: " ",
@@ -328,7 +341,7 @@ private fun Dashboard(s: DriveSnapshot?, modifier: Modifier = Modifier) {
     }
 }
 
-/** Round limit sign; gray ring when the limit is only inferred from the road type. */
+/** Round limit sign; gray ring when the limit is only inferred (road type, built-up area or not). */
 @Composable
 private fun LimitSign(limitKmh: Int, uncertain: Boolean) {
     Box(
@@ -427,6 +440,11 @@ private fun StartStop(running: Boolean, onStart: () -> Unit, onStop: () -> Unit)
             .clickable(onClick = if (running) onStop else onStart).padding(vertical = 18.dp),
     )
 }
+
+/** Limit inferred rather than signposted: shown with a gray ring. */
+fun LimitSource?.isGuess() = this == LimitSource.INFERRED || this == LimitSource.AREA
+
+private fun thousands(n: Int) = "%,d".format(n).replace(',', ' ')
 
 private fun distanceText(m: Double): String =
     if (m < 1_000) "${(m / 10).roundToInt() * 10} m" else "%.1f km".format(m / 1_000).replace('.', ',')

@@ -30,7 +30,8 @@ enum class Tone(val notes: List<Note>) {
 
 data class Note(val hz: Double, val ms: Int)
 
-class TonePlayer {
+/** Plays the tones; [ducker] lowers the music while they sound. */
+class TonePlayer(private val ducker: AudioDucker) {
     private val attributes = AudioAttributes.Builder()
         .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
@@ -39,6 +40,7 @@ class TonePlayer {
 
     fun play(tone: Tone) {
         val track = tracks.getValue(tone)
+        ducker.duckFor(durationMs(tone).toLong())
         runCatching {
             track.stop()
             track.reloadStaticData()

@@ -38,6 +38,7 @@ import org.maplibre.android.style.layers.Property
 import org.maplibre.android.style.layers.PropertyFactory
 import org.maplibre.android.style.layers.SymbolLayer
 import org.maplibre.android.style.sources.GeoJsonSource
+import zenith.core.ControlZone
 import zenith.core.DriveSnapshot
 import zenith.core.LatLon
 import zenith.core.Radar
@@ -45,8 +46,8 @@ import kotlin.math.cos
 import kotlin.math.ln
 
 /**
- * Tilted map at the top of the drive screen: arrow for the car, road ahead and nearby radars as
- * mini limit signs. The camera frames the next radar on the road when there is one; dragging or
+ * Tilted map at the top of the drive screen: arrow for the car, road ahead, nearby radars as mini
+ * limit signs and control itineraries as an orange dashed line. The camera frames the next radar on the road when there is one; dragging or
  * pinching looks around, and the camera comes back on its own after a few seconds.
  * Vector tiles from OpenFreeMap (free, no key). Any map failure leaves an empty black box.
  */
@@ -54,6 +55,7 @@ import kotlin.math.ln
 fun DriveMap(
     snapshot: DriveSnapshot?,
     radars: List<Radar>,
+    zones: List<ControlZone> = emptyList(),
     modifier: Modifier = Modifier,
     /** Height fraction where the car arrow sits. */
     carAt: Double = 0.45,
@@ -99,6 +101,7 @@ fun DriveMap(
     LaunchedEffect(radars, snapshot?.alerts?.firstOrNull()?.radar?.id) {
         holder.showRadars(radars, snapshot?.alerts?.map { it.radar.id }?.toSet().orEmpty())
     }
+    LaunchedEffect(zones) { holder.showZones(zones) }
 
     Box(modifier) {
         AndroidView(factory = { view }, modifier = Modifier.fillMaxSize())
@@ -121,6 +124,7 @@ private class MapHolder(private val carAt: Double) {
     private var map: MapLibreMap? = null
     private var style: Style? = null
     private var pendingRadars: String? = null
+    private var pendingZones: String? = null
     private var lastCamera: CameraPosition? = null
     private var zoom: Double? = null
     private var density = 1f
@@ -207,10 +211,23 @@ private class MapHolder(private val carAt: Double) {
         if (source == null) pendingRadars = json else runCatching { source.setGeoJson(json) }
     }
 
+    fun showZones(zones: List<ControlZone>) {
+        val json = collection(zones.map { line(it.points) })
+        val source = style?.getSourceAs<GeoJsonSource>(SRC_ZONES)
+        if (source == null) pendingZones = json else runCatching { source.setGeoJson(json) }
+    }
+
     private fun setUp(s: Style) {
         restyle(s)
         s.addImage(PUCK, puck(density))
+        s.addSource(GeoJsonSource(SRC_ZONES, pendingZones ?: collection(emptyList())))
         s.addSource(GeoJsonSource(SRC_AHEAD, line(emptyList())))
+        s.addLayer(
+            LineLayer("zones", SRC_ZONES).withProperties(
+                PropertyFactory.lineColor(ZONE_COLOR), PropertyFactory.lineWidth(4f), PropertyFactory.lineOpacity(0.55f),
+                PropertyFactory.lineDasharray(arrayOf(2f, 1.5f)), PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
+            ),
+        )
         s.addSource(GeoJsonSource(SRC_RADARS, pendingRadars ?: collection(emptyList())))
         s.addSource(GeoJsonSource(SRC_ME, collection(emptyList())))
         s.addLayer(
@@ -262,6 +279,7 @@ private class MapHolder(private val carAt: Double) {
         )
         style = s
         pendingRadars = null
+        pendingZones = null
     }
 
     /** Darker, calmer roads and black background, so the map melts into the app. */
@@ -329,10 +347,12 @@ private class MapHolder(private val carAt: Double) {
     private companion object {
         const val STYLE = "https://tiles.openfreemap.org/styles/dark"
         const val ACCENT = "#0A84FF"
+        const val ZONE_COLOR = "#FF9F0A"
         const val PUCK = "puck"
         const val SRC_ME = "me"
         const val SRC_AHEAD = "ahead"
         const val SRC_RADARS = "radars"
+        const val SRC_ZONES = "zones"
         const val LOOK_AROUND_MS = 8_000L
     }
 }
