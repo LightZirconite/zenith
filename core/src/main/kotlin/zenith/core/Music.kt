@@ -42,13 +42,6 @@ data class PlaybackProgress(val positionMs: Long, val updatedAtMs: Long, val spe
     /** Share of the track played at [nowMs], 0 to 1. */
     fun fractionAt(nowMs: Long, playing: Boolean): Float = positionAt(nowMs, playing).toFloat() / durationMs
 
-    /**
-     * Where a looping video of [loopMs] stands if it started with the track and never stopped: a
-     * canvas that follows the song, the same after a pause or back in the app.
-     */
-    fun loopPositionAt(nowMs: Long, playing: Boolean, loopMs: Long): Long =
-        if (loopMs <= 0) 0 else Math.floorMod(positionAt(nowMs, playing), loopMs)
-
     companion object {
         /**
          * Progress from a playback state; null when the player gives no position or no duration

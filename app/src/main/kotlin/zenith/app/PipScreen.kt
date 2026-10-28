@@ -1,6 +1,5 @@
 package zenith.app
 
-import android.os.SystemClock
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.RepeatMode
@@ -210,7 +209,6 @@ private fun PipCanvas(video: File, media: MediaInfo?, calm: Boolean, onFailed: (
             video,
             playing = media?.playing == true,
             modifier = Modifier.fillMaxSize(),
-            loopPositionMs = { loopMs -> media?.let { m -> m.progress?.loopPositionAt(SystemClock.elapsedRealtime(), m.playing, loopMs) } },
             onShown = { shown = true },
             onFailed = {
                 media?.spotifyTrackId?.let { SpotifyCanvas.discard(it, video) }

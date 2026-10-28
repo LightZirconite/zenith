@@ -91,7 +91,6 @@ fun MusicBackdrop(media: MediaInfo, canvas: Boolean, calm: Boolean, modifier: Mo
                 video,
                 playing = media.playing,
                 modifier = Modifier.fillMaxSize().alpha(videoAlpha),
-                loopPositionMs = { loopMs -> media.progress?.loopPositionAt(SystemClock.elapsedRealtime(), media.playing, loopMs) },
                 onShown = { videoShown = true },
                 onFailed = {
                     videoFailed = true
