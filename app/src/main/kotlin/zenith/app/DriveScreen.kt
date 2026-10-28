@@ -101,7 +101,6 @@ fun DriveScreen(
     /** Spotify Canvas behind the music card (setting). */
     mediaCanvas: Boolean = true,
     onMediaOpen: () -> Unit = {},
-    onMediaLike: () -> Unit = {},
     onMediaPrevious: () -> Unit = {},
     onMediaPlayPause: () -> Unit = {},
     onMediaNext: () -> Unit = {},
@@ -138,7 +137,6 @@ fun DriveScreen(
                         // An alert on screen: the music steps back.
                         calm = snapshot?.alerts?.isNotEmpty() == true,
                         onOpen = onMediaOpen,
-                        onLike = onMediaLike,
                         onPrevious = onMediaPrevious,
                         onPlayPause = onMediaPlayPause,
                         onNext = onMediaNext,

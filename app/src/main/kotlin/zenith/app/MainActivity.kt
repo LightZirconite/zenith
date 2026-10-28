@@ -198,7 +198,6 @@ class MainActivity : ComponentActivity() {
                     media = media,
                     mediaCanvas = settings.spotifyCanvas,
                     onMediaOpen = { NowPlaying.open(context) },
-                    onMediaLike = NowPlaying::toggleLike,
                     onMediaPrevious = NowPlaying::previous,
                     onMediaPlayPause = NowPlaying::playPause,
                     onMediaNext = NowPlaying::next,

@@ -49,12 +49,4 @@ class MusicTest {
         assertNull(PlaybackProgress.of(-1, 0, 1f, 200_000))
         assertEquals(1f, PlaybackProgress.of(0, 0, Float.NaN, 200_000)!!.speed)
     }
-
-    @Test
-    fun `Spotify's like action tells whether the track is liked`() {
-        assertEquals(LikeAction("ADD_TO_COLLECTION", liked = false), PlayerActions.like(listOf("TURN_SHUFFLE_ON", "ADD_TO_COLLECTION")))
-        assertEquals(LikeAction("REMOVE_FROM_COLLECTION", liked = true), PlayerActions.like(listOf("REMOVE_FROM_COLLECTION", "TURN_SHUFFLE_OFF")))
-        assertNull(PlayerActions.like(listOf("TURN_SHUFFLE_ON", "SEEK_15_SECONDS_BACK")))
-        assertNull(PlayerActions.like(emptyList()))
-    }
 }
