@@ -99,6 +99,7 @@ fun CarDashboard(stableArea: StateFlow<Rect>, hint: StateFlow<String>) {
         val carX = ((panelEnd + safe.right) / 2f / widthPx).toDouble().coerceIn(0.5, 0.8)
         val showMap = running && snapshot != null
         val s = snapshot.takeIf { running }
+        val digits = (maxHeight.value * 0.2f).coerceIn(64f, 120f).sp
 
         AnimatedVisibility(
             visible = showMap,
@@ -139,7 +140,7 @@ fun CarDashboard(stableArea: StateFlow<Rect>, hint: StateFlow<String>) {
                     Spacer(Modifier.height(10.dp))
                     AlertArea(s, CompactCards)
                     Spacer(Modifier.weight(1f))
-                    CarSpeed(s, digits = (maxHeight.value * 0.2f).coerceIn(64f, 120f).sp)
+                    CarSpeed(s, digits)
                 }
             } else {
                 Column(
