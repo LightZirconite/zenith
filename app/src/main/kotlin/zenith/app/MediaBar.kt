@@ -35,6 +35,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -56,7 +60,8 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import zenith.core.PlaybackProgress
 
-private val BarGlass = Color(0x9916161A)
+/** Translucent "glass" of the drive screen, shared with its chips, cards and buttons. */
+val Glass = Color(0xA61F1F24)
 private val BarDim = Color(0xFFB0B0B5)
 private val Liked = Color(0xFF1ED760)
 
@@ -76,7 +81,14 @@ fun MusicBackdrop(media: MediaInfo, canvas: Boolean, calm: Boolean, modifier: Mo
     val videoAlpha by animateFloatAsState(if (!videoShown) 0f else if (calm) 0.35f else 0.85f, tween(900), label = "canvas")
     val artAlpha by animateFloatAsState(if (calm) 0.25f else 0.5f, tween(600), label = "backdrop")
     val backdrop = remember(media.art) { media.art?.let(::tiny) }
-    Box(modifier) {
+    // The top fades to transparent (a mask, not a black band): the Canvas melts into the map above.
+    Box(
+        modifier.graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
+            .drawWithContent {
+                drawContent()
+                drawRect(BackdropMask, blendMode = BlendMode.DstIn)
+            },
+    ) {
         // Blurred cover: a tiny copy upscaled is already soft, the blur (Android 12+) smooths it out.
         backdrop?.let {
             Image(
@@ -102,13 +114,15 @@ fun MusicBackdrop(media: MediaInfo, canvas: Boolean, calm: Boolean, modifier: Mo
     }
 }
 
-/** Black at the top (it meets the map's fade), darker again at the bottom under the buttons. */
+/** Darkening for the speed and the buttons to stay readable, stronger at the bottom. */
 private val BackdropFade = Brush.verticalGradient(
-    0f to Color.Black,
-    0.3f to Color.Black.copy(alpha = 0.6f),
-    0.7f to Color.Black.copy(alpha = 0.45f),
+    0f to Color.Black.copy(alpha = 0.35f),
+    0.5f to Color.Black.copy(alpha = 0.45f),
     1f to Color.Black.copy(alpha = 0.75f),
 )
+
+/** Opacity of the backdrop: nothing at its top edge, full from 45 % down. */
+private val BackdropMask = Brush.verticalGradient(0f to Color.Transparent, 0.45f to Color.Black, 1f to Color.Black)
 
 /**
  * Music controls under the alerts, for any player (Spotify, YouTube, Deezer…): cover, title,
@@ -125,7 +139,7 @@ fun MediaBar(
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
 ) {
-    BoxWithConstraints(Modifier.fillMaxWidth().padding(bottom = 10.dp).height(72.dp).clip(RoundedCornerShape(20.dp)).background(BarGlass)) {
+    BoxWithConstraints(Modifier.fillMaxWidth().padding(bottom = 10.dp).height(72.dp).clip(RoundedCornerShape(20.dp)).background(Glass)) {
         // Below that width the heart would leave the title almost no room.
         val roomForLike = maxWidth >= 340.dp
 

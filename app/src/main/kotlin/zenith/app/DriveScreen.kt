@@ -69,11 +69,31 @@ import zenith.core.UpcomingRadar
 import kotlin.math.roundToInt
 
 private val Bg = Color(0xFF000000)
-private val Surface = Color(0xFF16161A)
+/** Translucent "glass" shared by every chip, card and button, like the music strip: the map and the Canvas show through. */
+private val Surface = Glass
 private val Red = Color(0xFFFF3B30)
 private val Orange = Color(0xFFFF9F0A)
 private val Green = Color(0xFF30D158)
 private val Dim = Color(0xFF8E8E93)
+
+/** The map's own long fade into the black background (no music). */
+private val DriveMapFade = Brush.verticalGradient(
+    0f to Color.Black.copy(alpha = 0.45f),
+    0.12f to Color.Transparent,
+    0.42f to Color.Transparent,
+    0.62f to Color.Black.copy(alpha = 0.35f),
+    0.8f to Color.Black.copy(alpha = 0.75f),
+    1f to Color.Black,
+)
+
+/** With music: the map darkens toward its bottom but never turns into a black band, the Canvas rises over it. */
+private val MapOverMusic = Brush.verticalGradient(
+    0f to Color.Black.copy(alpha = 0.45f),
+    0.12f to Color.Transparent,
+    0.45f to Color.Transparent,
+    0.75f to Color.Black.copy(alpha = 0.4f),
+    1f to Color.Black.copy(alpha = 0.85f),
+)
 
 @Composable
 fun DriveScreen(
@@ -107,7 +127,8 @@ fun DriveScreen(
     Box(Modifier.fillMaxSize().background(Bg)) {
         // Tilted map over the top of the screen, melting progressively into the background.
         AnimatedVisibility(visible = showMap, enter = fadeIn(tween(1_200)), exit = fadeOut(tween(600))) {
-            DriveMap(snapshot, radars, zones, Modifier.fillMaxWidth().fillMaxHeight(0.62f))
+            // With music, the bottom of the map stays half visible: the Canvas fades in over it.
+            DriveMap(snapshot, radars, zones, Modifier.fillMaxWidth().fillMaxHeight(0.62f), overlay = if (media != null) MapOverMusic else DriveMapFade)
         }
         // Music ambience from the bottom: the Spotify Canvas (else the cover, blurred) melting into the black.
         AnimatedVisibility(
@@ -122,7 +143,7 @@ fun DriveScreen(
                     canvas = mediaCanvas,
                     // An alert on screen: the music steps back.
                     calm = snapshot?.alerts?.isNotEmpty() == true,
-                    modifier = Modifier.fillMaxWidth().fillMaxHeight(0.55f),
+                    modifier = Modifier.fillMaxWidth().fillMaxHeight(0.62f),
                 )
             }
         }

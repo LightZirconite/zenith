@@ -36,9 +36,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -183,28 +187,38 @@ fun PipScreen(
     }
 }
 
-/** Map on top of a split window: clear at the top, black where the Canvas takes over. */
+/** Map on top of a split window: clear at the top, darker where the Canvas melts in. */
 private val PipMapFade = Brush.verticalGradient(
     0f to Color.Black.copy(alpha = 0.5f),
     0.25f to Color.Black.copy(alpha = 0.15f),
-    0.7f to Color.Black.copy(alpha = 0.55f),
-    1f to Color.Black,
-)
-
-/** Canvas at the bottom of a split window: rising from black, darker again under the speed. */
-private val PipCanvasFade = Brush.verticalGradient(
-    0f to Color.Black,
-    0.35f to Color.Black.copy(alpha = 0.35f),
-    0.65f to Color.Black.copy(alpha = 0.45f),
+    0.7f to Color.Black.copy(alpha = 0.45f),
     1f to Color.Black.copy(alpha = 0.85f),
 )
+
+/** Canvas at the bottom of a split window: darker under the speed. */
+private val PipCanvasFade = Brush.verticalGradient(
+    0f to Color.Black.copy(alpha = 0.3f),
+    0.6f to Color.Black.copy(alpha = 0.45f),
+    1f to Color.Black.copy(alpha = 0.85f),
+)
+
+/** Opacity of the Canvas: nothing at its top edge, it melts into the map rather than meeting it on a black band. */
+private val PipCanvasMask = Brush.verticalGradient(0f to Color.Transparent, 0.45f to Color.Black, 1f to Color.Black)
 
 /** The Spotify Canvas in the lower part of the window, faded in at its first frame. */
 @Composable
 private fun PipCanvas(video: File, media: MediaInfo?, calm: Boolean, onFailed: () -> Unit, modifier: Modifier) {
     var shown by remember(video) { mutableStateOf(false) }
-    val alpha by animateFloatAsState(if (!shown) 0f else if (calm) 0.6f else 1f, tween(900), label = "pipCanvas")
-    Box(modifier.alpha(alpha)) {
+    val opacity by animateFloatAsState(if (!shown) 0f else if (calm) 0.6f else 1f, tween(900), label = "pipCanvas")
+    Box(
+        modifier.graphicsLayer {
+            alpha = opacity
+            compositingStrategy = CompositingStrategy.Offscreen
+        }.drawWithContent {
+            drawContent()
+            drawRect(PipCanvasMask, blendMode = BlendMode.DstIn)
+        },
+    ) {
         CanvasVideo(
             video,
             playing = media?.playing == true,
