@@ -39,4 +39,16 @@ class SectionTrackerTest {
         val done = tracker().apply { advance(10_000.0, 330_000) }
         assertNull(done.maxSpeedToFinishKmh())
     }
+
+    @Test
+    fun `advice never goes above the limit`() {
+        // Plenty of time left: hold the limit, not the faster speed the average would allow.
+        assertEquals(70, SectionStatus(70, 50.0, 500.0, 95.0, 1_000.0).targetKmh)
+        assertEquals(70, SectionStatus(70, 50.0, 500.0, null, 1_000.0).targetKmh)
+        // Too fast so far: slower than the limit until the end.
+        val behind = SectionStatus(70, 80.0, 500.0, 61.7, 1_000.0)
+        assertEquals(61, behind.targetKmh)
+        assertEquals(false, behind.lost)
+        assertEquals(true, SectionStatus(70, 120.0, 100.0, 12.0, 1_000.0).lost)
+    }
 }

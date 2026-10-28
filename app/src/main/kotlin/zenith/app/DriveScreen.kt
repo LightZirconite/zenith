@@ -63,6 +63,7 @@ import zenith.core.ControlZone
 import zenith.core.DriveSnapshot
 import zenith.core.LimitSource
 import zenith.core.Radar
+import zenith.core.RadarType
 import zenith.core.SectionStatus
 import zenith.core.UpcomingRadar
 import kotlin.math.roundToInt
@@ -414,14 +415,38 @@ private fun UpcomingStrip(u: UpcomingRadar) {
 
 @Composable
 private fun SectionCard(s: SectionStatus) {
-    val over = s.averageKmh > s.limitKmh
+    // One number to read (the average, next to the limit sign), one sentence saying what to do.
+    val slowDown = s.lost || s.targetKmh < s.limitKmh
+    val progress by animateFloatAsState((1 - s.remainingM / s.lengthM).toFloat().coerceIn(0f, 1f), label = "section")
     Column(
-        Modifier.fillMaxWidth().padding(bottom = 12.dp).clip(RoundedCornerShape(22.dp))
-            .background(if (over) Red else Surface).padding(20.dp),
+        Modifier.fillMaxWidth().padding(bottom = 12.dp).clip(RoundedCornerShape(22.dp)).background(if (slowDown) Red else Surface),
     ) {
-        Text("Tronçon · moyenne ${s.averageKmh.roundToInt()} / ${s.limitKmh}", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        val target = s.maxSpeedToFinishKmh?.let { "max ${it.roundToInt()} km/h jusqu'à la fin" } ?: "aucune contrainte"
-        Text("${distanceText(s.remainingM)} restants · $target", color = Color.White.copy(alpha = 0.8f), fontSize = 15.sp)
+        Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+            RadarBadge(RadarType.SECTION_START, s.limitKmh, 54.dp)
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Ta moyenne sur le tronçon", color = Color.White.copy(alpha = 0.75f), fontSize = 14.sp)
+                Text("${s.averageKmh.roundToInt()} km/h", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text("encore", color = Color.White.copy(alpha = 0.75f), fontSize = 14.sp)
+                Text(distanceText(s.remainingM), color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+        Text(
+            when {
+                s.lost -> "Moyenne trop haute : elle finira au-dessus de ${s.limitKmh}"
+                slowDown -> "Pour finir sous ${s.limitKmh} : pas plus de ${s.targetKmh} jusqu'au bout"
+                else -> "Moyenne bonne : roule jusqu'à ${s.limitKmh}, pas plus"
+            },
+            color = Color.White,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 14.dp),
+        )
+        Box(Modifier.fillMaxWidth().height(6.dp).background(Color.White.copy(alpha = 0.15f))) {
+            Box(Modifier.fillMaxHeight().fillMaxWidth(progress).background(Color.White))
+        }
     }
 }
 

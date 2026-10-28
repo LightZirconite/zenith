@@ -75,7 +75,24 @@ sealed interface AlertEvent {
 
 data class ActiveAlert(val radar: Radar, val distanceM: Double, val limitKmh: Int?, val overLimit: Boolean, val ageMs: Long?)
 
-data class SectionStatus(val limitKmh: Int, val averageKmh: Double, val remainingM: Double, val maxSpeedToFinishKmh: Double?)
+/** Average-speed section under way. [lengthM]: what was tracked (the whole section, or what was left when picked up). */
+data class SectionStatus(
+    val limitKmh: Int,
+    val averageKmh: Double,
+    val remainingM: Double,
+    val maxSpeedToFinishKmh: Double?,
+    val lengthM: Double = remainingM,
+) {
+    /** Speed to hold until the end: the limit when the average allows it, never above it. */
+    val targetKmh: Int get() = minOf(limitKmh, maxSpeedToFinishKmh?.toInt() ?: limitKmh)
+
+    /** The average can no longer end under the limit at any reasonable speed. */
+    val lost: Boolean get() = maxSpeedToFinishKmh != null && maxSpeedToFinishKmh < MIN_REASONABLE_KMH
+
+    private companion object {
+        const val MIN_REASONABLE_KMH = 30.0
+    }
+}
 
 /**
  * Closest radar on the road ahead, even before its alert distance. [distanceM] is along the road
@@ -397,7 +414,7 @@ class AlertEngine(
     }
 
     private fun sectionStatus(): SectionStatus? = section?.let {
-        SectionStatus(sectionLimit, it.averageKmh(), it.remainingM, it.maxSpeedToFinishKmh())
+        SectionStatus(sectionLimit, it.averageKmh(), it.remainingM, it.maxSpeedToFinishKmh(), it.lengthM)
     }
 
     private companion object {

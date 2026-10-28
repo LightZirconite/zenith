@@ -358,7 +358,7 @@ class DriveService : Service(), LocationListener {
      * re-posts it every 30 s anyway so it comes back if it was dismissed.
      */
     private fun refreshNotification(s: DriveSnapshot) {
-        val key = Triple(s.speedKmh, s.limitKmh, listOfNotNull(nextRadarText(s), zoneText(s)).joinToString())
+        val key = Triple(s.speedKmh, s.limitKmh, listOfNotNull(sectionText(s), nextRadarText(s), zoneText(s)).joinToString())
         val stale = s.timeMs - lastNotifiedAtMs >= 30_000
         if (!stale && (key == lastNotified || s.timeMs - lastNotifiedAtMs < 2_000)) return
         lastNotified = key
@@ -391,12 +391,13 @@ class DriveService : Service(), LocationListener {
             else -> "$speed km/h"
         }
         val zone = s?.let(::zoneText)
-        val text = next ?: zone ?: s?.road?.segment?.name ?: "Aucun radar sur ta route pour l'instant"
+        val section = s?.let(::sectionText)
+        val text = section ?: next ?: zone ?: s?.road?.segment?.name ?: "Aucun radar sur ta route pour l'instant"
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
             .setContentText(text)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(listOfNotNull(next, zone, s?.road?.segment?.name).joinToString("\n").ifEmpty { text }))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(listOfNotNull(section, next, zone, s?.road?.segment?.name).joinToString("\n").ifEmpty { text }))
             .setContentIntent(open)
             .setDeleteIntent(reshow)
             .addAction(0, "Arrêter", stop)
@@ -421,6 +422,11 @@ class DriveService : Service(), LocationListener {
         }
         val km = "%.1f".format(distanceM / 1_000).replace('.', ',')
         return "$label · $km km"
+    }
+
+    /** "Tronçon : moyenne 67, limite 70 · encore 0,8 km", tenths of km so it changes rarely. */
+    private fun sectionText(s: DriveSnapshot): String? = s.section?.let {
+        "Tronçon : moyenne ${it.averageKmh.toInt()}, limite ${it.limitKmh} · encore ${"%.1f".format(it.remainingM / 1_000).replace('.', ',')} km"
     }
 
     /** "Itinéraire de contrôle · 12 km", whole kilometers so it changes rarely. */
