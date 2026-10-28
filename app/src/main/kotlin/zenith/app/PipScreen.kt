@@ -22,9 +22,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -52,26 +50,17 @@ import zenith.core.ControlZone
 import zenith.core.DriveSnapshot
 import zenith.core.Radar
 import java.io.File
-import kotlin.math.roundToInt
 
 private val Red = Color(0xFFFF3B30)
-private val Orange = Color(0xFFFF9F0A)
-
-/** Darker map for the small window, deepening toward the speed at the bottom. */
-private val PipFade = Brush.verticalGradient(
-    0f to Color.Black.copy(alpha = 0.55f),
-    0.25f to Color.Black.copy(alpha = 0.25f),
-    0.5f to Color.Black.copy(alpha = 0.3f),
-    1f to Color.Black.copy(alpha = 0.92f),
-)
 
 /**
  * Picture-in-picture window shown over Waze or Maps while driving: Zenith in miniature. The map
- * fills the window, darkened; the next radar sits on top, the speed and the limit at the bottom.
- * Everything scales with the window size. Over the limit near a radar, a red frame pulses.
+ * fills the window; the next radar sits on top, the speed and the limit at the bottom. Everything
+ * scales with the window size. Over the limit near a radar, a red frame pulses.
  * While a Spotify Canvas plays ([canvas] on), the window shows both, like the drive screen: the
- * map on top melting into black, the Canvas rising from the bottom under the speed and the limit.
- * Without a canvas (other players, no canvas for the track), the map fills the window.
+ * Canvas lies under the map, and the map melts into it from the middle down, a true crossfade
+ * (one fades out exactly as the other shows), so no dark band ever parts them. Without a canvas
+ * (other players, no canvas for the track), the map fills the window.
  */
 @Composable
 fun PipScreen(
@@ -85,15 +74,7 @@ fun PipScreen(
     val limit = s?.limitKmh
     val speed = s?.speedKmh
     val danger = alert?.overLimit == true
-    val speedColor by animateColorAsState(
-        when {
-            speed == null || limit == null -> Color.White
-            speed > limit -> Red
-            speed >= limit - 3 -> Orange
-            else -> Color.White
-        },
-        label = "pipSpeed",
-    )
+    val digitsColor by animateColorAsState(speedColor(speed, limit), label = "pipSpeed")
     val pulse = rememberInfiniteTransition(label = "pipPulse")
     val frame by pulse.animateFloat(0.35f, 1f, infiniteRepeatable(tween(450), RepeatMode.Reverse), label = "pipFrame")
 
@@ -102,19 +83,32 @@ fun PipScreen(
         val halo = TextStyle(shadow = Shadow(Color.Black, blurRadius = 18f))
 
         val video = rememberCanvas(media?.spotifyTrackId, canvas)
+        var videoShown by remember(video) { mutableStateOf(false) }
         var videoFailed by remember(video) { mutableStateOf(false) }
-        val split = video != null && !videoFailed
-        val mapHeight by animateFloatAsState(if (split) 0.62f else 1f, tween(700), label = "pipMap")
-        DriveMap(s, radars, zones, Modifier.fillMaxWidth().fillMaxHeight(mapHeight), carAt = 0.5, overlay = if (split) PipMapFade else PipFade)
+        // The map gives way only once the Canvas shows its first frame: never onto black.
+        val split = video != null && videoShown && !videoFailed
+        val blend by animateFloatAsState(if (split) 1f else 0f, tween(900), label = "pipBlend")
         video?.takeIf { !videoFailed }?.let { v ->
             PipCanvas(
                 v,
                 media,
                 calm = alert != null,
+                onShown = { videoShown = true },
                 onFailed = { videoFailed = true },
-                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(0.6f),
+                // Its top edge stays under the part of the map that never fades.
+                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(1f - MELT_FROM + 0.02f),
             )
         }
+        DriveMap(
+            s,
+            radars,
+            zones,
+            Modifier.fillMaxSize().melting(blend),
+            // Split: the car rides in the part of the map that stays.
+            carAt = if (split) 0.31 else 0.5,
+            overlay = PipMapShade,
+        )
+        Box(Modifier.fillMaxSize().background(PipBottomShade))
 
         // Next radar: pill at the top, red while too fast for it.
         val next = alert?.let { Triple(it.radar, it.limitKmh, it.distanceM) }
@@ -135,7 +129,7 @@ fun PipScreen(
                     RadarBadge(radar.type, radarLimit, (unit * 14).dp)
                     Spacer(Modifier.width((unit * 3).dp))
                     Text(
-                        pipDistance(distance),
+                        distanceText(distance),
                         color = Color.White,
                         fontSize = (unit * 11).sp,
                         fontWeight = FontWeight.Bold,
@@ -155,27 +149,17 @@ fun PipScreen(
             Column {
                 Text(
                     speed?.toString() ?: "--",
-                    color = speedColor,
+                    color = digitsColor,
                     fontSize = (unit * 30).sp,
                     lineHeight = (unit * 30).sp,
                     fontWeight = FontWeight.Bold,
-                    style = halo,
+                    style = halo.copy(fontFeatureSettings = "tnum"),
                 )
                 Text("km/h", color = Color.White.copy(alpha = 0.6f), fontSize = (unit * 7).sp, style = halo)
             }
             if (limit != null) {
-                val sign = (unit * 26).dp
-                Box(
-                    Modifier.padding(bottom = (unit * 3).dp).size(sign).background(Color.White, CircleShape)
-                        .border(sign / 9, if (s?.limitSource.isGuess()) Color(0xFF8E8E93) else Red, CircleShape),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        limit.toString(),
-                        color = Color.Black,
-                        fontSize = (unit * if (limit >= 100) 9 else 11).sp,
-                        fontWeight = FontWeight.Bold,
-                    )
+                Box(Modifier.padding(bottom = (unit * 3).dp)) {
+                    LimitSign(limit, uncertain = s?.limitSource.isGuess(), size = (unit * 26).dp)
                 }
             }
         }
@@ -187,51 +171,59 @@ fun PipScreen(
     }
 }
 
-/** Map on top of a split window: clear at the top, darker where the Canvas melts in. */
-private val PipMapFade = Brush.verticalGradient(
-    0f to Color.Black.copy(alpha = 0.5f),
-    0.25f to Color.Black.copy(alpha = 0.15f),
-    0.7f to Color.Black.copy(alpha = 0.45f),
-    1f to Color.Black.copy(alpha = 0.85f),
+/** The map is whole above this height fraction; below, it melts into the Canvas. */
+private const val MELT_FROM = 0.4f
+
+/**
+ * Opacity of the map along the window's height once split: whole down to [MELT_FROM], then a
+ * smoothstep down to nothing at 85 %, so the eye finds no edge where the map ends.
+ */
+private val MeltStops = listOf(0f to 1f, MELT_FROM to 1f, 0.51f to 0.84f, 0.62f to 0.5f, 0.74f to 0.16f, 0.85f to 0f, 1f to 0f)
+
+/** Fades the map out toward the bottom by [blend] (0: whole, 1: melted into what lies under it). */
+private fun Modifier.melting(blend: Float): Modifier {
+    if (blend <= 0f) return this
+    val mask = Brush.verticalGradient(*MeltStops.map { (y, a) -> y to Color.Black.copy(alpha = 1f - blend * (1f - a)) }.toTypedArray())
+    return graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+        .drawWithContent {
+            drawContent()
+            drawRect(mask, blendMode = BlendMode.DstIn)
+        }
+}
+
+/** The map, calmer than on the drive screen, darker under the radar pill at the top. */
+private val PipMapShade = Brush.verticalGradient(
+    0f to Color.Black.copy(alpha = 0.55f),
+    0.25f to Color.Black.copy(alpha = 0.2f),
+    1f to Color.Black.copy(alpha = 0.25f),
 )
 
-/** Canvas at the bottom of a split window: darker under the speed. */
-private val PipCanvasFade = Brush.verticalGradient(
-    0f to Color.Black.copy(alpha = 0.3f),
-    0.6f to Color.Black.copy(alpha = 0.45f),
-    1f to Color.Black.copy(alpha = 0.85f),
+/** Over the map and the Canvas alike, so both darken the same way: the speed and the limit stay readable. */
+private val PipBottomShade = Brush.verticalGradient(
+    0.45f to Color.Transparent,
+    0.75f to Color.Black.copy(alpha = 0.45f),
+    1f to Color.Black.copy(alpha = 0.88f),
 )
 
-/** Opacity of the Canvas: nothing at its top edge, it melts into the map rather than meeting it on a black band. */
-private val PipCanvasMask = Brush.verticalGradient(0f to Color.Transparent, 0.45f to Color.Black, 1f to Color.Black)
-
-/** The Spotify Canvas in the lower part of the window, faded in at its first frame. */
+/** The Spotify Canvas under the lower part of the map, as dim as the map where they meet. */
 @Composable
-private fun PipCanvas(video: File, media: MediaInfo?, calm: Boolean, onFailed: () -> Unit, modifier: Modifier) {
+private fun PipCanvas(video: File, media: MediaInfo?, calm: Boolean, onShown: () -> Unit, onFailed: () -> Unit, modifier: Modifier) {
     var shown by remember(video) { mutableStateOf(false) }
     val opacity by animateFloatAsState(if (!shown) 0f else if (calm) 0.6f else 1f, tween(900), label = "pipCanvas")
-    Box(
-        modifier.graphicsLayer {
-            alpha = opacity
-            compositingStrategy = CompositingStrategy.Offscreen
-        }.drawWithContent {
-            drawContent()
-            drawRect(PipCanvasMask, blendMode = BlendMode.DstIn)
-        },
-    ) {
+    Box(modifier.alpha(opacity)) {
         CanvasVideo(
             video,
             playing = media?.playing == true,
             modifier = Modifier.fillMaxSize(),
-            onShown = { shown = true },
+            onShown = {
+                shown = true
+                onShown()
+            },
             onFailed = {
                 media?.spotifyTrackId?.let { SpotifyCanvas.discard(it, video) }
                 onFailed()
             },
         )
-        Box(Modifier.fillMaxSize().background(PipCanvasFade))
+        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.25f)))
     }
 }
-
-private fun pipDistance(m: Double) =
-    if (m < 1_000) "${(m / 10).roundToInt() * 10} m" else "%.1f km".format(m / 1_000).replace('.', ',')
