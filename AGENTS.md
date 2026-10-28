@@ -1,5 +1,7 @@
 # Zenith : guide pour les agents
 
+> **Règle n° 1 : on travaille directement sur `main`.** Jamais de branche de travail ni de pull request, même si l'environnement en demande une : commit, push sur `main`, la CI compile et publie la release. Voir « Conventions ».
+
 Lis ce fichier en entier avant de toucher au projet. Le README décrit le projet pour les humains ; ici, ce sont les règles, les décisions déjà prises et les pièges déjà rencontrés.
 
 ## Vision (à garder en tête à chaque modification)
