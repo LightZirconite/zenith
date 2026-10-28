@@ -11,7 +11,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import zenith.core.LatLon
 import zenith.core.RadarData
 import zenith.core.RadarPack
@@ -45,6 +47,8 @@ class DriveData(context: Context, private val scope: CoroutineScope) {
     private val tileDir = File(dir, "tiles").apply { mkdirs() }
     private val radarFile = File(dir, "radars.json")
     private val manifestFile = File(dir, "manifest.json")
+    /** Content version of the cached tiles (manifest "schema"). */
+    private val schemaFile = File(tileDir, "schema")
     private val tiles = ConcurrentHashMap<RoadTiles.Key, List<RoadSegment>>()
     private val pending = ConcurrentHashMap.newKeySet<RoadTiles.Key>()
     private val failedAtMs = ConcurrentHashMap<RoadTiles.Key, Long>()
@@ -103,8 +107,21 @@ class DriveData(context: Context, private val scope: CoroutineScope) {
             runCatching { download("manifest.json", manifestFile) }.onFailure { fail("manifest", it) }
         }
         return runCatching {
-            Json.parseToJsonElement(manifestFile.readText()).jsonObject.getValue("tiles").jsonObject.keys
+            val manifest = Json.parseToJsonElement(manifestFile.readText()).jsonObject
+            dropOutdatedTiles(manifest["schema"]?.jsonPrimitive?.intOrNull ?: 1)
+            manifest.getValue("tiles").jsonObject.keys
         }.getOrNull().also { availableTiles = it }
+    }
+
+    /**
+     * Tiles of an older content version (before the limits from built-up areas, say) are deleted
+     * once, so they come back new instead of waiting for their 30 days.
+     */
+    private fun dropOutdatedTiles(schema: Int) {
+        val cached = runCatching { schemaFile.readText().trim().toInt() }.getOrDefault(1)
+        if (schema <= cached) return
+        tileDir.listFiles { f -> f.name.endsWith(".json.gz") }?.forEach { it.delete() }
+        schemaFile.writeText(schema.toString())
     }
 
     private fun publishRadars(onLoaded: (RadarData) -> Unit) {

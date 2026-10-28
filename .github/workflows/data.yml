@@ -62,6 +62,9 @@ jobs:
           tiles = sorted(os.listdir("out/tiles"))
           manifest = {
               "v": 1,
+              # Tile content version: raising it makes the app drop its cached tiles once.
+              # 2 = limits from built-up areas (src 3).
+              "schema": 2,
               "generated": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
               "tiles": {t: os.path.getsize(f"out/tiles/{t}") for t in tiles},
           }
