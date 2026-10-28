@@ -116,7 +116,11 @@ jobs:
           newer=$(gh run list --workflow radars.yml --limit 20 --json databaseId,status \
             -q "[.[] | select(.databaseId > ${{ github.run_id }} and .status != \"completed\")] | length")
           if [ "$newer" != "0" ]; then echo "Une exécution plus récente prend le relais."; exit 0; fi
-          gh workflow run radars.yml --ref main -f chained=true
+          # A failed call would end the chain: retried, a few minutes apart.
+          for attempt in 1 2 3 4 5; do
+            gh workflow run radars.yml --ref main -f chained=true && break
+            sleep $((60 * attempt))
+          done
           # data.yml (road tiles, OSM radars) depends on a weekly cron that never fired either:
           # started from here once its manifest is a week old and no run of it is under way.
           generated=$(gh release download data -p manifest.json -O - 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin)['generated'])" || echo 1970-01-01T00:00:00+00:00)

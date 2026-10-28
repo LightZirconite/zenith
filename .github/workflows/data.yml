@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 # Shared with radars.yml: both publish radars.json and official.json.
 concurrency:
@@ -94,3 +95,13 @@ jobs:
         run: |
           python pipeline/build_radars.py check out/previous_radars.json out/radars.json
           gh release upload data out/radars.json out/official.json --clobber
+
+      # Revives the radars chain (radars.yml starts itself again every few hours) if it ever stopped.
+      - name: Radars chain alive
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          busy=$(gh run list --workflow radars.yml --limit 10 --json status -q '[.[] | select(.status != "completed")] | length')
+          if [ "$busy" = "0" ]; then echo "Chaîne radars arrêtée : relancée."; gh workflow run radars.yml --ref main -f chained=true; fi
