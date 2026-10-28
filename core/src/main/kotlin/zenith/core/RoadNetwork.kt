@@ -1,7 +1,10 @@
 package zenith.core
 
-/** How a speed limit was obtained, from most to least trustworthy. */
-enum class LimitSource { EXPLICIT, IMPLICIT, INFERRED }
+/**
+ * How a speed limit was obtained, from most to least trustworthy. [AREA]: no tag at all, French
+ * default of the place (50 in a built-up area, 80 outside), shown but never spoken.
+ */
+enum class LimitSource { EXPLICIT, IMPLICIT, INFERRED, AREA }
 
 /** A road piece between two graph nodes. Forward = from [fromNode] to [toNode]. */
 data class RoadSegment(

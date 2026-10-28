@@ -18,11 +18,15 @@ object Announcer {
         } else {
             null
         }
-        is AlertEvent.SectionStarted -> "Tronçon de ${spokenDistance(event.lengthM)}, moyenne à ${event.limitKmh}"
+        is AlertEvent.SectionStarted ->
+            if (event.resumed) "Tronçon en cours, moyenne à ${event.limitKmh}"
+            else "Tronçon de ${spokenDistance(event.lengthM)}, moyenne à ${event.limitKmh}"
         is AlertEvent.SectionEnded ->
             "Fin du tronçon, moyenne ${event.averageKmh.roundToInt()}" + if (event.wouldFlash) ", au-dessus de la limite" else ""
         is AlertEvent.Overspeed -> if (event.level == OverspeedLevel.WARN) "Limite ${event.limitKmh}" else null
         is AlertEvent.LimitChanged -> null
+        is AlertEvent.ZoneEntered -> "Itinéraire de contrôle sur ${spokenDistance(event.remainingM)}, radar possible"
+        is AlertEvent.ZoneLeft -> null
     }
 
     /** Distance rounded the way it is said: 50 m steps under 1 km, then tenths of km. */

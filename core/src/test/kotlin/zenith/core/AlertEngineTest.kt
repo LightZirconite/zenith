@@ -76,6 +76,45 @@ class AlertEngineTest {
     }
 
     @Test
+    fun `same camera from two sources is announced once`() {
+        val twin = Radar("R1-osm", Sim.ll(3.0, 1_600.0), RadarType.FIXED, limitKmh = 90, directionDeg = 0.0)
+        val events = run(listOf(fixed90, twin), 30.0).events()
+        assertEquals(1, events.filterIsInstance<AlertEvent.Approach>().size)
+        assertEquals(1, events.filterIsInstance<AlertEvent.Passed>().size)
+        assertEquals(1, events.filterIsInstance<AlertEvent.Brake>().size)
+    }
+
+    @Test
+    fun `two different radars close together are both announced`() {
+        val redLight = Radar("F1", Sim.ll(0.0, 1_600.0), RadarType.RED_LIGHT, directionDeg = 0.0)
+        val ids = run(listOf(fixed90, redLight), 25.0).events().filterIsInstance<AlertEvent.Approach>().map { it.radar.id }
+        assertEquals(setOf("R1", "F1"), ids.toSet())
+    }
+
+    @Test
+    fun `section cameras never predict a flash on the spot`() {
+        val start = Radar("S", Sim.ll(0.0, 500.0), RadarType.SECTION_START, 90, 0.0, sectionLengthM = 1_000.0)
+        val end = Radar("E", Sim.ll(0.0, 1_500.0), RadarType.SECTION_END, 90, 0.0)
+        val events = run(listOf(start, end), 40.0).events() // 144 km/h
+        assertEquals(2, events.filterIsInstance<AlertEvent.Passed>().size)
+        assertTrue(events.filterIsInstance<AlertEvent.Passed>().none { it.wouldFlash })
+        assertTrue(events.filterIsInstance<AlertEvent.SectionEnded>().single().wouldFlash)
+    }
+
+    @Test
+    fun `limit guessed from the place is shown but never spoken nor lent to a radar`() {
+        val area = RoadSegment(1, 1, 2, listOf(Sim.ll(0.0, -100.0), Sim.ll(0.0, 3_000.0)), oneway = true,
+            maxspeedForward = 80, limitSource = LimitSource.AREA)
+        val bare = Radar("bare", Sim.ll(0.0, 1_500.0), RadarType.FIXED, directionDeg = 0.0)
+        val snaps = run(listOf(bare), 100 / 3.6, RoadNetwork(listOf(area)))
+        assertEquals(80, snaps.last().limitKmh)
+        assertEquals(LimitSource.AREA, snaps.last().limitSource)
+        val events = snaps.events()
+        assertTrue(events.filterIsInstance<AlertEvent.Overspeed>().none { it.level == OverspeedLevel.WARN })
+        assertEquals(null, events.filterIsInstance<AlertEvent.Approach>().single().limitKmh)
+    }
+
+    @Test
     fun `road limit follows rain rule and overspeed escalates`() {
         val network = RoadNetwork(listOf(Sim.seg(1, 1, 2, 0.0 to -100.0, 0.0 to 3_000.0, oneway = true, limit = 130)))
         val snaps = run(emptyList(), 120 / 3.6, network, DriverProfile(raining = true))

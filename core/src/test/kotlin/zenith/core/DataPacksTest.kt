@@ -27,6 +27,28 @@ class DataPacksTest {
     }
 
     @Test
+    fun `parses control zones, absent from older packs`() {
+        val json = """
+            {"v":1,"radars":[],"zones":[
+              {"id":"I_01_001","kind":"ITINERARY","pts":[46.18501,5.24796,46.17739,5.25551,46.17683,5.25595]},
+              {"id":"odd","pts":[46.0,5.0,46.1]},
+              {"id":"short","pts":[46.0,5.0]}
+            ]}
+        """.trimIndent()
+        val zones = RadarPack.parseAll(json).zones
+        assertEquals(listOf("I_01_001"), zones.map { it.id })
+        assertEquals(LatLon(46.17739, 5.25551), zones.single().points[1])
+        assertEquals(1_100.0, zones.single().lengthM, 50.0)
+        assertTrue(RadarPack.parseAll("""{"v":1,"radars":[]}""").zones.isEmpty())
+    }
+
+    @Test
+    fun `limit source 3 is the default of the place`() {
+        val tile = """{"v":1,"segments":[[1000,1,2,0,80,80,3,4,"D 1",[45.0,3.0,45.0,3.01]]]}"""
+        assertEquals(LimitSource.AREA, RoadTiles.parse(tile).single().limitSource)
+    }
+
+    @Test
     fun `parses a real road tile`() {
         val segments = RoadTiles.parse(tileText)
         assertEquals(138, segments.size)

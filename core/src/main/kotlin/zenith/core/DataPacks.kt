@@ -13,11 +13,27 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 import kotlin.math.floor
 
+/** Everything radars.json holds. */
+data class RadarData(val radars: List<Radar>, val zones: List<ControlZone>)
+
 /** radars.json built by pipeline/build_radars.py. */
 object RadarPack {
-    fun parse(text: String): List<Radar> {
+    fun parse(text: String): List<Radar> = parseAll(text).radars
+
+    /** Radars and control zones ("zones": flat [lat, lon, ...] polylines; absent from older packs). */
+    fun parseAll(text: String): RadarData {
         val root = Json.parseToJsonElement(text).jsonObject
-        return root.getValue("radars").jsonArray.mapNotNull { e ->
+        val zones = (root["zones"] as? JsonArray).orEmpty().mapNotNull { e ->
+            val o = e as? JsonObject ?: return@mapNotNull null
+            val flat = (o["pts"] as? JsonArray)?.map { (it as? JsonPrimitive)?.doubleOrNull ?: return@mapNotNull null }
+            if (flat == null || flat.size < 4 || flat.size % 2 != 0) return@mapNotNull null
+            ControlZone(o.str("id") ?: return@mapNotNull null, flat.chunked(2) { LatLon(it[0], it[1]) })
+        }
+        return RadarData(radars(root), zones)
+    }
+
+    private fun radars(root: JsonObject): List<Radar> =
+        root.getValue("radars").jsonArray.mapNotNull { e ->
             val o = e.jsonObject
             val type = runCatching { RadarType.valueOf(o.str("type") ?: "") }.getOrNull() ?: return@mapNotNull null
             Radar(
@@ -31,7 +47,6 @@ object RadarPack {
                 reportedAtMs = o.num("at")?.takeIf { type.mobile }?.let { (it * 1000).toLong() },
             )
         }
-    }
 
     private fun JsonObject.str(key: String) = (this[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
     private fun JsonObject.num(key: String) = (this[key] as? JsonPrimitive)?.doubleOrNull
@@ -44,7 +59,7 @@ object RoadTiles {
         "motorway", "trunk", "primary", "secondary", "tertiary", "unclassified", "residential",
         "living_street", "motorway_link", "trunk_link", "primary_link", "secondary_link", "tertiary_link",
     )
-    private val SOURCES = listOf(LimitSource.EXPLICIT, LimitSource.IMPLICIT, LimitSource.INFERRED)
+    private val SOURCES = listOf(LimitSource.EXPLICIT, LimitSource.IMPLICIT, LimitSource.INFERRED, LimitSource.AREA)
 
     data class Key(val i: Int, val j: Int) {
         val fileName: String get() = "roads_${i}_$j.json.gz"

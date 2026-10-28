@@ -119,6 +119,20 @@ object RoadHorizon {
         return out
     }
 
+    /** Point [d] meters ahead along [path] and the travel bearing there; null off the path or behind the car. */
+    fun pointAt(path: List<HorizonStep>, d: Double): Pair<LatLon, Double>? {
+        if (d < 0) return null
+        val step = path.firstOrNull { d >= it.startM && d <= it.endM } ?: return null
+        val pts = if (step.forward) step.segment.points else step.segment.points.reversed()
+        var along = step.startM
+        for ((a, b) in pts.zipWithNext()) {
+            val len = Geo.distanceM(a, b)
+            if (along + len >= d) return lerp(a, b, if (len > 0) (d - along) / len else 0.0) to Geo.bearingDeg(a, b)
+            along += len
+        }
+        return pts.last() to Geo.bearingDeg(pts[pts.size - 2], pts.last())
+    }
+
     private fun lerp(a: LatLon, b: LatLon, t: Double) = LatLon(a.lat + (b.lat - a.lat) * t, a.lon + (b.lon - a.lon) * t)
 
     private fun exitNode(s: HorizonStep) = if (s.forward) s.segment.toNode else s.segment.fromNode

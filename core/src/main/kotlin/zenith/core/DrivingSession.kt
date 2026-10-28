@@ -24,11 +24,13 @@ data class DriveSnapshot(
     val events: List<AlertEvent>,
     /** No GPS (tunnel): position estimated along the road at the last speed. */
     val estimated: Boolean = false,
+    /** Control itinerary being driven, if any. */
+    val zone: ZoneStatus? = null,
 )
 
 /**
- * Real-time pipeline: GPS fix → Kalman filter → map matching → alerts. Pure and deterministic,
- * so a recorded GPX trace replays exactly like a live drive.
+ * Real-time pipeline: GPS fix → Kalman filter → map matching → alerts and control zones. Pure and
+ * deterministic, so a recorded GPX trace replays exactly like a live drive.
  */
 class DrivingSession(
     /** Current road network; may change as road tiles load. */
@@ -36,6 +38,7 @@ class DrivingSession(
     radars: List<Radar>,
     profile: DriverProfile = DriverProfile(),
     settings: AlertSettings = AlertSettings(),
+    zones: List<ControlZone> = emptyList(),
 ) {
     /** Licence and weather rules; can change during a drive (rain starting). */
     @Volatile
@@ -46,17 +49,24 @@ class DrivingSession(
         radars: List<Radar>,
         profile: DriverProfile = DriverProfile(),
         settings: AlertSettings = AlertSettings(),
-    ) : this({ network }, radars, profile, settings)
+        zones: List<ControlZone> = emptyList(),
+    ) : this({ network }, radars, profile, settings, zones)
 
     private val filter = KalmanFilter()
     private val stabilizer = SpeedStabilizer()
     private val matcher = MapMatcher(network)
     private val effective: (Int) -> Int = { SpeedRules.effectiveLimit(it, this.profile.raining, this.profile.probationary) }
     private val engine = AlertEngine(RadarIndex(radars), settings, effective)
+    private var zoneTracker = ZoneTracker(zones)
 
     /** Swaps in a newer radar list (e.g. after a pack download) without resetting the drive. */
     fun setRadars(radars: List<Radar>) {
         engine.radars = RadarIndex(radars)
+    }
+
+    /** Swaps in newer control zones; the zone being driven is picked up again after a few fixes. */
+    fun setZones(zones: List<ControlZone>) {
+        zoneTracker = ZoneTracker(zones)
     }
 
     private var last: DriveSnapshot? = null
@@ -94,6 +104,7 @@ class DrivingSession(
         val road = matcher.update(state)
         val roadLimit = road?.limitKmh
         val out = engine.step(state, road, net)
+        val zone = zoneTracker.step(state)
         return DriveSnapshot(
             timeMs = state.timeMs,
             position = state.position,
@@ -108,8 +119,9 @@ class DrivingSession(
             upcoming = out.upcoming,
             limitAhead = out.limitAhead,
             ahead = out.ahead,
-            events = out.events,
+            events = out.events + zone.events,
             estimated = estimated,
+            zone = zone.status,
         ).also { last = it }
     }
 
