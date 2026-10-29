@@ -3,6 +3,7 @@ package zenith.app
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
+import android.media.AudioTimestamp
 import android.media.AudioTrack
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
@@ -62,6 +63,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.min
@@ -75,6 +77,9 @@ import zenith.core.LatLon
 /** Where the start of a drive stands: stars drifting at home, the tunnel while the GPS searches, the jump. */
 enum class FlightPhase { IDLE, SEARCH, ARRIVE }
 
+/** The two moments whose pictures follow their sound: the arrival and the way back. */
+enum class FlightSound { ARRIVE, HOMECOMING }
+
 private val Blue = Color(0xFF0A84FF)
 private val Green = Color(0xFF30D158)
 private val StarBlue = Color(0xFF9CC8FF)
@@ -87,95 +92,135 @@ internal const val HEART_Y = 0.42f
 internal const val GLOBE_SHARE = 0.15f
 
 /**
- * Length of the jump, from the first good position to the map; the flash comes at [LANDING]. The
- * first [SETTLE] of the dive turns the Earth until home is dead center, approaching slowly; only
- * then does it rush at the viewer, onto home.
+ * The airlock: the position is locked, the Earth turns it dead center and the tunnel holds its
+ * breath this long before the jump.
  */
-private const val JUMP_MS = 3_200
-private const val LANDING = 0.75f
-private const val SETTLE = 0.4f
+internal const val HOLD_MS = 1_100
 
-/** The way back at the end of a drive: out of home, the Earth falling away into the stars. */
-private const val HOMECOMING_MS = 3_400
+/** The dive, from the first frame of the rush to the last star; the flash comes at [LANDING] of it. */
+private const val DIVE_MS = 1_800
+private const val LANDING = 0.68f
 
-/** From the start of the jump to its boom, when the music comes back. */
-internal val JUMP_IMPACT_MS: Long = (JUMP_MS * LANDING).toLong()
+/** From the start of the arrival (position locked) to the flash: the boom, the map, the music back. */
+internal const val JUMP_IMPACT_MS = HOLD_MS + (DIVE_MS * LANDING).toInt()
+
+/** The way back: the scene closes into the heart through a flash at [CLOSE_MS]... */
+internal const val CLOSE_MS = 650
+
+/** ...the Earth falls back from the screen to its size in the tunnel... */
+private const val RECEDE_MS = 1_400
+
+/** ...then fades into the calm sky of home. */
+internal const val HOMECOMING_MS = 3_300
+
+/** A sound heard later than this after it was started is not believed (a broken timestamp). */
+private const val MAX_LAG_NS = 350_000_000L
 
 /**
  * Space behind the start of a drive, drawn frame by frame. At home, a calm sky drifts by. Once
  * started, a tube of stars forms around the viewer and rushes past, faster as the search goes on
  * and as satellites lock, rings of light marking its walls; at its end the Earth ([Globe]) turns,
- * its satellites locking one by one onto [home] (the driver's position; France until known). At
- * [FlightPhase.ARRIVE] the Earth settles with home dead center, then the stars stretch into
- * shooting-star streaks and it rushes at the viewer, onto home, until it fills the screen; a white
- * flash and the map opens beneath it ([onLanded]), then the stars fade out ([onGone]). [comingHome]:
- * a drive just ended, the reverse: out of home in a flash, the Earth falls away into the stars, which
- * come back rushing and slow down to the calm of home.
+ * its satellites locking one by one onto [home] (the driver's position; France until known).
+ *
+ * [FlightPhase.ARRIVE]: the airlock first ([HOLD_MS]): the position locks with a ring of light, the
+ * Earth settles it dead center and leans in while the stars slow down, holding their breath
+ * ([onDive] at its end). Then the jump: the stars stretch into streaks and the Earth rushes at the
+ * viewer, onto home, until it fills the screen; a white flash and the map opens beneath it
+ * ([onLanded]), then the stars fade out ([onGone]).
+ *
+ * [comingHome]: a drive just ended, the arrival backwards. Around the scene closing into the heart
+ * the stars rush back in and a flash builds; out of it the Earth, home in front, falls away from
+ * the viewer to its size in the tunnel and fades into the stars, which slow down to the calm of home.
+ *
+ * Both follow their sound ([heardAt]: when it is first heard, Bluetooth included when Android knows),
+ * so the boom lands on the flash.
  */
 @Composable
 fun Starfield(
     phase: FlightPhase,
     gps: GpsInfo,
+    onDive: () -> Unit,
     onLanded: () -> Unit,
     onGone: () -> Unit,
     modifier: Modifier = Modifier,
     comingHome: Boolean = false,
     home: LatLon? = null,
+    heardAt: (FlightSound) -> Long? = { null },
 ) {
     val sky = remember { Stars(380, tube = false) }
     val tube = remember { Stars(900, tube = true) }
-    val globe = remember { Globe() }
+    val globe = remember {
+        Globe().apply {
+            home?.let { aimAt(it.lat, it.lon) }
+            if (comingHome) face()
+        }
+    }
     LaunchedEffect(home) { home?.let { globe.aimAt(it.lat, it.lon) } }
     val lock by animateFloatAsState((gps.used / 4f).coerceAtMost(1f), tween(900, easing = FastOutSlowInEasing), label = "lock")
-    // Out of hyperspace: from a rush down to the drift of home.
-    val homecoming = remember { Animatable(if (comingHome) 1f else 0f) }
-    LaunchedEffect(Unit) {
-        if (homecoming.value > 0f) {
-            globe.face()
-            homecoming.animateTo(0f, tween(HOMECOMING_MS, easing = LinearOutSlowInEasing))
-        }
-    }
     // The tube forms around the viewer at Start and speeds up the longer the search, the more satellites locked.
     val tunnel by animateFloatAsState(if (phase == FlightPhase.IDLE) 0f else 1f, tween(1_800, easing = FastOutSlowInEasing), label = "tunnel")
-    var searchingSinceNs by remember { mutableLongStateOf(0L) }
     val orbit by animateFloatAsState(if (phase == FlightPhase.SEARCH) 1f else 0f, tween(900), label = "orbit")
-    val jump = remember { Animatable(0f) }
+    // Time since the arrival and since the way back began, in ms; -1 while not under way.
+    var arriveMs by remember { mutableFloatStateOf(-1f) }
+    var backMs by remember { mutableFloatStateOf(if (comingHome) 0f else -1f) }
+    // A drive ended in the last instants of the jump, this sky still up: the way back from here.
+    LaunchedEffect(comingHome) {
+        if (comingHome && backMs < 0f) {
+            globe.face()
+            backMs = 0f
+        }
+    }
+    val dive by rememberUpdatedState(onDive)
     val landed by rememberUpdatedState(onLanded)
     val gone by rememberUpdatedState(onGone)
-    LaunchedEffect(phase) {
-        if (phase != FlightPhase.ARRIVE) {
-            jump.snapTo(0f)
-            return@LaunchedEffect
-        }
-        var sent = false
-        jump.animateTo(1f, tween(JUMP_MS, easing = LinearEasing)) {
-            if (!sent && value >= LANDING) {
-                sent = true
-                landed()
-            }
-        }
-        gone()
-    }
+    val heard by rememberUpdatedState(heardAt)
     val locked by rememberUpdatedState(gps.used)
     val inPhase by rememberUpdatedState(phase)
     var frame by remember { mutableLongStateOf(0L) }
     var speed by remember { mutableFloatStateOf(0.035f) }
     LaunchedEffect(Unit) {
         var last = 0L
+        var searchingSince = 0L
+        var arriveFrom = 0L
+        var backFrom = 0L
+        var sent = 0
         while (true) {
             withFrameNanos { now ->
-                if (inPhase == FlightPhase.SEARCH && searchingSinceNs == 0L) searchingSinceNs = now
-                if (inPhase == FlightPhase.IDLE) searchingSinceNs = 0L
-                val searched = if (searchingSinceNs == 0L) 0f else (now - searchingSinceNs) / 1e9f
+                if (inPhase == FlightPhase.SEARCH && searchingSince == 0L) searchingSince = now
+                if (inPhase == FlightPhase.IDLE) searchingSince = 0L
+                // The arrival's clock: from its sound once heard, never going back.
+                if (inPhase == FlightPhase.ARRIVE) {
+                    if (arriveFrom == 0L) arriveFrom = now
+                    val anchor = heard(FlightSound.ARRIVE)?.takeIf { abs(it - arriveFrom) < 700_000_000L } ?: arriveFrom
+                    arriveMs = max(arriveMs, ((now - anchor) / 1e6f).coerceAtLeast(0f))
+                    if (sent == 0 && arriveMs >= HOLD_MS) sent = 1.also { dive() }
+                    if (sent == 1 && arriveMs >= JUMP_IMPACT_MS) sent = 2.also { landed() }
+                    if (sent == 2 && arriveMs >= HOLD_MS + DIVE_MS) sent = 3.also { gone() }
+                } else {
+                    arriveFrom = 0L
+                    arriveMs = -1f
+                    sent = 0
+                }
+                if (backMs >= 0f) {
+                    if (backFrom == 0L) backFrom = now
+                    val anchor = heard(FlightSound.HOMECOMING)?.takeIf { abs(it - backFrom) < 700_000_000L } ?: backFrom
+                    backMs = max(backMs, ((now - anchor) / 1e6f).coerceAtLeast(0f))
+                    if (backMs >= HOMECOMING_MS) backMs = -1f
+                } else {
+                    backFrom = 0L
+                }
+                val searched = if (searchingSince == 0L) 0f else (now - searchingSince) / 1e9f
                 // Progressive: from a cruise to a race over the first seconds, a little more per satellite.
                 val cruise = 0.035f + tunnel * (0.45f + 0.9f * (searched / 8f).coerceAtMost(1f) + 0.06f * locked.coerceAtMost(8))
-                speed = cruise + 16f * jump.value.pow(3) + 9f * homecoming.value.pow(2)
+                val a = Jump(arriveMs)
+                // The airlock holds its breath (the stars slow down), then the rush.
+                speed = cruise * (1f - 0.5f * smooth(a.hold)) + 16f * a.dive.pow(3) + Back(backMs).speed
                 if (last != 0L) {
                     val dt = ((now - last) / 1e9f).coerceAtMost(0.05f)
                     sky.step(dt, speed * 0.35f + 0.02f)
                     tube.step(dt, speed)
-                    val back = homecoming.value > 0f
-                    globe.step(dt, if (back) 1f else lock, settle = if (back) 0f else (jump.value / LANDING / SETTLE))
+                    val arriving = inPhase == FlightPhase.ARRIVE
+                    globe.step(dt, lock, aim = arriving || backMs >= 0f || lock >= 0.98f, firm = arriving)
                 }
                 last = now
                 frame = now
@@ -188,41 +233,45 @@ fun Starfield(
         val cx = size.width / 2
         val cy = size.height * HEART_Y
         val scale = min(size.width, size.height) * 0.42f
-        val j = jump.value
+        val base = min(size.width, size.height) * GLOBE_SHARE
+        val a = Jump(arriveMs)
+        val b = Back(backMs)
         // After the flash, the stars give way to the map.
-        val fade = if (j <= LANDING) 1f else (1f - (j - LANDING) / (1f - LANDING)).coerceIn(0f, 1f)
-        sky.draw(this, cx, cy, scale, speed * 0.35f, t, fade * (1f - 0.5f * tunnel), twinkle = true)
+        val fade = if (a.dive <= LANDING) 1f else (1f - (a.dive - LANDING) / (1f - LANDING)).coerceIn(0f, 1f)
+        sky.draw(this, cx, cy, scale, speed * 0.35f, t, fade * (1f - 0.5f * max(tunnel, b.tube)), twinkle = true)
         if (tunnel > 0.01f) {
             tubeRings(cx, cy, scale, t, speed, tunnel * fade)
             tube.draw(this, cx, cy, scale, speed, t, fade * tunnel, twinkle = false)
             // The Earth ahead: out of the distance as the tube forms, a little nearer as satellites
-            // lock, then rushing at the viewer through the jump until it fills the screen at the flash.
-            val r = min(size.width, size.height) * GLOBE_SHARE * (0.2f + 0.8f * tunnel) * (0.92f + 0.08f * lock) * diveScale(j / LANDING)
-            globe.draw(this, cx, cy, r, alpha = tunnel * fade, orbits = orbit * fade, t = t, visible = gps.visible, used = gps.used, lock = lock)
+            // lock, leaning in through the airlock, then rushing at the viewer until it fills the
+            // screen at the flash.
+            val rush = (a.dive / LANDING).coerceAtMost(1f)
+            val r = base * (0.2f + 0.8f * tunnel) * (0.92f + 0.08f * lock) * (1f + 0.12f * smooth(a.hold)) * (1f + 14f * rush.pow(2.4f))
+            val flare = if (arriveMs < 0f) 0f else (arriveMs / 900f).coerceIn(0f, 1f)
+            if (backMs < 0f) {
+                globe.draw(this, cx, cy, r, alpha = tunnel * fade, orbits = orbit * fade, t = t, visible = gps.visible, used = gps.used, lock = if (arriveMs >= 0f) 1f else lock, flare = flare)
+            }
         }
-        // Back from a drive: the Earth, home in front, falls away from the viewer and fades into the stars.
-        val away = homecoming.value
-        if (away > 0.01f && tunnel < 0.99f) {
-            val r = min(size.width, size.height) * GLOBE_SHARE * (0.35f + 15f * away.pow(2.6f))
-            globe.draw(this, cx, cy, r, alpha = (away / 0.35f).coerceAtMost(1f) * (1f - tunnel), orbits = 0f, t = t, visible = 0, used = 0, lock = 1f)
+        if (backMs >= 0f) {
+            // Back from a drive: the tunnel's walls rush past backwards, the Earth falls away from the
+            // viewer, home in front, and fades into the stars; a glow at the heart while it recedes.
+            tube.draw(this, cx, cy, scale, speed, t, b.tube, twinkle = false)
+            if (b.glow > 0.01f) {
+                drawRect(
+                    Brush.radialGradient(
+                        0f to Color.White.copy(alpha = 0.35f * b.glow),
+                        0.4f to StarBlue.copy(alpha = 0.16f * b.glow),
+                        1f to Color.Transparent,
+                        center = Offset(cx, cy),
+                        radius = max(size.width, size.height) * 0.7f,
+                    ),
+                )
+            }
+            globe.draw(this, cx, cy, base * b.size, alpha = b.globe, orbits = 0f, t = t, visible = 0, used = 0, lock = 1f)
         }
-        // Back home: out of the Earth in a flash, then a soft bloom at the heart while the stars slow down.
-        val bloom = homecoming.value
-        if (bloom > 0.85f) drawRect(Color.White.copy(alpha = ((bloom - 0.85f) / 0.15f).pow(2) * 0.9f))
-        if (bloom > 0.01f) {
-            drawRect(
-                Brush.radialGradient(
-                    0f to Color.White.copy(alpha = 0.45f * bloom.pow(3)),
-                    0.5f to StarBlue.copy(alpha = 0.18f * bloom * bloom),
-                    1f to Color.Transparent,
-                    center = Offset(cx, cy),
-                    radius = max(size.width, size.height) * 0.7f,
-                ),
-            )
-        }
-
-        // The jump's flash: white at the heart, blue at the edges, at its brightest as the map opens.
-        val flash = if (j > 0f) exp(-((j - LANDING) / 0.09f).pow(2)) else 0f
+        // The flash: of the jump, at its brightest as the map opens; of the way back, as the scene
+        // closes. White at the heart, blue at the edges.
+        val flash = max(if (arriveMs >= 0f) exp(-((a.dive - LANDING) / 0.09f).pow(2)) else 0f, b.flash)
         if (flash > 0.01f) {
             drawRect(
                 Brush.radialGradient(
@@ -237,15 +286,39 @@ fun Starfield(
     }
 }
 
-/**
- * Size of the Earth through the jump, by [dive] (0 at its start, 1 at the flash): a slow approach
- * while it settles on home, then the rush, ever faster, until it fills the screen.
- */
-private fun diveScale(dive: Float): Float {
-    val d = dive.coerceIn(0f, 1f)
-    val approach = (d / SETTLE).coerceAtMost(1f)
-    val rush = ((d - SETTLE) / (1f - SETTLE)).coerceAtLeast(0f)
-    return (1f + 0.4f * approach * approach * (3 - 2 * approach)) * (1f + 14f * rush.pow(2.2f))
+/** Where the arrival stands at [ms] since its start (-1: not arriving): the airlock, then the dive, each 0 to 1. */
+private class Jump(ms: Float) {
+    val hold = if (ms < 0f) 0f else (ms / HOLD_MS).coerceIn(0f, 1f)
+    val dive = if (ms < 0f) 0f else ((ms - HOLD_MS) / DIVE_MS).coerceIn(0f, 1f)
+}
+
+/** Where the way back stands at [ms] since the stop (-1: not under way). */
+private class Back(ms: Float) {
+    private val on = ms >= 0f
+
+    /** Closing (0 to 1) until the flash, then falling away (0 to 1), then fading into the stars (0 to 1). */
+    private val close = if (on) (ms / CLOSE_MS).coerceIn(0f, 1f) else 0f
+    private val recede = if (on) ((ms - CLOSE_MS) / RECEDE_MS).coerceIn(0f, 1f) else 0f
+    private val vanish = if (on) ((ms - CLOSE_MS - RECEDE_MS) / (HOMECOMING_MS - CLOSE_MS - RECEDE_MS)).coerceIn(0f, 1f) else 0f
+
+    /** The stars: drawn into the heart ever faster while the scene closes, then slowing down to rest. */
+    val speed = when {
+        !on -> 0f
+        ms < CLOSE_MS -> -16f * close * close
+        else -> -16f * (1f - recede).pow(3)
+    }
+    val tube = if (on) 1f - smooth(vanish) else 0f
+    val flash = if (on) exp(-((ms - CLOSE_MS) / 210f).pow(2)) else 0f
+    val glow = if (on && ms >= CLOSE_MS) (1f - recede).pow(2) else 0f
+
+    /** The Earth's radius in globe radii: the whole screen out of the flash, its size in the tunnel, then a point. */
+    val size = (1f + 14f * (1f - recede).pow(2.4f)) * (1f - 0.8f * smooth(vanish))
+    val globe = if (on) ((ms - CLOSE_MS + 230f) / 230f).coerceIn(0f, 1f) * (1f - smooth(vanish)) else 0f
+}
+
+private fun smooth(x: Float): Float {
+    val k = x.coerceIn(0f, 1f)
+    return k * k * (3 - 2 * k)
 }
 
 /** Rings of light along the tube's wall, rushing toward the viewer: they make the tunnel read as one. */
@@ -268,6 +341,33 @@ private fun DrawScope.tubeRings(cx: Float, cy: Float, scale: Float, t: Float, sp
     }
 }
 
+/**
+ * The rim of the scene closing into the heart at the end of a drive ([progress] of the portal, 1 open,
+ * 0 shut): a ring of light on its edge, brighter as it tightens.
+ */
+@Composable
+fun PortalRim(progress: Float, modifier: Modifier = Modifier) {
+    if (progress <= 0f || progress >= 1f) return
+    Canvas(modifier) {
+        val reach = kotlin.math.hypot(size.width, size.height)
+        val k = 1f - progress
+        val center = Offset(size.width / 2, size.height * HEART_Y)
+        val r = progress * 1.15f * 0.91f * reach
+        drawCircle(
+            Brush.radialGradient(
+                (0.8f) to Color.Transparent,
+                (0.97f) to StarBlue.copy(alpha = 0.5f * k),
+                1f to Color.Transparent,
+                center = center,
+                radius = r * 1.12f,
+            ),
+            radius = r * 1.12f,
+            center = center,
+        )
+        drawCircle(Color.White.copy(alpha = 0.85f * k), radius = r, center = center, style = Stroke((1.5f + 3f * k) * density))
+    }
+}
+
 /** The arrival's shock ring: a bright circle racing out from the tunnel's heart as the scene opens. */
 @Composable
 fun ShockRing(progress: Float, modifier: Modifier = Modifier) {
@@ -286,11 +386,12 @@ fun ShockRing(progress: Float, modifier: Modifier = Modifier) {
 
 /**
  * The words under the globe while the GPS searches: what is happening, and four lights coming on
- * one by one as satellites lock (four make a position). In the demo, [gps] is simulated.
+ * one by one as satellites lock (four make a position). [locked]: the airlock, the position is
+ * there. In the demo, [gps] is simulated.
  */
 @Composable
-fun FlightCaption(gps: GpsInfo, demo: Boolean, modifier: Modifier = Modifier) {
-    val ready = gps.used >= 4
+fun FlightCaption(gps: GpsInfo, demo: Boolean, modifier: Modifier = Modifier, locked: Boolean = false) {
+    val ready = locked || gps.used >= 4
     val halo = TextStyle(shadow = Shadow(Color.Black, blurRadius = 18f))
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         val status = when {
@@ -311,7 +412,7 @@ fun FlightCaption(gps: GpsInfo, demo: Boolean, modifier: Modifier = Modifier) {
         }
         Spacer(Modifier.height(14.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            for (i in 0 until 4) LockLight(on = i < gps.used, ready = ready)
+            for (i in 0 until 4) LockLight(on = locked || i < gps.used, ready = ready)
         }
         Spacer(Modifier.height(12.dp))
         Text(
@@ -364,10 +465,11 @@ private class Stars(private val count: Int, private val tube: Boolean) {
         phase[i] = random.nextFloat() * 6.28f
     }
 
+    /** [speed] below zero: backwards, the stars fall away into the heart and new ones come from beside the viewer. */
     fun step(dt: Float, speed: Float) {
         for (i in 0 until count) {
             z[i] -= speed * dt
-            if (z[i] <= 0.03f) spawn(i, 1.2f)
+            if (z[i] <= 0.03f) spawn(i, 1.2f) else if (z[i] > 1.25f) spawn(i, 0.05f + random.nextFloat() * 0.15f)
         }
     }
 
@@ -388,8 +490,8 @@ private class Stars(private val count: Int, private val tube: Boolean) {
                 else -> Color.White
             }.copy(alpha = alpha)
             val width = (0.6f + near * 2.6f) * density
-            // The trail: where the star was a moment ago; long at speed, nothing at rest.
-            val tailDepth = (depth + speed * 0.05f).coerceAtMost(1.4f)
+            // The trail: where the star was a moment ago; long at speed, nothing at rest, outward backwards.
+            val tailDepth = (depth + speed * 0.05f).coerceIn(depth * 0.3f, 1.4f)
             val tx = cx + x[i] / tailDepth * scale
             val ty = cy + y[i] / tailDepth * scale
             if ((px - tx) * (px - tx) + (py - ty) * (py - ty) < width * width) {
@@ -404,9 +506,11 @@ private class Stars(private val count: Int, private val tube: Boolean) {
 /**
  * The flight's sounds, synthesized like the alert tones (no assets): the engines spooling up at
  * Start, a low hum looping while the GPS searches, a soft note at each satellite locked, then the
- * jump, a rising rush ending in a round deep boom and a warm chord as the map appears. The music
+ * arrival: a deep tone gathering itself in the airlock, the rush of the jump ending in a round deep
+ * boom and a warm chord as the map appears. At the end of a drive, the way back: air drawn into the
+ * heart, a soft thump out of the flash, a whoosh falling away and the chord of home. The music
  * steps aside for the flight: it slides down and pauses at Start, plays again low under the boom's
- * chord and rises back to where it was.
+ * chord and rises back to where it was; it only ducks under the way back.
  */
 class WarpSound(context: Context) {
     private val attributes = AudioAttributes.Builder()
@@ -415,8 +519,19 @@ class WarpSound(context: Context) {
         .build()
     private var engage: AudioTrack? = null
     private var hum: AudioTrack? = null
-    private var arrive: AudioTrack? = null
     private var locks: List<AudioTrack> = emptyList()
+
+    @Volatile
+    private var arrivePcm: ShortArray? = null
+
+    @Volatile
+    private var homecomingPcm: ShortArray? = null
+
+    /** The arrival or the way back now playing, a fresh track each time so its clock starts at zero. */
+    private var moment: AudioTrack? = null
+    private var momentKind: FlightSound? = null
+    private var momentStartNs = 0L
+    private var momentLagNs: Long? = null
 
     /** Its own focus owner (the drive service has another): the music's way out and back. */
     private val music = AudioDucker(context)
@@ -426,9 +541,10 @@ class WarpSound(context: Context) {
     suspend fun prepare() = withContext(Dispatchers.Default) {
         runCatching {
             engage = track(engageWave())
-            arrive = track(arriveWave())
             hum = track(humWave()).apply { setLoopPoints(0, HUM_SAMPLES, -1) }
             locks = LOCK_NOTES.mapIndexed { i, hz -> track(lockWave(hz, chord = i == LOCK_NOTES.lastIndex)) }
+            arrivePcm = arriveWave()
+            homecomingPcm = homecomingWave()
         }
     }
 
@@ -436,6 +552,32 @@ class WarpSound(context: Context) {
 
     /** Satellite [n] (1 to 4) locked: a soft round note, a step higher each time, the fourth a chord. */
     fun lock(n: Int) = replay(locks.getOrNull(n - 1))
+
+    /** The airlock, the jump and the boom, in one sound: the pictures follow it ([heardAt]). */
+    fun arrive() = play(FlightSound.ARRIVE, arrivePcm)
+
+    /** The way back at the end of a drive; the music ducks under it. */
+    fun homecoming() {
+        play(FlightSound.HOMECOMING, homecomingPcm)
+        music.duckFor(HOMECOMING_MS.toLong(), holdMs = 500)
+    }
+
+    /**
+     * When the first sample of [kind] reaches the ear: when it was started, plus the output's delay
+     * read from the track's timestamps (Bluetooth included when Android knows it) once they come.
+     */
+    fun heardAt(kind: FlightSound): Long? {
+        val track = moment ?: return null
+        if (momentKind != kind) return null
+        if (momentLagNs == null) {
+            val stamp = AudioTimestamp()
+            if (runCatching { track.getTimestamp(stamp) }.getOrDefault(false) && stamp.framePosition > 0) {
+                val first = stamp.nanoTime - stamp.framePosition * 1_000_000_000L / RATE
+                momentLagNs = (first - momentStartNs).coerceIn(0L, MAX_LAG_NS)
+            }
+        }
+        return momentStartNs + (momentLagNs ?: 0L)
+    }
 
     /** At Start: the music slides down, then pauses for the flight. */
     fun musicAway() {
@@ -487,15 +629,27 @@ class WarpSound(context: Context) {
         runCatching { h.pause() }
     }
 
-    fun arrive() = replay(arrive)
-
     fun release() {
-        (listOfNotNull(engage, hum, arrive) + locks).forEach { runCatching { it.release() } }
+        (listOfNotNull(engage, hum, moment) + locks).forEach { runCatching { it.release() } }
         engage = null
         hum = null
-        arrive = null
+        moment = null
         locks = emptyList()
         musicNow()
+    }
+
+    private fun play(kind: FlightSound, pcm: ShortArray?) {
+        pcm ?: return
+        runCatching {
+            moment?.release()
+            moment = null
+            val track = track(pcm)
+            moment = track
+            momentKind = kind
+            momentLagNs = null
+            momentStartNs = System.nanoTime()
+            track.play()
+        }
     }
 
     private fun replay(track: AudioTrack?) {
@@ -520,6 +674,7 @@ class WarpSound(context: Context) {
 
     private companion object {
         const val RATE = 44_100
+        const val TWO_PI = 2 * PI.toFloat()
 
         /** Two seconds: every partial of the hum fits a whole number of cycles, so the loop is seamless. */
         const val HUM_SAMPLES = 2 * RATE
@@ -547,7 +702,7 @@ class WarpSound(context: Context) {
             var phase = 0f
             return pcm(length) { t, noise ->
                 val k = t / length
-                phase += 2 * PI.toFloat() * (55f + 300f * k * k) / RATE
+                phase += TWO_PI * (55f + 300f * k * k) / RATE
                 val env = smooth(k / 0.75f) * (1f - smooth((k - 0.75f) / 0.25f))
                 env * (0.55f * sin(phase) + 0.2f * sin(phase * 2.01f) + noise * (0.15f + 0.6f * k))
             }
@@ -555,34 +710,47 @@ class WarpSound(context: Context) {
 
         /** The hum of the tunnel: deep partials breathing slowly, a faint shimmer on top. */
         fun humWave(): ShortArray = pcm(HUM_SAMPLES.toFloat() / RATE) { t, _ ->
-            val breath = 1f + 0.3f * sin(2 * PI.toFloat() * 0.5f * t)
-            val w = 2 * PI.toFloat() * t
+            val breath = 1f + 0.3f * sin(TWO_PI * 0.5f * t)
+            val w = TWO_PI * t
             0.32f * breath * (sin(w * 55f) + 0.5f * sin(w * 110f) + 0.25f * sin(w * 165f)) + 0.03f * breath * sin(w * 880f)
         }
 
         /**
-         * The jump: a rush rising fast, then at the flash a round deep boom, the rush's air settling
-         * and a warm chord swelling under it, the whole dying away slowly: an arrival, not a cut.
+         * The arrival, timed on the pictures: in the airlock a deep tone gathers itself, rising, air
+         * drawn in; the rush of the jump rises fast out of it; at the flash a round deep boom, the
+         * air settling and a warm chord swelling under it, the whole dying away slowly: an arrival,
+         * not a cut.
          */
         fun arriveWave(): ShortArray {
-            val impact = JUMP_MS * LANDING / 1_000f
+            val hold = HOLD_MS / 1_000f
+            val impact = JUMP_IMPACT_MS / 1_000f
             val length = impact + 3.6f
+            var charge = 0f
             var rush = 0f
             var boom = 0f
             return pcm(length) { t, noise ->
                 var v = 0f
-                if (t < impact) {
-                    val k = t / impact
-                    rush += 2 * PI.toFloat() * (120f + 900f * k * k * k) / RATE
-                    v += k * k * (0.35f * sin(rush) + noise * 0.9f)
-                } else {
+                if (t < impact + 0.05f) {
+                    // The airlock: from the hum's 55 Hz up an octave, swelling, then handing over to the rush.
+                    charge += TWO_PI * (55f + 55f * smooth(t / impact)) / RATE
+                    val swell = smooth(t / 0.35f) * (0.32f + 0.2f * smooth(t / hold)) * (1f - smooth((t - hold) / (impact - hold)))
+                    v += swell * (sin(charge) + 0.4f * sin(charge * 2f)) + noise * 0.2f * smooth(t / hold) * (1f - smooth((t - hold) / 0.4f))
+                    // The rush, starting under the end of the airlock, gone 40 ms after the flash.
+                    val k = ((t - hold + 0.15f) / (impact - hold + 0.15f)).coerceIn(0f, 1f)
+                    if (k > 0f) {
+                        rush += TWO_PI * (120f + 900f * k * k * k) / RATE
+                        val out = if (t <= impact) 1f else 1f - (t - impact) / 0.05f
+                        v += out * k * k * (0.35f * sin(rush) + noise * 0.9f)
+                    }
+                }
+                if (t >= impact) {
                     val d = t - impact
                     // Pitch dropping from 70 to 35 Hz as it decays: the body of the boom.
-                    boom += 2 * PI.toFloat() * (35f + 35f * exp(-d / 0.25f)) / RATE
+                    boom += TWO_PI * (35f + 35f * exp(-d / 0.25f)) / RATE
                     // A round, deep landing (soft attack), no bell: the air settles, a warm chord carries on.
                     v += 1.0f * smooth(d / 0.03f) * exp(-d / 0.9f) * sin(boom)
-                    v += noise * 0.9f * exp(-d / 0.35f)
-                    val w = 2 * PI.toFloat() * d
+                    v += noise * 0.9f * smooth(d / 0.03f) * exp(-d / 0.35f)
+                    val w = TWO_PI * d
                     val pad = 0.14f * smooth(d / 0.5f) * exp(-d / 1.8f)
                     v += pad * (sin(w * 110f) + sin(w * 138.6f) + sin(w * 164.8f) + 0.5f * sin(w * 220f))
                 }
@@ -591,18 +759,48 @@ class WarpSound(context: Context) {
             }
         }
 
+        /**
+         * The way back, timed on the pictures: air drawn into the heart while the scene closes, a
+         * soft deep thump out of the flash (no impact), a whoosh falling away with the Earth, and the
+         * warm chord of home settling in slowly.
+         */
+        fun homecomingWave(): ShortArray {
+            val close = CLOSE_MS / 1_000f
+            val recede = RECEDE_MS / 1_000f
+            val length = HOMECOMING_MS / 1_000f + 0.8f
+            var sweep = 0f
+            var thump = 0f
+            return pcm(length) { t, noise ->
+                var v = 0f
+                if (t < close) {
+                    val k = t / close
+                    sweep += TWO_PI * (180f + 340f * k * k) / RATE
+                    v += k * k * (0.28f * sin(sweep) + 0.7f * noise)
+                } else {
+                    val d = t - close
+                    val u = (d / recede).coerceIn(0f, 1f)
+                    sweep += TWO_PI * (520f - 420f * smooth(u)) / RATE
+                    v += (1f - u) * (1f - u) * 0.28f * sin(sweep) + noise * 0.7f * exp(-d / 0.45f)
+                    thump += TWO_PI * (38f + 24f * exp(-d / 0.2f)) / RATE
+                    v += 0.7f * smooth(d / 0.04f) * exp(-d / 0.55f) * sin(thump)
+                    val c = d - 0.8f
+                    if (c > 0f) {
+                        val w = TWO_PI * c
+                        val pad = 0.11f * smooth(c / 0.6f) * exp(-c / 1.4f)
+                        v += pad * (sin(w * 164.81f) + sin(w * 207.65f) + sin(w * 246.94f) + 0.5f * sin(w * 329.63f))
+                    }
+                }
+                v * (1f - smooth((t - (length - 0.6f)) / 0.6f))
+            }
+        }
+
         /** A lock: a soft sine with a slow fade and a quiet octave for air; no bell, no click. */
         fun lockWave(hz: Float, chord: Boolean): ShortArray = pcm(1.1f) { t, _ ->
-            val w = 2 * PI.toFloat() * t
+            val w = TWO_PI * t
             val env = smooth(t / 0.04f) * exp(-t / if (chord) 0.4f else 0.24f)
             var v = sin(w * hz) + 0.2f * sin(w * hz * 2f)
             if (chord) v += 0.7f * sin(w * hz * 1.2599f) + 0.55f * sin(w * hz * 1.4983f)
             0.3f * env * v * (1f - smooth((t - 0.9f) / 0.2f))
-        }
-
-        fun smooth(x: Float): Float {
-            val k = x.coerceIn(0f, 1f)
-            return k * k * (3 - 2 * k)
         }
     }
 }

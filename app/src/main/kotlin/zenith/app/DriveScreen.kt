@@ -6,6 +6,8 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.EaseOutBack
+import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
@@ -79,6 +81,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -143,10 +146,17 @@ private const val MUSIC_AWAY_MAX_MS = 12_000L
 /** A position without a trusted speed (indoors) still lands after this wait. */
 private const val WEAK_FIX_WAIT_MS = 15_000L
 
-/** Home's buttons rise back into place after a drive, and sink away at Start. */
+/** Home's buttons rise back into place after a flight cut short, and sink away at Start. */
 private val BottomIn = fadeIn(tween(500, delayMillis = 400)) +
     slideInVertically(spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessLow)) { it }
+
+/** After a drive, once the Earth has fallen away into the stars. */
+private val BottomInLate = fadeIn(tween(600, delayMillis = 2_200)) +
+    slideInVertically(tween(900, delayMillis = 2_100, easing = EaseOutBack)) { it }
 private val BottomOut = fadeOut(tween(200)) + slideOutVertically(tween(300)) { it / 2 }
+
+/** The drive's cards leave toward the heart as the scene closes. */
+private val DriveOut = fadeOut(tween(220)) + scaleOut(tween(320, easing = FastOutLinearInEasing), targetScale = 0.8f)
 
 /** Chips pop in with a spring and shrink away. */
 private val ChipIn = fadeIn(tween(300)) + scaleIn(spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMedium), initialScale = 0.7f)
@@ -223,6 +233,8 @@ fun DriveScreen(
     // the first good position, and the map comes in at the flash. Opened mid-drive: straight to the map.
     var landed by remember(running) { mutableStateOf(running && snapshot?.speedKmh != null) }
     var flightOver by remember(running) { mutableStateOf(landed) }
+    // The jump itself has begun: the airlock is over, the flight's words rush past.
+    var diving by remember(running) { mutableStateOf(false) }
     var minFlightDone by remember(running) { mutableStateOf(false) }
     var weakFixWaited by remember(running) { mutableStateOf(false) }
     val hasFix = snapshot != null
@@ -254,14 +266,17 @@ fun DriveScreen(
         }
     }
     val sky = if (demo) GpsInfo(used = demoLocked, visible = 9) else gps
-    // A drive just ended (seen at the change itself): the stars rush back out of hyperspace.
-    val lastRunning = remember { booleanArrayOf(running) }
-    val comingHome = remember(running) { (!running && lastRunning[0]).also { lastRunning[0] = running } }
+    // A drive that had reached the map just ended (seen at the change itself): the way back, the
+    // arrival backwards. A flight cut short only lets the tunnel slow down.
+    val wasLanded = remember { booleanArrayOf(false) }
+    val comingHome = remember(running) { !running && wasLanded[0] }
+    wasLanded[0] = running && landed
     // Where the driver is, kept after the drive: the globe dives onto it, and the way back leaves from it.
     var home by remember { mutableStateOf<LatLon?>(null) }
     LaunchedEffect(snapshot?.position) { snapshot?.position?.let { home = it } }
     val sound = rememberWarpSound()
     val soundScope = rememberCoroutineScope()
+    val hostView = LocalView.current
     var heardPhase by remember { mutableStateOf<FlightPhase?>(null) }
     LaunchedEffect(phase, flightOver) {
         val before = heardPhase
@@ -276,19 +291,27 @@ fun DriveScreen(
                 sound.startHum()
             }
             phase == FlightPhase.ARRIVE && before == FlightPhase.SEARCH -> {
+                // The airlock, the jump and the boom are one sound, the pictures follow it; the
+                // hum dies away under the airlock's deep tone.
                 sound.arrive()
-                // Apart from this effect, which the end of the jump restarts: the music comes back at the boom.
-                soundScope.launch {
-                    delay(JUMP_IMPACT_MS)
-                    sound.musicBack()
-                }
-                sound.fadeHum(900)
+                sound.fadeHum(HOLD_MS.toLong())
             }
             else -> {
-                if (phase == FlightPhase.IDLE) sound.musicNow()
+                if (phase == FlightPhase.IDLE) {
+                    sound.musicNow()
+                    if (comingHome) sound.homecoming()
+                }
                 sound.fadeHum()
             }
         }
+    }
+    // The way back takes the whole screen too: the status bar comes back with home.
+    var homeBound by remember { mutableStateOf(false) }
+    LaunchedEffect(comingHome) {
+        if (!comingHome) return@LaunchedEffect
+        homeBound = true
+        delay(HOMECOMING_MS.toLong())
+        homeBound = false
     }
     // A long search (indoors, cold GPS): the music does not wait for the jump.
     LaunchedEffect(phase) {
@@ -321,11 +344,12 @@ fun DriveScreen(
     var cruising by remember(running) { mutableStateOf(false) }
     LaunchedEffect(snapshot?.speedKmh) { cruising = Cockpit.cruising(snapshot?.speedKmh, cruising) }
     // The flight takes the whole screen: the status bar (time, battery) folds away until the map is there.
-    ImmersiveBars(hidden = running && !flightOver)
+    ImmersiveBars(hidden = (running && !flightOver) || homeBound)
     val withMusic by animateFloatAsState(if (media != null) 1f else 0f, tween(900), label = "withMusic")
     // The arrival: the whole scene (map and Canvas, loaded during the flight) opens like a portal
     // from the heart of the tunnel at the flash, rushing in from a zoom, with a shock ring. At the
-    // stop it closes back into the heart, receding, while the stars rush out of it.
+    // stop it closes back into the heart, ever faster and receding, a rim of light on its edge,
+    // into the flash of the way back.
     val portal = remember { Animatable(if (landed) 1f else 0f) }
     var sceneUp by remember { mutableStateOf(running) }
     LaunchedEffect(running, showMap) {
@@ -339,7 +363,7 @@ fun DriveScreen(
                 portal.snapTo(0f)
             }
             portal.value > 0f -> {
-                portal.animateTo(0f, tween(900, easing = FastOutSlowInEasing))
+                portal.animateTo(0f, tween(CLOSE_MS, easing = FastOutLinearInEasing))
                 sceneUp = false
             }
             else -> sceneUp = false
@@ -367,15 +391,26 @@ fun DriveScreen(
         }
     }
     Box(Modifier.fillMaxSize().background(Bg)) {
-        AnimatedVisibility(visible = !flightOver, enter = fadeIn(tween(800)), exit = fadeOut(tween(200))) {
+        AnimatedVisibility(
+            visible = !flightOver,
+            // The way back starts under the closing scene at once, its flash already building.
+            enter = if (comingHome) EnterTransition.None else fadeIn(tween(800)),
+            exit = fadeOut(tween(200)),
+        ) {
             Starfield(
                 phase,
                 sky,
-                onLanded = { landed = true },
+                onDive = { diving = true },
+                onLanded = {
+                    landed = true
+                    // At the boom: the music comes back, low under the chord, then rises.
+                    soundScope.launch { sound.musicBack() }
+                },
                 onGone = { flightOver = true },
                 modifier = Modifier.fillMaxSize(),
                 comingHome = comingHome,
                 home = home,
+                heardAt = sound::heardAt,
             )
         }
         if (running || sceneUp) {
@@ -383,7 +418,7 @@ fun DriveScreen(
                 Modifier.fillMaxSize().portalReveal(portal.value).graphicsLayer {
                     val k = portal.value
                     alpha = if (k <= 0f) 0f else 1f
-                    val scale = if (running) 1.35f - 0.35f * k else 0.75f + 0.25f * k
+                    val scale = if (running) 1.35f - 0.35f * k else 0.7f + 0.3f * k
                     scaleX = scale
                     scaleY = scale
                 },
@@ -420,18 +455,24 @@ fun DriveScreen(
                     overlay = if (media != null) MapOverMusic else MapAlone,
                 )
             }
-            ShockRing(portal.value, modifier = Modifier.fillMaxSize())
+            if (running) ShockRing(portal.value, modifier = Modifier.fillMaxSize()) else PortalRim(portal.value, modifier = Modifier.fillMaxSize())
         }
-        // The flight's words, under the globe at the tunnel's heart; they rush past the viewer at the jump.
+        // The flight's words, under the globe at the tunnel's heart, through the airlock too; they
+        // rush past the viewer as the jump begins.
         AnimatedVisibility(
-            visible = phase == FlightPhase.SEARCH,
+            visible = phase == FlightPhase.SEARCH || (phase == FlightPhase.ARRIVE && !diving && !landed),
             enter = fadeIn(tween(700, delayMillis = 900)) +
                 slideInVertically(tween(900, delayMillis = 900, easing = FastOutSlowInEasing)) { it / 4 },
             exit = fadeOut(tween(300)) + scaleOut(tween(400), targetScale = 1.8f),
         ) {
             BoxWithConstraints(Modifier.fillMaxSize()) {
                 val globe = minOf(maxWidth, maxHeight) * GLOBE_SHARE
-                FlightCaption(sky, demo, Modifier.align(Alignment.TopCenter).padding(top = maxHeight * HEART_Y + globe * 1.75f + 16.dp))
+                FlightCaption(
+                    sky,
+                    demo,
+                    Modifier.align(Alignment.TopCenter).padding(top = maxHeight * HEART_Y + globe * 1.75f + 16.dp),
+                    locked = phase == FlightPhase.ARRIVE,
+                )
             }
         }
         // Too fast near a radar: the edges of the screen pulse red.
@@ -469,7 +510,12 @@ fun DriveScreen(
                             initialState == HomeView.FLIGHT && targetState == HomeView.DRIVE ->
                                 (fadeIn(tween(400, delayMillis = 100)) + scaleIn(spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessLow), initialScale = 1.5f))
                                     .togetherWith(fadeOut(tween(300)) + scaleOut(tween(350), targetScale = 2.6f))
-                            // Back home: the speed recedes, home comes out of the distance as the stars slow down.
+                            // Back from a drive: the speed is drawn into the heart with the scene; home
+                            // comes out of the distance once the Earth has fallen away.
+                            initialState == HomeView.DRIVE && targetState == HomeView.IDLE ->
+                                (fadeIn(tween(700, delayMillis = 1_700)) + scaleIn(tween(1_300, delayMillis = 1_550, easing = EaseOutBack), initialScale = 0.35f))
+                                    .togetherWith(fadeOut(tween(260)) + scaleOut(tween(420, easing = FastOutLinearInEasing), targetScale = 0.3f))
+                            // A flight cut short: home comes out of the distance as the stars slow down.
                             targetState == HomeView.IDLE ->
                                 (fadeIn(tween(700, delayMillis = 350)) + scaleIn(spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessVeryLow), initialScale = 0.55f))
                                     .togetherWith(fadeOut(tween(300)) + scaleOut(tween(500), targetScale = 0.7f))
@@ -483,7 +529,10 @@ fun DriveScreen(
                 ) { shown ->
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         when (shown) {
-                            HomeView.IDLE -> Idle(data, onDemo)
+                            HomeView.IDLE -> Idle(data) {
+                                UiSound.play(UiSound.Kind.SUCCESS, hostView, long = true)
+                                onDemo()
+                            }
                             // The flight's words sit under the globe, drawn over the whole screen.
                             HomeView.FLIGHT -> Spacer(Modifier.height(1.dp))
                             HomeView.DRIVE -> Dashboard(snapshot, Modifier.padding(top = if (showMap) 72.dp else 0.dp))
@@ -497,12 +546,16 @@ fun DriveScreen(
             AnimatedVisibility(
                 visible = running && landed && media != null,
                 enter = fadeIn(tween(600, delayMillis = 500)) + slideInVertically(tween(700, delayMillis = 500, easing = FastOutSlowInEasing)) { it / 2 },
-                exit = fadeOut(),
+                exit = DriveOut,
             ) {
                 media?.let {
                     MediaBar(
                         it,
-                        onTap = { onMusicChoice(Cockpit.toggle(focus)) },
+                        onTap = {
+                            val big = Cockpit.toggle(focus)
+                            UiSound.play(if (big) UiSound.Kind.MUSIC_UP else UiSound.Kind.MUSIC_DOWN, hostView)
+                            onMusicChoice(big)
+                        },
                         onOpen = onMediaOpen,
                         onLike = onMediaLike,
                         onPrevious = onMediaPrevious,
@@ -515,23 +568,25 @@ fun DriveScreen(
             AnimatedVisibility(
                 visible = running && landed && navApps.isNotEmpty() && !cruising,
                 enter = fadeIn(tween(600, delayMillis = 750)) + slideInVertically(tween(700, delayMillis = 750, easing = FastOutSlowInEasing)) { it / 2 },
-                exit = fadeOut(),
+                exit = DriveOut,
             ) {
                 NavApps(navApps, onOpenNavApp)
             }
             StartStop(running, onStart, onStop, compact = running && cruising)
-            AnimatedVisibility(visible = !running, enter = BottomIn, exit = BottomOut) {
+            AnimatedVisibility(visible = !running, enter = if (comingHome) BottomInLate else BottomIn, exit = BottomOut) {
                 Text(
                     "Réglages",
                     color = Color.White,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold,
                     textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp).tap(onClick = onOpenSettings).glass(RoundedCornerShape(18.dp))
+                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
+                        .tap(shape = RoundedCornerShape(18.dp), sound = UiSound.Kind.OPEN, lift = 1.03f, onClick = onOpenSettings)
+                        .glass(RoundedCornerShape(18.dp))
                         .padding(vertical = 14.dp),
                 )
             }
-            AnimatedVisibility(visible = !running, enter = BottomIn, exit = BottomOut) {
+            AnimatedVisibility(visible = !running, enter = if (comingHome) BottomInLate else BottomIn, exit = BottomOut) {
                 Text(
                     "Cartes © OpenFreeMap © OpenStreetMap · radars data.gouv.fr, OpenStreetMap, Lufop",
                     color = Dim.copy(alpha = 0.6f),
@@ -594,7 +649,7 @@ private fun StatusRow(
 @Composable
 private fun Chip(text: String, dot: Color, onClick: (() -> Unit)? = null) {
     Row(
-        Modifier.then(if (onClick != null) Modifier.tap(onClick = onClick) else Modifier).glass(RoundedCornerShape(50))
+        Modifier.then(if (onClick != null) Modifier.tap(shape = RoundedCornerShape(50), onClick = onClick) else Modifier).glass(RoundedCornerShape(50))
             .padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -621,7 +676,8 @@ private fun UpdateBanner(update: UpdateState, canInstall: Boolean, onInstall: ()
             color = Color.White,
             fontSize = 14.sp,
             textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp).tap(enabled = update is UpdateState.Ready, onClick = onInstall)
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                .tap(enabled = update is UpdateState.Ready, shape = RoundedCornerShape(12.dp), lift = 1.03f, onClick = onInstall)
                 .glass(RoundedCornerShape(12.dp)).padding(12.dp),
         )
     }
@@ -675,7 +731,8 @@ private fun NavApps(apps: List<NavApp>, onOpen: (NavApp) -> Unit) {
                 fontSize = 15.sp,
                 fontWeight = FontWeight.SemiBold,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.weight(1f).tap { onOpen(app) }.glass(RoundedCornerShape(14.dp)).padding(vertical = 12.dp),
+                modifier = Modifier.weight(1f).tap(shape = RoundedCornerShape(14.dp), sound = UiSound.Kind.OPEN) { onOpen(app) }
+                    .glass(RoundedCornerShape(14.dp)).padding(vertical = 12.dp),
             )
         }
     }
@@ -892,7 +949,15 @@ private fun StartStop(running: Boolean, onStart: () -> Unit, onStop: () -> Unit,
                     style = Stroke(1.5.dp.toPx()),
                 )
             }
-            .tap(onClick = if (running) onStop else onStart).glass(RoundedCornerShape(18.dp), bg)
+            // Only the touch: the flight and the way back are the sound.
+            .tap(
+                shape = RoundedCornerShape(18.dp),
+                sound = UiSound.Kind.SILENT,
+                lift = 1.04f,
+                glow = if (running) PressLight else PressShade,
+                onClick = if (running) onStop else onStart,
+            )
+            .glass(RoundedCornerShape(18.dp), bg)
             .padding(vertical = height)
             .alpha(quiet),
     ) {

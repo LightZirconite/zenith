@@ -46,7 +46,7 @@ private const val LZ = 0.63f
  * satellites in view on three tilted orbits, each with a short trail. As they lock, the globe slows
  * and turns home (the driver's position once known, France before) to the viewer; a beacon lights up
  * there and every locked satellite beams down to it, a pulse of data running along each beam.
- * Before the dive it settles exactly on home, so the zoom lands on the driver, not on a neighbour.
+ * Aimed, it settles on home like a camera, by the shortest way: the dive lands on the driver.
  */
 internal class Globe {
     private val px: FloatArray
@@ -61,12 +61,11 @@ internal class Globe {
     private var homeSpin = (-Math.toRadians(HOME_LON)).toFloat()
     private var homeTilt = Math.toRadians(HOME_LAT).toFloat()
 
-    /** Spin and tilt when the settling on home began; null while not settling. */
-    private var settleFrom: FloatArray? = null
-
     /** France starts a quarter turn away, to the left: it comes into view as the search goes on. */
     private var spin = homeSpin - 1.7f
     private var tilt = 0.35f
+    private var spinSpeed = SPIN
+    private var tiltSpeed = 0f
 
     init {
         val x = ArrayList<Float>()
@@ -102,39 +101,49 @@ internal class Globe {
     fun face() {
         spin = homeSpin
         tilt = homeTilt
-        settleFrom = null
+        spinSpeed = 0f
+        tiltSpeed = 0f
     }
 
     /**
-     * Spins while searching, slower with each satellite; locked, it eases home to the front.
-     * [settle] (0 to 1, the start of the dive) brings home exactly to the center, always turning the
-     * way it already spins, so the zoom that follows lands on it.
+     * Spins while searching, slower with each satellite ([lock], 0 to 1). [aim]: home comes to the
+     * center like a camera settling, from the speed the globe already has and always by the shortest
+     * way (never a whole turn when home moves a little behind); [firm] for the airlock before the
+     * jump, where it must be dead center within a second.
      */
-    fun step(dt: Float, lock: Float, settle: Float = 0f) {
-        if (settle > 0f) {
-            val from = settleFrom ?: floatArrayOf(spin, tilt).also { settleFrom = it }
-            val k = settle.coerceIn(0f, 1f)
-            val e = k * k * (3 - 2 * k)
-            spin = from[0] + (((homeSpin - from[0]) % TAU + TAU) % TAU) * e
-            tilt = from[1] + (homeTilt - from[1]) * e
-            return
-        }
-        settleFrom = null
-        if (lock < 0.98f) {
-            spin += dt * SPIN * (1f - 0.7f * lock)
+    fun step(dt: Float, lock: Float, aim: Boolean, firm: Boolean = false) {
+        if (aim) {
+            val w = if (firm) 6.5f else 3f
+            spinSpeed += (w * w * wrap(homeSpin - spin) - 2 * w * spinSpeed) * dt
+            tiltSpeed += (w * w * (homeTilt - tilt) - 2 * w * tiltSpeed) * dt
         } else {
-            val ahead = ((homeSpin - spin) % TAU + TAU) % TAU
-            spin += min(ahead * 1.6f, 1.8f) * dt
+            val k = lock.coerceIn(0f, 1f)
+            spinSpeed += (SPIN * (1f - 0.7f * k) - spinSpeed) * (2f * dt).coerceAtMost(1f)
+            val target = 0.35f + (homeTilt - 0.35f) * k * k * (3 - 2 * k)
+            tiltSpeed += (9f * (target - tilt) - 6f * tiltSpeed) * dt
         }
-        val k = lock.coerceIn(0f, 1f)
-        tilt = 0.35f + (homeTilt - 0.35f) * k * k * (3 - 2 * k)
+        spin = wrap(spin + spinSpeed * dt)
+        tilt += tiltSpeed * dt
     }
 
     /**
      * Draws the globe of radius [r] at ([cx], [cy]). [orbits] fades the satellites alone (they leave
-     * first at the jump); [used] of the [visible] satellites are locked, [lock] is 0 to 1.
+     * first at the jump); [used] of the [visible] satellites are locked, [lock] is 0 to 1. [flare]
+     * (0 to 1): the lock-on, a ring of light running out of the beacon.
      */
-    fun draw(scope: DrawScope, cx: Float, cy: Float, r: Float, alpha: Float, orbits: Float, t: Float, visible: Int, used: Int, lock: Float): Unit = with(scope) {
+    fun draw(
+        scope: DrawScope,
+        cx: Float,
+        cy: Float,
+        r: Float,
+        alpha: Float,
+        orbits: Float,
+        t: Float,
+        visible: Int,
+        used: Int,
+        lock: Float,
+        flare: Float = 0f,
+    ): Unit = with(scope) {
         if (alpha <= 0.01f || r < 1f) return@with
         val center = Offset(cx, cy)
         val beacon = rotated(home).takeIf { it[2] > 0.12f }?.let { Offset(cx + it[0] * r, cy - it[1] * r) }
@@ -196,6 +205,15 @@ internal class Globe {
             }
             drawCircle(Brush.radialGradient(listOf(color.copy(alpha = 0.7f * strength), Color.Transparent), center = b, radius = 12 * density), radius = 12 * density, center = b)
             drawCircle(Color.White.copy(alpha = strength), radius = 2.6f * density, center = b)
+            if (flare > 0f && flare < 1f) {
+                val k = 1f - (1f - flare) * (1f - flare)
+                drawCircle(color.copy(alpha = alpha * (1f - flare)), radius = r * (0.04f + 0.55f * k), center = b, style = Stroke((3f * (1f - flare) + 0.6f) * density))
+                drawCircle(
+                    Brush.radialGradient(listOf(Color.White.copy(alpha = 0.8f * alpha * (1f - flare)), Color.Transparent), center = b, radius = 34 * density),
+                    radius = 34 * density,
+                    center = b,
+                )
+            }
         }
         if (orbits > 0.01f) satellites(back = false, cx, cy, r, alpha * orbits, t, visible, used, beacon)
     }
@@ -311,6 +329,11 @@ internal class Globe {
         val ORBIT_INCLINATION = floatArrayOf(0.3f, 0.5f, 0.2f)
         val ORBIT_NODE = floatArrayOf(-0.35f, 0.3f, 0.12f)
         val ORBIT_SPEED = floatArrayOf(0.55f, 0.4f, 0.3f)
+
+        /** [a] brought between -π and π: the shortest way to turn. */
+        fun wrap(a: Float): Float = ((a + PI_F) % TAU + TAU) % TAU - PI_F
+
+        const val PI_F = TAU / 2
 
         fun unit(latDeg: Double, lonDeg: Double): FloatArray {
             val lat = Math.toRadians(latDeg)
