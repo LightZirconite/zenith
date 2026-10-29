@@ -3,6 +3,7 @@ package zenith.app
 import android.content.Context
 import android.util.Log
 import androidx.core.content.edit
+import androidx.core.content.pm.PackageInfoCompat
 
 /**
  * Keeps one crash from becoming a loop that leaves the app unusable (a drive service restarted by
@@ -56,7 +57,7 @@ object MapGuard {
     /** True when the map may be created; marks the attempt. */
     fun tryOpen(context: Context): Boolean {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val version = runCatching { context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode }.getOrDefault(0L)
+        val version = runCatching { PackageInfoCompat.getLongVersionCode(context.packageManager.getPackageInfo(context.packageName, 0)) }.getOrDefault(0L)
         var fails = if (prefs.getLong(KEY_VERSION, -1) == version) prefs.getInt(KEY_FAILS, 0) else 0
         if (prefs.getBoolean(KEY_OPENING, false)) fails++
         val allowed = fails < MAX_FAILS
