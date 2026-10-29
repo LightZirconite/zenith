@@ -57,7 +57,7 @@ android {
         abortOnError = true
         // The findings in the CI log, warnings included.
         textReport = true
-        textOutput = file("stdout")
+        textOutput = file("build/reports/lint-results.txt")
     }
 }
 

@@ -17,7 +17,9 @@ jobs:
       - name: Unit tests
         run: ./gradlew :core:test
       - name: Android 10 API check
-        run: ./gradlew :app:lintDebug
+        run: ./gradlew :app:lintDebug || { cat app/build/reports/lint-results.txt; exit 1; }
+      - name: Android 10 API report
+        run: cat app/build/reports/lint-results.txt
       - name: Debug APK
         run: ./gradlew :app:assembleDebug
       - uses: actions/upload-artifact@v7

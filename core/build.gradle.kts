@@ -2,6 +2,8 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.kotlin.jvm)
+    // Analyzed by the app's lint (checkDependencies): core runs on the phone too, Android 10 included.
+    alias(libs.plugins.android.lint)
 }
 
 java {
