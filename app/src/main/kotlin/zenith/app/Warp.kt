@@ -3,6 +3,7 @@ package zenith.app
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioTimestamp
 import android.media.AudioTrack
 import androidx.compose.animation.AnimatedContent
@@ -73,6 +74,7 @@ import kotlin.math.tanh
 import kotlin.random.Random
 import kotlin.math.cos
 import zenith.core.LatLon
+import zenith.core.Loudness
 
 /** Where the start of a drive stands: stars drifting at home, the tunnel while the GPS searches, the jump. */
 enum class FlightPhase { IDLE, SEARCH, ARRIVE }
@@ -498,7 +500,14 @@ class WarpSound(context: Context) {
 
     /** Its own focus owner (the drive service has another): the music's way out and back. */
     private val music = AudioDucker(context)
+    private val audio = context.getSystemService(AudioManager::class.java)
+
+    /** Turned down when the media volume is high (car head unit), like the interface sounds. */
+    private fun gain(): Float = runCatching {
+        Loudness.uiGain(audio.getStreamVolume(AudioManager.STREAM_MUSIC), audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC))
+    }.getOrDefault(1f)
     private var musicAway = false
+    private var humLevel = HUM_LEVEL
 
     /** Builds the sounds off the main thread; anything asked before is silently skipped. */
     suspend fun prepare() = withContext(Dispatchers.Default) {
@@ -572,7 +581,8 @@ class WarpSound(context: Context) {
     fun startHum() {
         val h = hum ?: return
         runCatching {
-            h.setVolume(0.55f)
+            humLevel = HUM_LEVEL * gain()
+            h.setVolume(humLevel)
             if (h.playState != AudioTrack.PLAYSTATE_PLAYING) {
                 h.preferredDevice = music.bluetoothMedia()
                 h.reloadStaticData()
@@ -587,7 +597,7 @@ class WarpSound(context: Context) {
         val h = hum?.takeIf { runCatching { it.playState == AudioTrack.PLAYSTATE_PLAYING }.getOrDefault(false) } ?: return
         val steps = 14
         for (k in steps downTo 0) {
-            runCatching { h.setVolume(0.55f * k / steps) }
+            runCatching { h.setVolume(humLevel * k / steps) }
             delay(ms / steps)
         }
         runCatching { h.pause() }
@@ -613,6 +623,7 @@ class WarpSound(context: Context) {
             momentLagNs = null
             momentStartNs = System.nanoTime()
             track.preferredDevice = music.bluetoothMedia()
+            track.setVolume(gain())
             track.play()
         }
     }
@@ -623,6 +634,7 @@ class WarpSound(context: Context) {
             t.stop()
             t.reloadStaticData()
             t.preferredDevice = music.bluetoothMedia()
+            t.setVolume(gain())
             t.play()
         }
     }
@@ -644,6 +656,9 @@ class WarpSound(context: Context) {
 
         /** Two seconds: every partial of the hum fits a whole number of cycles, so the loop is seamless. */
         const val HUM_SAMPLES = 2 * RATE
+
+        /** The hum's own level, under the other flight sounds. */
+        const val HUM_LEVEL = 0.55f
 
         /** After the boom, the music stays low this long under the chord before rising. */
         const val MUSIC_RISE_MS = 800L

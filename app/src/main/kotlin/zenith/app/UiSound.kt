@@ -2,10 +2,12 @@ package zenith.app
 
 import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioManager
 import android.media.SoundPool
 import android.os.Build
 import android.view.HapticFeedbackConstants
 import android.view.View
+import zenith.core.Loudness
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -67,11 +69,14 @@ object UiSound {
 
     @Volatile
     private var pool: SoundPool? = null
+    @Volatile
+    private var audio: AudioManager? = null
     private val ids = AtomicIntegerArray(Kind.entries.size)
 
     /** Builds the sounds once per launch, off the main thread; a press before they are ready is silent. */
     fun init(context: Context) {
         if (pool != null) return
+        audio = context.applicationContext.getSystemService(AudioManager::class.java)
         val sounds = runCatching {
             SoundPool.Builder()
                 .setMaxStreams(4)
@@ -104,7 +109,11 @@ object UiSound {
         view?.let { runCatching { it.performHapticFeedback(if (long) HapticFeedbackConstants.LONG_PRESS else haptic(kind)) } }
         if (!UserSettings.state.value.uiSounds) return
         val id = ids.get(kind.ordinal)
-        if (id != 0) runCatching { pool?.play(id, 1f, 1f, 1, 0, 1f) }
+        if (id == 0) return
+        // Turned down when the media volume is high (car head unit): never louder than the alerts.
+        val gain = runCatching { audio?.let { Loudness.uiGain(it.getStreamVolume(AudioManager.STREAM_MUSIC), it.getStreamMaxVolume(AudioManager.STREAM_MUSIC)) } }
+            .getOrNull() ?: 1f
+        runCatching { pool?.play(id, gain, gain, 1, 0, 1f) }
     }
 
     private fun haptic(kind: Kind): Int = when (kind) {
