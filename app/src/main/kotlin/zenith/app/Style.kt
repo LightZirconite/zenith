@@ -26,6 +26,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -156,7 +158,11 @@ fun LargeTitlePage(
 ) {
     Box(Modifier.fillMaxSize()) {
         SpaceBackdrop(Modifier.fillMaxSize())
-        Column(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 20.dp, vertical = 12.dp)) {
+        // Tablet or car screen: a readable column in the middle rather than rows across the whole width.
+        Column(
+            Modifier.align(Alignment.TopCenter).fillMaxHeight().widthIn(max = PAGE_MAX_WIDTH).fillMaxWidth()
+                .safeDrawingPadding().padding(horizontal = 20.dp, vertical = 12.dp),
+        ) {
             Box(Modifier.fillMaxWidth().height(44.dp)) {
                 Box(Modifier.align(Alignment.CenterStart)) { leading() }
                 Text(
@@ -193,6 +199,9 @@ fun LargeTitlePage(
         }
     }
 }
+
+/** Widest a page or the drive screen's column grows on a tablet or a car screen. */
+val PAGE_MAX_WIDTH = 640.dp
 
 /** Folds the status bar (time, battery) away while [hidden]; a swipe from the top shows it a moment. */
 @Composable
@@ -263,14 +272,19 @@ fun Modifier.tap(
  * Fades the content out along its height: [stops] are (height fraction, opacity), 1 whole, 0 gone.
  * A mask on its own layer, not a dark band: what lies beneath shows through, as in a crossfade.
  */
-fun Modifier.verticalFade(stops: List<Pair<Float, Float>>): Modifier {
-    val mask = Brush.verticalGradient(*stops.map { (y, a) -> y to Color.Black.copy(alpha = a.coerceIn(0f, 1f)) }.toTypedArray())
-    return graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+fun Modifier.verticalFade(stops: List<Pair<Float, Float>>): Modifier =
+    fadeMask(Brush.verticalGradient(*stops.map { (y, a) -> y to Color.Black.copy(alpha = a.coerceIn(0f, 1f)) }.toTypedArray()))
+
+/** Same as [verticalFade], across the width: [stops] are (width fraction, opacity). */
+fun Modifier.horizontalFade(stops: List<Pair<Float, Float>>): Modifier =
+    fadeMask(Brush.horizontalGradient(*stops.map { (x, a) -> x to Color.Black.copy(alpha = a.coerceIn(0f, 1f)) }.toTypedArray()))
+
+private fun Modifier.fadeMask(mask: Brush): Modifier =
+    graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
         .drawWithContent {
             drawContent()
             drawRect(mask, blendMode = BlendMode.DstIn)
         }
-}
 
 /** Stop by stop, [from] at 0 to [to] at 1; both lists the same length. */
 fun blendStops(from: List<Pair<Float, Float>>, to: List<Pair<Float, Float>>, k: Float): List<Pair<Float, Float>> =

@@ -225,7 +225,8 @@ private class MapHolder {
             .bearing(s.headingDeg ?: lastCamera?.bearing ?: 0.0)
             .tilt(tilt)
             .zoom(z)
-            .padding(0.0, 0.0, 0.0, heightPx * (1 - 2 * carAt))
+            // Padding at the bottom lifts the car above the middle, at the top lowers it below.
+            .padding(0.0, heightPx * (2 * carAt - 1).coerceAtLeast(0.0), 0.0, heightPx * (1 - 2 * carAt).coerceAtLeast(0.0))
             .build()
         val first = lastCamera == null
         lastCamera = camera

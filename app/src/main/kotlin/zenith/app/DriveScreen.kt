@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -51,6 +52,8 @@ import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -80,6 +83,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
@@ -194,6 +198,28 @@ private val MapOverCanvas = listOf(0f to 1f, 0.35f to 1f, 0.45f to 0.85f, 0.575f
 
 /** Music mode: the map keeps only the top of the screen, the Canvas takes the rest. */
 private val MapInMusicMode = listOf(0f to 1f, 0.15f to 1f, 0.25f to 0.6f, 0.33f to 0.35f, 0.42f to 0.18f, 0.52f to 0.08f, 0.65f to 0.02f, 1f to 0f)
+
+/** Landscape: the share of the width for the map (and home) on the left; the speed and buttons take the rest. */
+private const val LAND_SPLIT = 0.56f
+
+/** Landscape: the map's width, as a share of the screen; it melts away under the right column. */
+private const val LAND_MAP_WIDTH = 0.66f
+
+/** Landscape, the map's opacity across its width: alone, it fades into the black under the speed. */
+private val LandMapAlone = listOf(0f to 1f, 0.62f to 1f, 0.78f to 0.65f, 0.9f to 0.25f, 1f to 0f)
+
+/** Landscape with music: the crossfade with the Canvas starts a little earlier. */
+private val LandMapOverCanvas = listOf(0f to 1f, 0.52f to 1f, 0.7f to 0.55f, 0.86f to 0.18f, 1f to 0f)
+
+/** Landscape music mode: the map keeps the left, the Canvas comes in from the right. */
+private val LandMapInMusicMode = listOf(0f to 1f, 0.32f to 1f, 0.52f to 0.45f, 0.72f to 0.12f, 1f to 0f)
+
+/** Landscape: a darker band only under the chips at the top. */
+private val LandMapShade = Brush.verticalGradient(
+    0f to Color.Black.copy(alpha = 0.45f),
+    0.14f to Color.Transparent,
+    1f to Color.Black.copy(alpha = 0.2f),
+)
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -342,6 +368,11 @@ fun DriveScreen(
     // accident, more room for the road; slow or stopped, they come back.
     var cruising by remember(running) { mutableStateOf(false) }
     LaunchedEffect(snapshot?.speedKmh) { cruising = Cockpit.cruising(snapshot?.speedKmh, cruising) }
+    // Landscape (phone in a holder across): map on the left, speed and buttons in a column on the right.
+    val screen = LocalConfiguration.current
+    val landscape = screen.screenWidthDp > screen.screenHeightDp
+    // A tablet or car screen across has the height for the full-size speed; a phone across does not.
+    val tall = screen.screenHeightDp >= 560
     // The flight takes the whole screen: the status bar (time, battery) folds away until the map is there.
     ImmersiveBars(hidden = (running && !flightOver) || homeBound)
     val withMusic by animateFloatAsState(if (media != null) 1f else 0f, tween(900), label = "withMusic")
@@ -433,6 +464,7 @@ fun DriveScreen(
                         calm = snapshot?.alerts?.isNotEmpty() == true,
                         focus = focus,
                         modifier = Modifier.fillMaxSize(),
+                        fromRight = landscape,
                     )
                 }
                 // Tilted map over the top of the screen. It reaches low: alone, it fades into the black
@@ -442,16 +474,22 @@ fun DriveScreen(
                     snapshot,
                     radars,
                     zones,
-                    Modifier.fillMaxWidth().fillMaxHeight(MAP_HEIGHT).then(
-                        if (withMusic > 0f) {
-                            Modifier.verticalFade(blendStops(MapWhole, blendStops(MapOverCanvas, MapInMusicMode, focus), withMusic))
-                        } else {
-                            Modifier
-                        },
-                    ),
-                    // The car where it always was on screen, the map now taller.
-                    carAt = 0.28 / MAP_HEIGHT,
-                    overlay = if (media != null) MapOverMusic else MapAlone,
+                    when {
+                        // Landscape: the whole height on the left, melting away under the right column.
+                        landscape -> Modifier.fillMaxHeight().fillMaxWidth(LAND_MAP_WIDTH)
+                            .horizontalFade(blendStops(LandMapAlone, blendStops(LandMapOverCanvas, LandMapInMusicMode, focus), withMusic))
+                        withMusic > 0f -> Modifier.fillMaxWidth().fillMaxHeight(MAP_HEIGHT)
+                            .verticalFade(blendStops(MapWhole, blendStops(MapOverCanvas, MapInMusicMode, focus), withMusic))
+                        else -> Modifier.fillMaxWidth().fillMaxHeight(MAP_HEIGHT)
+                    },
+                    // The car where it always was on screen, the map now taller; in landscape a
+                    // little low, to see far ahead in the short height.
+                    carAt = if (landscape) 0.62 else 0.28 / MAP_HEIGHT,
+                    overlay = when {
+                        landscape -> LandMapShade
+                        media != null -> MapOverMusic
+                        else -> MapAlone
+                    },
                 )
             }
             if (running) ShockRing(portal.value, modifier = Modifier.fillMaxSize())
@@ -477,70 +515,57 @@ fun DriveScreen(
         // Too fast near a radar: the edges of the screen pulse red.
         DangerGlow(on = landed && snapshot?.alerts?.firstOrNull()?.overLimit == true, modifier = Modifier.fillMaxSize())
         RadarPassWave(pass.value, passFlash, Modifier.fillMaxSize())
-        Column(
-            // The status bar's room is kept while it is folded away for the flight: nothing jumps.
-            modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.union(WindowInsets.statusBarsIgnoringVisibility))
-                .padding(horizontal = 20.dp, vertical = 12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            StatusRow(running && landed, gps, data, demo, snapshot)
-            UpdateBanner(update, canInstall, onInstallUpdate)
-            Column(
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                // Home, flight and speed swap with a zoom: the flight's caption rushes past the
-                // viewer as the speed arrives. A little lower than the middle while driving, so the
-                // car arrow on the map stays clear.
-                val view = when {
-                    !running -> HomeView.IDLE
-                    !landed -> HomeView.FLIGHT
-                    else -> HomeView.DRIVE
-                }
-                AnimatedContent(
-                    view,
-                    transitionSpec = {
-                        when {
-                            // Start: home rushes past the viewer as the tunnel forms.
-                            initialState == HomeView.IDLE && targetState == HomeView.FLIGHT ->
-                                EnterTransition.None
-                                    .togetherWith(fadeOut(tween(450)) + scaleOut(tween(600, easing = FastOutSlowInEasing), targetScale = 2.4f))
-                            initialState == HomeView.FLIGHT && targetState == HomeView.DRIVE ->
-                                (fadeIn(tween(250, delayMillis = 50)) + scaleIn(spring(dampingRatio = 0.65f, stiffness = Spring.StiffnessMediumLow), initialScale = 1.5f))
-                                    .togetherWith(fadeOut(tween(300)) + scaleOut(tween(350), targetScale = 2.6f))
-                            // Back from a drive: the speed steps back with the scene; home comes out of
-                            // the distance as the Earth drifts away.
-                            initialState == HomeView.DRIVE && targetState == HomeView.IDLE ->
-                                (fadeIn(tween(500, delayMillis = 800)) + scaleIn(tween(800, delayMillis = 700, easing = EaseOutBack), initialScale = 0.6f))
-                                    .togetherWith(fadeOut(tween(250)) + scaleOut(tween(400), targetScale = 0.85f))
-                            // A flight cut short: home comes out of the distance as the stars slow down.
-                            targetState == HomeView.IDLE ->
-                                (fadeIn(tween(700, delayMillis = 350)) + scaleIn(spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessVeryLow), initialScale = 0.55f))
-                                    .togetherWith(fadeOut(tween(300)) + scaleOut(tween(500), targetScale = 0.7f))
-                            else ->
-                                (fadeIn(tween(500, delayMillis = 150)) + scaleIn(spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessLow), initialScale = 0.9f))
-                                    .togetherWith(fadeOut(tween(250)) + scaleOut(tween(250), targetScale = 1.05f))
-                        }.using(SizeTransform(clip = false))
-                    },
-                    contentAlignment = Alignment.Center,
-                    label = "home",
-                ) { shown ->
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        when (shown) {
-                            HomeView.IDLE -> Idle(data) {
-                                UiSound.play(UiSound.Kind.SUCCESS, hostView, long = true)
-                                onDemo()
-                            }
-                            // The flight's words sit under the globe, drawn over the whole screen.
-                            HomeView.FLIGHT -> Spacer(Modifier.height(1.dp))
-                            HomeView.DRIVE -> Dashboard(snapshot, Modifier.padding(top = if (showMap) 72.dp else 0.dp))
+        // Home, flight and speed swap with a zoom: the flight's caption rushes past the viewer as the
+        // speed arrives. A little lower than the middle while driving, so the car arrow on the map stays clear.
+        val view = when {
+            !running -> HomeView.IDLE
+            !landed -> HomeView.FLIGHT
+            else -> HomeView.DRIVE
+        }
+        val homeView: @Composable () -> Unit = {
+            AnimatedContent(
+                view,
+                transitionSpec = {
+                    when {
+                        // Start: home rushes past the viewer as the tunnel forms.
+                        initialState == HomeView.IDLE && targetState == HomeView.FLIGHT ->
+                            EnterTransition.None
+                                .togetherWith(fadeOut(tween(450)) + scaleOut(tween(600, easing = FastOutSlowInEasing), targetScale = 2.4f))
+                        initialState == HomeView.FLIGHT && targetState == HomeView.DRIVE ->
+                            (fadeIn(tween(250, delayMillis = 50)) + scaleIn(spring(dampingRatio = 0.65f, stiffness = Spring.StiffnessMediumLow), initialScale = 1.5f))
+                                .togetherWith(fadeOut(tween(300)) + scaleOut(tween(350), targetScale = 2.6f))
+                        // Back from a drive: the speed steps back with the scene; home comes out of
+                        // the distance as the Earth drifts away.
+                        initialState == HomeView.DRIVE && targetState == HomeView.IDLE ->
+                            (fadeIn(tween(500, delayMillis = 800)) + scaleIn(tween(800, delayMillis = 700, easing = EaseOutBack), initialScale = 0.6f))
+                                .togetherWith(fadeOut(tween(250)) + scaleOut(tween(400), targetScale = 0.85f))
+                        // A flight cut short: home comes out of the distance as the stars slow down.
+                        targetState == HomeView.IDLE ->
+                            (fadeIn(tween(700, delayMillis = 350)) + scaleIn(spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessVeryLow), initialScale = 0.55f))
+                                .togetherWith(fadeOut(tween(300)) + scaleOut(tween(500), targetScale = 0.7f))
+                        else ->
+                            (fadeIn(tween(500, delayMillis = 150)) + scaleIn(spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessLow), initialScale = 0.9f))
+                                .togetherWith(fadeOut(tween(250)) + scaleOut(tween(250), targetScale = 1.05f))
+                    }.using(SizeTransform(clip = false))
+                },
+                contentAlignment = Alignment.Center,
+                label = "home",
+            ) { shown ->
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    when (shown) {
+                        HomeView.IDLE -> Idle(data) {
+                            UiSound.play(UiSound.Kind.SUCCESS, hostView, long = true)
+                            onDemo()
                         }
+                        // The flight's words sit under the globe, drawn over the whole screen.
+                        HomeView.FLIGHT -> Spacer(Modifier.height(1.dp))
+                        // In landscape the speed has its own column, beside the map.
+                        HomeView.DRIVE -> if (landscape) Spacer(Modifier.height(1.dp)) else Dashboard(snapshot, Modifier.padding(top = if (showMap) 72.dp else 0.dp))
                     }
                 }
             }
-            AlertArea(snapshot.takeIf { running && landed })
-            Spacer(Modifier.height(12.dp))
+        }
+        val musicCard: @Composable ColumnScope.() -> Unit = {
             // After the arrival, the rest settles in one after the other, from the speed down to the music.
             AnimatedVisibility(
                 visible = running && landed && media != null,
@@ -564,6 +589,8 @@ fun DriveScreen(
                     )
                 }
             }
+        }
+        val navShortcuts: @Composable ColumnScope.() -> Unit = {
             AnimatedVisibility(
                 visible = running && landed && navApps.isNotEmpty() && !cruising,
                 enter = fadeIn(tween(400, delayMillis = 350)) + slideInVertically(spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow)) { it / 2 },
@@ -571,6 +598,8 @@ fun DriveScreen(
             ) {
                 NavApps(navApps, onOpenNavApp)
             }
+        }
+        val buttons: @Composable ColumnScope.() -> Unit = {
             StartStop(running, onStart, onStop, compact = running && cruising)
             AnimatedVisibility(visible = !running, enter = if (comingHome) BottomInLate else BottomIn, exit = BottomOut) {
                 Text(
@@ -593,6 +622,62 @@ fun DriveScreen(
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
                 )
+            }
+        }
+        Column(
+            // The status bar's room is kept while it is folded away for the flight: nothing jumps.
+            // Upright on a tablet: one column in the middle, not buttons stretched across the screen.
+            modifier = Modifier.align(Alignment.TopCenter).fillMaxHeight()
+                .then(if (landscape) Modifier.fillMaxWidth() else Modifier.widthIn(max = PAGE_MAX_WIDTH).fillMaxWidth())
+                .windowInsetsPadding(WindowInsets.safeDrawing.union(WindowInsets.statusBarsIgnoringVisibility))
+                .padding(horizontal = 20.dp, vertical = 12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            StatusRow(running && landed, gps, data, demo, snapshot)
+            UpdateBanner(update, canInstall, onInstallUpdate)
+            if (!landscape) {
+                Column(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) { homeView() }
+                AlertArea(snapshot.takeIf { running && landed })
+                Spacer(Modifier.height(12.dp))
+                musicCard()
+                navShortcuts()
+                buttons()
+            } else {
+                // Landscape: the map (or home) on the left with the alerts under it, the speed and
+                // the buttons in a column on the right, all within the screen's short height.
+                Row(Modifier.weight(1f).fillMaxWidth()) {
+                    Column(Modifier.weight(LAND_SPLIT).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Column(
+                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                            verticalArrangement = Arrangement.Center,
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) { homeView() }
+                        AlertArea(snapshot.takeIf { running && landed })
+                        navShortcuts()
+                    }
+                    Spacer(Modifier.width(20.dp))
+                    Column(
+                        // A wide car screen: the column keeps a sensible width, centered in its room.
+                        Modifier.weight(1f - LAND_SPLIT).fillMaxHeight().wrapContentWidth().widthIn(max = 520.dp),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        AnimatedVisibility(
+                            visible = view == HomeView.DRIVE,
+                            enter = fadeIn(tween(250, delayMillis = 50)) + scaleIn(spring(dampingRatio = 0.65f, stiffness = Spring.StiffnessMediumLow), initialScale = 1.5f),
+                            exit = fadeOut(tween(250)) + scaleOut(tween(400), targetScale = 0.85f),
+                        ) {
+                            Dashboard(snapshot, compact = !tall)
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        musicCard()
+                        buttons()
+                    }
+                }
             }
         }
     }
@@ -738,10 +823,11 @@ private fun NavApps(apps: List<NavApp>, onOpen: (NavApp) -> Unit) {
 }
 
 @Composable
-private fun Dashboard(s: DriveSnapshot?, modifier: Modifier = Modifier) {
+private fun Dashboard(s: DriveSnapshot?, modifier: Modifier = Modifier, compact: Boolean = false) {
     val limit = s?.limitKmh
     val speed = s?.speedKmh
-    val animatedSpeed by animateIntAsState(speed ?: 0, tween(400), label = "speed")
+    // Short roll between two fixes: the number glides but keeps up with the car.
+    val animatedSpeed by animateIntAsState(speed ?: 0, tween(250, easing = LinearOutSlowInEasing), label = "speed")
     val color by animateColorAsState(speedColor(speed, limit), label = "speedColor")
     // Waiting for the GPS: the dashes breathe instead of sitting still.
     val searching = rememberInfiniteTransition(label = "searching")
@@ -749,26 +835,27 @@ private fun Dashboard(s: DriveSnapshot?, modifier: Modifier = Modifier) {
     // Dark halo so the digits stay readable over the map.
     val halo = TextStyle(shadow = Shadow(Color.Black, blurRadius = 28f))
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(s?.road?.segment?.name ?: " ", color = Dim, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, style = halo)
+        Text(s?.road?.segment?.name ?: " ", color = Dim, fontSize = if (compact) 15.sp else 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, style = halo)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
                     if (speed == null) "--" else animatedSpeed.toString(),
                     color = color,
-                    fontSize = 150.sp,
+                    // Landscape: smaller, to fit the short height beside the map.
+                    fontSize = if (compact) 96.sp else 150.sp,
                     fontWeight = FontWeight.Bold,
                     // Fixed-width digits, set tight: the number does not jump as it changes.
                     letterSpacing = (-4).sp,
                     style = halo.copy(fontFeatureSettings = "tnum"),
                     modifier = Modifier.alpha(if (speed == null) searchAlpha else 1f),
                 )
-                Text("km/h", color = Dim, fontSize = 20.sp)
+                Text("km/h", color = Dim, fontSize = if (compact) 16.sp else 20.sp)
             }
             AnimatedVisibility(visible = limit != null, enter = fadeIn(), exit = fadeOut()) {
                 Row {
-                    Spacer(Modifier.width(20.dp))
+                    Spacer(Modifier.width(if (compact) 14.dp else 20.dp))
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        LimitSign(limit ?: 0, uncertain = s?.limitSource.isGuess())
+                        LimitSign(limit ?: 0, uncertain = s?.limitSource.isGuess(), size = if (compact) 80.dp else 104.dp)
                         val ahead = s?.limitAhead
                         Text(
                             ahead?.let { "${it.limitKmh} dans ${distanceText(it.distanceM)}" } ?: " ",

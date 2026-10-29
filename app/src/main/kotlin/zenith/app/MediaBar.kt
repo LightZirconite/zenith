@@ -92,7 +92,7 @@ private enum class Glyph { PREVIOUS, PLAY, PAUSE, NEXT }
  * back further. [focus] (music mode, 0 to 1) brings it up the screen, brighter.
  */
 @Composable
-fun MusicBackdrop(media: MediaInfo, canvas: Boolean, calm: Boolean, focus: Float = 0f, modifier: Modifier = Modifier) {
+fun MusicBackdrop(media: MediaInfo, canvas: Boolean, calm: Boolean, focus: Float = 0f, modifier: Modifier = Modifier, fromRight: Boolean = false) {
     val video = rememberCanvas(media, canvas)
     var videoShown by remember(video) { mutableStateOf(false) }
     var videoFailed by remember(video) { mutableStateOf(false) }
@@ -100,7 +100,10 @@ fun MusicBackdrop(media: MediaInfo, canvas: Boolean, calm: Boolean, focus: Float
     val artAlpha by animateFloatAsState(if (calm) 0.25f else 0.5f, tween(600), label = "backdrop")
     val backdrop = remember(media.art) { media.art?.let(::tiny) }
     // The top fades to transparent (a mask, not a black band): faint high up, whole where the map has gone.
-    Box(modifier.verticalFade(blendStops(BackdropMask, BackdropMaskFocus, focus))) {
+    // In landscape it comes in from the right instead, under the speed column, beside the map.
+    val mask = if (fromRight) Modifier.horizontalFade(blendStops(LandBackdropMask, LandBackdropMaskFocus, focus))
+    else Modifier.verticalFade(blendStops(BackdropMask, BackdropMaskFocus, focus))
+    Box(modifier.then(mask)) {
         // Blurred cover: a tiny copy upscaled is already soft, the blur (Android 12+) smooths it out.
         backdrop?.let {
             Image(
@@ -146,6 +149,12 @@ private val BackdropMask = listOf(0f to 0f, 0.2f to 0f, 0.3f to 0.5f, 0.42f to 1
  * fade under the map's top (a hard edge up there would spoil the crossfade).
  */
 private val BackdropMaskFocus = listOf(0f to 0f, 0.05f to 0f, 0.18f to 0.5f, 0.33f to 1f, 1f to 1f)
+
+/** Landscape: across the width, whole from the speed column, a long soft fade under the map's right side. */
+private val LandBackdropMask = listOf(0f to 0f, 0.3f to 0f, 0.44f to 0.5f, 0.58f to 1f, 1f to 1f)
+
+/** Landscape music mode: further over to the left, the map keeping its left part. */
+private val LandBackdropMaskFocus = listOf(0f to 0f, 0.12f to 0f, 0.26f to 0.5f, 0.42f to 1f, 1f to 1f)
 
 /**
  * Music controls under the alerts, for any player (Spotify, YouTube, Deezer…): cover, title,

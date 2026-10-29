@@ -14,6 +14,7 @@ import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.BatteryManager
+import android.os.Bundle
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
@@ -44,6 +45,7 @@ import zenith.core.Weather
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Foreground service running a drive: 1 Hz GPS → DrivingSession → shared state, sounds, voice
@@ -79,6 +81,8 @@ class DriveService : Service(), LocationListener {
     @Volatile
     private var zoneBoxes: List<Pair<ControlZone, BBox>> = emptyList()
     private var lastNearbyMs = 0L
+    /** GPS fixes handed to the drive thread and not yet taken up. */
+    private val queuedFixes = AtomicInteger()
     /** Wall time of a vehicle exit received while still fast; 0 when none is pending. */
     @Volatile
     private var vehicleLeftAtMs = 0L
@@ -250,15 +254,27 @@ class DriveService : Service(), LocationListener {
         }
     }
 
+    // Android 10 and older call these, which only have default bodies since Android 11: without
+    // them the first GPS status change throws AbstractMethodError and the app crashes at Start.
+    @Deprecated("Called by Android 10 and older only")
+    override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) = Unit
+
+    override fun onProviderEnabled(provider: String) = Unit
+
+    override fun onProviderDisabled(provider: String) = Unit
+
     override fun onLocationChanged(location: Location) {
         val fix = location.toFix()
         data?.ensureTiles(fix.position)
         val wallMs = System.currentTimeMillis()
+        queuedFixes.incrementAndGet()
         scope.launch(drive) {
             recorder?.add(fix)
             lastFixTimeMs = fix.timeMs
             lastFixWallMs = wallMs
-            process(fix)
+            // The drive thread fell behind (heavy road horizon): an older fix is skipped for the
+            // newest, so the speed on screen never trails seconds behind the car.
+            if (queuedFixes.decrementAndGet() == 0) process(fix)
             val s = DriveState.snapshot.value
             if (parking?.onFix(wallMs, fix.position, s?.speedKmh, s?.road?.segment?.roadClass, charging()) == true) endByItself()
             val left = vehicleLeftAtMs

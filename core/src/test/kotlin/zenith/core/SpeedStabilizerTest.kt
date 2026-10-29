@@ -27,7 +27,14 @@ class SpeedStabilizerTest {
     fun `driving off and stopping`() {
         val s = SpeedStabilizer()
         val shown = listOf(0.0, 8.0, 20.0, 30.0, 30.0, 10.0, 2.0, 0.0, 0.0).map { s.update(fix(it), 0.0) }
-        assertEquals(listOf(0, 0, 14, 24, 27, 17, 8, 3, 0), shown)
+        assertEquals(listOf(0, 8, 20, 30, 30, 10, 0, 0, 0), shown)
+    }
+
+    @Test
+    fun `a poor fix is smoothed`() {
+        val s = SpeedStabilizer()
+        assertEquals(50, s.update(fix(50.0), 0.0))
+        assertEquals(62, s.update(fix(70.0, accuracy = 40.0), 0.0))
     }
 
     @Test
