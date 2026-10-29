@@ -11,6 +11,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.location.Location
+import android.media.AudioManager
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.BatteryManager
@@ -34,6 +35,7 @@ import zenith.core.BBox
 import zenith.core.ControlZone
 import zenith.core.DemoDrive
 import zenith.core.DriveSnapshot
+import zenith.core.DriveVolume
 import zenith.core.DrivingSession
 import zenith.core.GpsFix
 import zenith.core.LatLon
@@ -82,6 +84,8 @@ class DriveService : Service(), LocationListener {
     @Volatile
     private var zoneBoxes: List<Pair<ControlZone, BBox>> = emptyList()
     private var lastNearbyMs = 0L
+    /** The media volume before the drive and the level Zenith raised it to, if it did. */
+    private var volumeRaised: Pair<Int, Int>? = null
     /** GPS fixes handed to the drive thread and not yet taken up. */
     private val queuedFixes = AtomicInteger()
     /** Speed for the big number, from each fix as it comes (main thread). */
@@ -161,6 +165,7 @@ class DriveService : Service(), LocationListener {
         speaker = Speaker(this, ducker)
         tones = TonePlayer(ducker)
         DriveState.started(origin)
+        raiseVolume()
         NowPlaying.start(this)
         if (demo) startDemo() else startLive()
         // Started by itself (car, riding): the small window opens at once over whatever is in front.
@@ -257,6 +262,30 @@ class DriveService : Service(), LocationListener {
         } finally {
             conn.disconnect()
         }
+    }
+
+    /** Alerts must be heard: a low media volume goes up for the drive ([DriveVolume]). */
+    private fun raiseVolume() {
+        if (!UserSettings.state.value.raiseVolume) return
+        runCatching {
+            val audio = getSystemService(AudioManager::class.java)
+            if (audio.isVolumeFixed) return
+            val now = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
+            val target = DriveVolume.raiseTo(now, audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)) ?: return
+            audio.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0)
+            volumeRaised = now to target
+        }.onFailure { Log.w("Zenith", "raise volume", it) }
+    }
+
+    /** Back where it was, unless the driver set it meanwhile. */
+    private fun restoreVolume() {
+        val (before, raisedTo) = volumeRaised ?: return
+        volumeRaised = null
+        runCatching {
+            val audio = getSystemService(AudioManager::class.java)
+            DriveVolume.restoreTo(before, raisedTo, audio.getStreamVolume(AudioManager.STREAM_MUSIC))
+                ?.let { audio.setStreamVolume(AudioManager.STREAM_MUSIC, it, 0) }
+        }.onFailure { Log.w("Zenith", "restore volume", it) }
     }
 
     /** Hidden demo: replays [DemoDrive] in real time through the same pipeline, then stops. */
@@ -398,6 +427,7 @@ class DriveService : Service(), LocationListener {
 
     override fun onDestroy() {
         scope.cancel()
+        restoreVolume()
         if (started) {
             if (!demo) runCatching { getSystemService(LocationManager::class.java).removeUpdates(this) }
             runCatching { gpsStatus?.stop() }

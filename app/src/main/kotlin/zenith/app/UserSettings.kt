@@ -19,6 +19,8 @@ data class SettingsState(
     val voice: Boolean = true,
     /** The music pauses while the voice speaks (else it slides down and back up). */
     val pauseMusic: Boolean = false,
+    /** The media volume (alerts and voice) raised to 60 % for a drive when lower, put back after. */
+    val raiseVolume: Boolean = true,
     /** Battery saver: a drive started by hand ends by itself once the car is parked. */
     val autoStop: Boolean = true,
     /** Drive started by itself when the phone starts riding in a vehicle (activity recognition). */
@@ -57,6 +59,7 @@ object UserSettings {
             // New key: the voice now lowers the music by default, the old "pause" choice is not kept.
             pauseMusic = p.getBoolean("voice_pause", false),
             autoStop = p.getBoolean("auto_stop", true),
+            raiseVolume = p.getBoolean("raise_volume", true),
             autoRain = p.getBoolean("auto_rain", true),
             motionStart = p.getBoolean("motion_start", true),
             cars = readCars(p.getString("cars", null))
@@ -79,6 +82,7 @@ object UserSettings {
             putBoolean("voice", next.voice)
             putBoolean("voice_pause", next.pauseMusic)
             putBoolean("auto_stop", next.autoStop)
+            putBoolean("raise_volume", next.raiseVolume)
             putBoolean("auto_rain", next.autoRain)
             putBoolean("motion_start", next.motionStart)
             putString("cars", JSONArray(next.cars.map { JSONObject().put("id", it.associationId).put("name", it.name) }).toString())

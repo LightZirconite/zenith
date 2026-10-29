@@ -83,6 +83,13 @@ fun SettingsScreen(
             }
             Divider()
             ToggleRow(
+                "Volume monté en conduite",
+                "Au départ, le volume des médias monte à 60 % s'il est plus bas, pour bien entendre les alertes et la voix. " +
+                    "À l'arrêt, il revient où il était, sauf si tu l'as changé entre-temps.",
+                settings.raiseVolume,
+            ) { on -> onChange { it.copy(raiseVolume = on) } }
+            Divider()
+            ToggleRow(
                 "Musique en pause pendant la voix",
                 "Désactivé (conseillé) : pendant une annonce, Spotify, YouTube ou la radio baissent en douceur puis remontent " +
                     "de même. Activé : la musique baisse puis s'arrête le temps de l'annonce. Les bips, eux, ne font que la baisser.",
