@@ -64,8 +64,11 @@ class MainActivity : ComponentActivity() {
     /** Driving: leaving Zenith (for Waze, Maps…) shrinks it into a picture-in-picture window. */
     private var pipWanted = false
 
-    /** Opened by [openSmallWindow]: the activity goes into its small window once resumed. */
-    private var smallWindowAsked = false
+    /**
+     * Opened by [openSmallWindow]: the activity goes into its small window once resumed, showing
+     * the small window's content meanwhile (no take-off flight, no music paused for it).
+     */
+    private val openingSmall = MutableStateFlow(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(SystemBarStyle.dark(android.graphics.Color.TRANSPARENT), SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
@@ -86,6 +89,7 @@ class MainActivity : ComponentActivity() {
             val update by Updater.state.collectAsStateWithLifecycle()
             val resumeCount by resumes.collectAsStateWithLifecycle()
             val pip by inPip.collectAsStateWithLifecycle()
+            val smallSoon by openingSmall.collectAsStateWithLifecycle()
             val demo by DriveState.demo.collectAsStateWithLifecycle()
             val settings by UserSettings.state.collectAsStateWithLifecycle()
             val media by NowPlaying.state.collectAsStateWithLifecycle()
@@ -218,7 +222,7 @@ class MainActivity : ComponentActivity() {
                 showSettings -> Screen.SETTINGS
                 else -> Screen.DRIVE
             }
-            if (pip) {
+            if (pip || smallSoon) {
                 PipScreen(snapshot, radars, zones, media = media, canvas = settings.spotifyCanvas, musicChoice = musicChoice)
             } else AnimatedContent(screen, transitionSpec = { screenTransition(initialState, targetState) }, label = "screen") { shown ->
                 when (shown) {
@@ -316,7 +320,7 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIntent(intent: Intent?) {
         if (intent?.action == ACTION_START_DRIVE) startRequested.value = true
-        if (intent?.action == ACTION_OPEN_SMALL_WINDOW) smallWindowAsked = true
+        if (intent?.action == ACTION_OPEN_SMALL_WINDOW) openingSmall.value = true
     }
 
     override fun onStart() {
@@ -333,10 +337,15 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         resumes.value++
         // Opened by an automatic start: straight into the small window, over what was in front.
-        if (smallWindowAsked) {
-            smallWindowAsked = false
-            if (DriveState.running.value && !isInPictureInPictureMode) {
-                window.decorView.post { runCatching { enterPictureInPictureMode(pipParams()) } }
+        if (openingSmall.value) {
+            if (!DriveState.running.value || isInPictureInPictureMode) {
+                openingSmall.value = false
+            } else {
+                window.decorView.post {
+                    // A screen without picture-in-picture (some head units): the full screen instead.
+                    val entered = runCatching { enterPictureInPictureMode(pipParams()) }.getOrDefault(false)
+                    if (!entered) openingSmall.value = false
+                }
             }
         }
     }
@@ -350,6 +359,7 @@ class MainActivity : ComponentActivity() {
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         inPip.value = isInPictureInPictureMode
+        openingSmall.value = false
     }
 
     private fun updatePip() {
