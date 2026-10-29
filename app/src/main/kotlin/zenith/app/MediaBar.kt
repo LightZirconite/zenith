@@ -2,6 +2,12 @@ package zenith.app
 
 import android.graphics.Bitmap
 import android.os.SystemClock
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
@@ -52,10 +58,9 @@ import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -167,7 +172,7 @@ fun MediaBar(
     onSeek: (Long) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
-    val haptics = LocalHapticFeedback.current
+    val view = LocalView.current
     val next by rememberUpdatedState(onNext)
     val previous by rememberUpdatedState(onPrevious)
     val swipe = remember { Animatable(0f) }
@@ -190,7 +195,7 @@ fun MediaBar(
                         val now = SystemClock.elapsedRealtime()
                         if (armed && drift < abs(x) / 0.6f * 0.5f && now - lastChangeMs > SWIPE_COOLDOWN_MS) {
                             lastChangeMs = now
-                            UiSound.play(UiSound.Kind.SWIPE)
+                            UiSound.play(UiSound.Kind.SWIPE, view)
                             if (x < 0) next() else previous()
                         }
                         settle()
@@ -204,10 +209,7 @@ fun MediaBar(
                     scope.launch { swipe.snapTo(x) }
                     val past = abs(x) >= threshold
                     // A tick when the swipe would now change track, and coming back cancels it.
-                    if (past && !armed) {
-                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        UiSound.play(UiSound.Kind.ARMED)
-                    }
+                    if (past && !armed) UiSound.play(UiSound.Kind.TICK, view)
                     armed = past
                 }
             },
@@ -235,7 +237,9 @@ fun MediaBar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Row(
-                Modifier.weight(1f).fillMaxHeight().tap(onLongClick = onOpen, onClick = onTap)
+                // The music mode's own sound is played by the screen, which knows which way it goes.
+                Modifier.weight(1f).fillMaxHeight()
+                    .tap(shape = RoundedCornerShape(14.dp), sound = null, lift = 0.98f, onLongClick = onOpen, onClick = onTap)
                     .semantics { contentDescription = "Mode musique ; appui long : ouvrir le lecteur" },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -294,7 +298,7 @@ private fun ProgressLine(progress: PlaybackProgress, playing: Boolean, modifier:
 @Composable
 private fun GlyphButton(glyph: Glyph, label: String, onClick: () -> Unit) {
     Box(
-        Modifier.size(44.dp).tap(onClick = onClick).clip(CircleShape).semantics { contentDescription = label },
+        Modifier.size(44.dp).tap(shape = CircleShape, lift = 1.15f, onClick = onClick).clip(CircleShape).semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {
         Canvas(Modifier.size(15.dp)) { drawGlyph(glyph, Color.White) }
@@ -305,7 +309,7 @@ private fun GlyphButton(glyph: Glyph, label: String, onClick: () -> Unit) {
 @Composable
 private fun SeekButton(text: String, label: String, onClick: () -> Unit) {
     Box(
-        Modifier.size(44.dp).tap(onClick = onClick).clip(CircleShape).semantics { contentDescription = label },
+        Modifier.size(44.dp).tap(shape = CircleShape, lift = 1.15f, onClick = onClick).clip(CircleShape).semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {
         Box(Modifier.size(32.dp).border(1.5.dp, Color.White.copy(alpha = 0.7f), CircleShape), contentAlignment = Alignment.Center) {
@@ -314,27 +318,49 @@ private fun SeekButton(text: String, label: String, onClick: () -> Unit) {
     }
 }
 
-/** Play / pause, the main button: a white disc. */
+/** Play / pause, the main button: a white disc; the glyph turns into the other with a little spin. */
 @Composable
 private fun PlayButton(playing: Boolean, onClick: () -> Unit) {
     Box(
-        Modifier.size(48.dp).tap(onClick = onClick).clip(CircleShape).padding(3.dp).background(Color.White, CircleShape)
+        Modifier.size(48.dp)
+            .tap(shape = CircleShape, sound = if (playing) UiSound.Kind.PAUSE else UiSound.Kind.PLAY, lift = 1.12f, glow = PressShade, onClick = onClick)
+            .clip(CircleShape).padding(3.dp).background(Color.White, CircleShape)
             .semantics { contentDescription = if (playing) "Pause" else "Lecture" },
         contentAlignment = Alignment.Center,
     ) {
-        Canvas(Modifier.size(16.dp)) { drawGlyph(if (playing) Glyph.PAUSE else Glyph.PLAY, Color.Black) }
+        AnimatedContent(
+            playing,
+            transitionSpec = {
+                (scaleIn(spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMedium), initialScale = 0.4f) + fadeIn(tween(120)))
+                    .togetherWith(scaleOut(tween(120), targetScale = 0.4f) + fadeOut(tween(100)))
+            },
+            contentAlignment = Alignment.Center,
+            label = "playGlyph",
+        ) { on ->
+            Canvas(Modifier.size(16.dp)) { drawGlyph(if (on) Glyph.PAUSE else Glyph.PLAY, Color.Black) }
+        }
     }
 }
 
-/** Spotify's Liked Songs: outlined heart, green and filled once liked. */
+/** Spotify's Liked Songs: outlined heart, green and filled once liked, popping as it changes. */
 @Composable
 private fun HeartButton(liked: Boolean, onClick: () -> Unit) {
+    val pop = remember { Animatable(1f) }
+    var seen by remember { mutableStateOf(liked) }
+    LaunchedEffect(liked) {
+        if (liked == seen) return@LaunchedEffect
+        seen = liked
+        pop.snapTo(if (liked) 1.45f else 0.7f)
+        pop.animateTo(1f, spring(dampingRatio = 0.4f, stiffness = Spring.StiffnessMediumLow))
+    }
     Box(
-        Modifier.size(44.dp).tap(onClick = onClick).clip(CircleShape)
+        Modifier.size(44.dp)
+            .tap(shape = CircleShape, sound = if (liked) UiSound.Kind.UNLIKE else UiSound.Kind.LIKE, lift = 1.15f, onClick = onClick)
+            .clip(CircleShape)
             .semantics { contentDescription = if (liked) "Retirer des titres likés" else "Ajouter aux titres likés" },
         contentAlignment = Alignment.Center,
     ) {
-        Canvas(Modifier.size(19.dp)) {
+        Canvas(Modifier.size(19.dp).graphicsLayer { scaleX = pop.value; scaleY = pop.value }) {
             val heart = heart(size.width, size.height)
             if (liked) drawPath(heart, Liked) else drawPath(heart, Color.White, style = Stroke(width = 1.8.dp.toPx()))
         }

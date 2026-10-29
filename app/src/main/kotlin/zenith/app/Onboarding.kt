@@ -58,6 +58,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -267,7 +268,14 @@ private fun GoButton(missing: Int, onClick: () -> Unit) {
                     style = Stroke(2.dp.toPx()),
                 )
             }
-            .tap(onClick = onClick).clip(RoundedCornerShape(18.dp)).background(Color.White).padding(vertical = 18.dp),
+            .tap(
+                shape = RoundedCornerShape(18.dp),
+                sound = if (ready) UiSound.Kind.SUCCESS else UiSound.Kind.OPEN,
+                lift = 1.04f,
+                glow = PressShade,
+                onClick = onClick,
+            )
+            .clip(RoundedCornerShape(18.dp)).background(Color.White).padding(vertical = 18.dp),
     ) {
         AnimatedContent(
             missing,
@@ -301,11 +309,13 @@ private fun Step(
     modifier: Modifier = Modifier,
     action: String = "Autoriser",
 ) {
-    // Granted while the screen is open: a ring of light runs out from the check.
+    // Granted while the screen is open: a ring of light runs out from the check, a warm little chord.
+    val view = LocalView.current
     var seen by remember { mutableStateOf(granted) }
     val burst = remember { Animatable(1f) }
     LaunchedEffect(granted) {
         if (granted && !seen) {
+            UiSound.play(UiSound.Kind.SUCCESS, view)
             burst.snapTo(0f)
             burst.animateTo(1f, tween(800, easing = LinearOutSlowInEasing))
         }
@@ -313,8 +323,9 @@ private fun Step(
     }
     val edge by animateColorAsState(if (granted) Green.copy(alpha = 0.35f) else Color.Transparent, tween(600), label = "stepEdge")
     Row(
-        modifier.fillMaxWidth().padding(bottom = 12.dp).tap(enabled = !granted, onClick = onClick)
-            .glass(RoundedCornerShape(20.dp), Surface)
+        modifier.fillMaxWidth().padding(bottom = 12.dp)
+            .tap(enabled = !granted, shape = RoundedCornerShape(22.dp), sound = UiSound.Kind.OPEN, lift = 0.98f, onClick = onClick)
+            .glass(RoundedCornerShape(22.dp), Surface)
             .drawBehind { drawRect(Brush.horizontalGradient(listOf(Color.Transparent, edge), startX = size.width * 0.5f)) }
             .padding(18.dp),
         verticalAlignment = Alignment.CenterVertically,

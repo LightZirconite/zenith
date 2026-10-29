@@ -3,20 +3,24 @@ package zenith.app
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.IndicationNodeFactory
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.InteractionSource
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -24,29 +28,41 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.isSpecified
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.node.DelegatableNode
 import androidx.compose.ui.node.DrawModifierNode
 import androidx.compose.ui.platform.LocalView
@@ -58,21 +74,32 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 /** Translucent "glass" of the drive screen, shared by the music strip, chips, cards and buttons. */
 val Glass = Color(0xA61F1F24)
 
-/** Hairline that catches the light on the edge of a glass surface. */
-private val GlassEdge = Color.White.copy(alpha = 0.09f)
+/**
+ * The rim of a glass surface, as liquid glass catches the light: bright on the upper left edge,
+ * almost gone along the middle, a softer glint on the lower right.
+ */
+private val GlassRim = Brush.linearGradient(
+    0f to Color.White.copy(alpha = 0.3f),
+    0.35f to Color.White.copy(alpha = 0.07f),
+    0.7f to Color.White.copy(alpha = 0.05f),
+    1f to Color.White.copy(alpha = 0.16f),
+)
 
 /** Light catching the top of a glass surface. */
-private val GlassSheen = Brush.verticalGradient(0f to Color.White.copy(alpha = 0.07f), 0.55f to Color.Transparent)
+private val GlassSheen = Brush.verticalGradient(0f to Color.White.copy(alpha = 0.09f), 0.5f to Color.Transparent)
 
-/** A glass surface of [shape]: clipped, translucent fill lit from above, light hairline edge. */
+/** Light under the finger on a dark surface; a white surface darkens a little instead ([PressShade]). */
+val PressLight = Color.White.copy(alpha = 0.2f)
+val PressShade = Color.Black.copy(alpha = 0.1f)
+
+/** A glass surface of [shape]: clipped, translucent fill lit from above, a rim catching the light. */
 fun Modifier.glass(shape: Shape, color: Color = Glass): Modifier =
-    clip(shape).background(color).background(GlassSheen).border(0.5.dp, GlassEdge, shape)
+    clip(shape).background(color).background(GlassSheen).border(0.75.dp, GlassRim, shape)
 
 /** A band of light crossing the surface once as it appears, like glass catching the sun. After the clip. */
 @Composable
@@ -194,31 +221,43 @@ private fun Density.collapse(scroll: ScrollState): Float =
     (scroll.value / 56.dp.toPx()).coerceIn(0f, 1f)
 
 /**
- * Clickable that sinks a little under the finger and springs back, instead of the Material ripple,
- * with a soft tap sound ([UiSound]) unless [sound] is off (a switch plays its own).
+ * Clickable the liquid-glass way, instead of the Material ripple: under the finger the surface
+ * swells toward it ([lift]; below 1 it sinks, for big rows) and lights up from the touch point
+ * ([glow], within [shape]); let go, it springs back with a little bounce. Each press has its
+ * [sound] and a light tick of the phone's touch feedback ([UiSound]); a long press opens.
  * Put it before the surface's own clip and background so the whole surface moves.
  */
-fun Modifier.tap(enabled: Boolean = true, sound: Boolean = true, onClick: () -> Unit): Modifier =
-    clickable(interactionSource = null, indication = PressScale, enabled = enabled) {
-        if (sound) UiSound.tap()
-        onClick()
-    }
-
-/** [tap] with a long press as well. */
 @OptIn(ExperimentalFoundationApi::class)
-fun Modifier.tap(onLongClick: () -> Unit, onClick: () -> Unit): Modifier =
-    combinedClickable(
-        interactionSource = null,
-        indication = PressScale,
-        onLongClick = {
-            UiSound.tap()
-            onLongClick()
+@Composable
+fun Modifier.tap(
+    enabled: Boolean = true,
+    shape: Shape = RectangleShape,
+    sound: UiSound.Kind? = UiSound.Kind.TAP,
+    lift: Float = 1.05f,
+    glow: Color = PressLight,
+    interaction: MutableInteractionSource? = null,
+    onLongClick: (() -> Unit)? = null,
+    onClick: () -> Unit,
+): Modifier {
+    val view = LocalView.current
+    return combinedClickable(
+        interactionSource = interaction,
+        indication = LiquidPress(shape, lift, glow),
+        enabled = enabled,
+        onLongClick = onLongClick?.let { long ->
+            {
+                UiSound.play(UiSound.Kind.OPEN, view, long = true)
+                long()
+            }
         },
+        // The long press's buzz comes from UiSound, with its sound: not twice.
+        hapticFeedbackEnabled = false,
         onClick = {
-            UiSound.tap()
+            sound?.let { UiSound.play(it, view) }
             onClick()
         },
     )
+}
 
 /**
  * Fades the content out along its height: [stops] are (height fraction, opacity), 1 whole, 0 gone.
@@ -237,28 +276,95 @@ fun Modifier.verticalFade(stops: List<Pair<Float, Float>>): Modifier {
 fun blendStops(from: List<Pair<Float, Float>>, to: List<Pair<Float, Float>>, k: Float): List<Pair<Float, Float>> =
     from.zip(to) { (y0, a0), (y1, a1) -> (y0 + (y1 - y0) * k) to (a0 + (a1 - a0) * k) }
 
-private object PressScale : IndicationNodeFactory {
-    override fun create(interactionSource: InteractionSource): DelegatableNode = PressScaleNode(interactionSource)
-    override fun equals(other: Any?) = other === this
-    override fun hashCode() = 0x5ca1e
+private data class LiquidPress(val shape: Shape, val lift: Float, val glow: Color) : IndicationNodeFactory {
+    override fun create(interactionSource: InteractionSource): DelegatableNode = LiquidPressNode(interactionSource, shape, lift, glow)
 }
 
-private class PressScaleNode(private val interactions: InteractionSource) : Modifier.Node(), DrawModifierNode {
-    private val press = Animatable(1f)
+private class LiquidPressNode(
+    private val interactions: InteractionSource,
+    private val shape: Shape,
+    private val lift: Float,
+    private val glow: Color,
+) : Modifier.Node(), DrawModifierNode {
+    private val swell = Animatable(1f)
+    private val light = Animatable(0f)
+    private var at = Offset.Unspecified
 
     override fun onAttach() {
         coroutineScope.launch {
-            interactions.interactions.collectLatest {
+            interactions.interactions.collect {
                 when (it) {
-                    is PressInteraction.Press -> press.animateTo(0.96f, spring(stiffness = Spring.StiffnessMedium))
-                    is PressInteraction.Release, is PressInteraction.Cancel ->
-                        press.animateTo(1f, spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMediumLow))
+                    is PressInteraction.Press -> {
+                        at = it.pressPosition
+                        launch { swell.animateTo(lift, spring(dampingRatio = 0.7f, stiffness = 520f)) }
+                        launch { light.animateTo(1f, tween(120)) }
+                    }
+                    is PressInteraction.Release, is PressInteraction.Cancel -> {
+                        // A quick tap still shows: the release carries on toward the press, then bounces back.
+                        val quick = light.value < 0.6f
+                        launch {
+                            swell.animateTo(1f, spring(dampingRatio = 0.42f, stiffness = 380f), initialVelocity = if (quick) (lift - 1f) * 16f else 0f)
+                        }
+                        launch {
+                            if (quick) light.animateTo(0.8f, tween(70))
+                            light.animateTo(0f, tween(480))
+                        }
+                    }
                 }
             }
         }
     }
 
     override fun ContentDrawScope.draw() {
-        scale(press.value) { this@draw.drawContent() }
+        val k = light.value
+        scale(swell.value) {
+            this@draw.drawContent()
+            if (k > 0.01f) {
+                val center = if (at.isSpecified) at else this.center
+                drawOutline(
+                    shape.createOutline(size, layoutDirection, this),
+                    Brush.radialGradient(
+                        listOf(glow.copy(alpha = glow.alpha * k), glow.copy(alpha = glow.alpha * k * 0.35f), Color.Transparent),
+                        center = center,
+                        radius = size.maxDimension * 0.85f,
+                    ),
+                )
+            }
+        }
     }
 }
+
+/** A chevron pointing back (‹), drawn: no icon library needed. */
+@Composable
+fun Chevron(color: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        val w = 2.4.dp.toPx()
+        val path = Path().apply {
+            moveTo(size.width - w / 2, w / 2)
+            lineTo(w / 2, size.height / 2)
+            lineTo(size.width - w / 2, size.height - w / 2)
+        }
+        drawPath(path, color, style = Stroke(w, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
+/**
+ * The iOS switch: the knob springs across and the track turns green; held down ([interaction]
+ * pressed), the knob stretches toward where it will go.
+ */
+@Composable
+fun GlassSwitch(on: Boolean, interaction: MutableInteractionSource? = null) {
+    val pressed = interaction?.collectIsPressedAsState()?.value == true
+    val track by animateColorAsState(if (on) SwitchOn else SwitchOff, tween(250), label = "track")
+    val width by animateDpAsState(if (pressed) 33.dp else 27.dp, spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMedium), label = "knobWidth")
+    val x by animateDpAsState(if (on) 47.dp - width else 0.dp, spring(dampingRatio = 0.62f, stiffness = Spring.StiffnessMediumLow), label = "knobX")
+    Box(Modifier.size(width = 51.dp, height = 31.dp).clip(RoundedCornerShape(50)).background(track).padding(2.dp)) {
+        Box(
+            Modifier.offset(x = x).size(width = width, height = 27.dp).shadow(3.dp, RoundedCornerShape(50))
+                .background(Color.White, RoundedCornerShape(50)),
+        )
+    }
+}
+
+private val SwitchOn = Color(0xFF30D158)
+private val SwitchOff = Color(0xFF39393D)

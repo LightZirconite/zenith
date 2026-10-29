@@ -166,6 +166,8 @@ private class MapHolder {
                     }
                 }
                 m.addOnMapClickListener {
+                    // Looking around: the tap brings the camera back on the car, with its sound.
+                    if (gesture || SystemClock.elapsedRealtime() < freeUntilMs) UiSound.play(UiSound.Kind.RECENTER, this)
                     gesture = false
                     freeUntilMs = 0L
                     last?.let(::follow)

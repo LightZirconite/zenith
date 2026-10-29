@@ -23,6 +23,7 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.VisibilityThreshold
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -39,6 +40,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.IntOffset
 import androidx.core.content.FileProvider
 import androidx.core.content.edit
 import androidx.lifecycle.Lifecycle
@@ -65,6 +68,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val prefs = getSharedPreferences("zenith", MODE_PRIVATE)
         UserSettings.init(this)
+        UiSound.init(this)
         handleIntent(intent)
         setContent {
             val context = LocalContext.current
@@ -85,7 +89,11 @@ class MainActivity : ComponentActivity() {
             var showSettings by remember { mutableStateOf(false) }
             val scope = rememberCoroutineScope()
             val pairLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { }
-            BackHandler(enabled = showSettings) { showSettings = false }
+            val view = LocalView.current
+            BackHandler(enabled = showSettings) {
+                UiSound.play(UiSound.Kind.CLOSE, view)
+                showSettings = false
+            }
             val navApps = remember(resumeCount) { NavApp.installed(context) }
             var permissionResults by remember { mutableIntStateOf(0) }
             val permissions = remember(resumeCount, permissionResults) { Permissions.read(context) }
@@ -368,17 +376,19 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Between full screens: settings slide in over home, which sinks back into the distance, and
-     * slide away on the way back; the welcome page lifts toward the viewer as home comes up.
+     * Between full screens, the iOS way: the settings are pushed in from the right over home, which
+     * slides a third of the way left, sinks a little and dims; back, the reverse, on the same spring.
+     * The welcome page lifts toward the viewer as home comes up.
      */
     private fun screenTransition(from: Screen, to: Screen): ContentTransform = when {
         to == Screen.SETTINGS -> ContentTransform(
-            slideInHorizontally(spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMediumLow)) { it } + fadeIn(tween(250)),
-            scaleOut(tween(450, easing = FastOutSlowInEasing), targetScale = 0.9f) + fadeOut(tween(400)),
+            slideInHorizontally(PushSpring) { it },
+            slideOutHorizontally(PushSpring) { -it / 3 } + scaleOut(PushSpringFloat, targetScale = 0.94f) +
+                fadeOut(tween(380), targetAlpha = 0.25f),
         )
         from == Screen.SETTINGS -> ContentTransform(
-            scaleIn(spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessLow), initialScale = 0.9f) + fadeIn(tween(350)),
-            slideOutHorizontally(tween(350, easing = FastOutSlowInEasing)) { it } + fadeOut(tween(300, delayMillis = 50)),
+            slideInHorizontally(PushSpring) { -it / 3 } + scaleIn(PushSpringFloat, initialScale = 0.94f) + fadeIn(tween(380), initialAlpha = 0.25f),
+            slideOutHorizontally(PushSpring) { it },
             // The page leaving stays on top while it slides away.
             targetContentZIndex = -1f,
         )
@@ -394,6 +404,10 @@ class MainActivity : ComponentActivity() {
         private const val KEY_MEDIA_STEP = "media_step"
     }
 }
+
+/** iOS's push: a quick spring, no bounce. */
+private val PushSpring = spring(dampingRatio = 1f, stiffness = 420f, visibilityThreshold = IntOffset.VisibilityThreshold)
+private val PushSpringFloat = spring<Float>(dampingRatio = 1f, stiffness = 420f)
 
 /** The full screens, for the transitions between them (the small window has none). */
 private enum class Screen { DRIVE, SETTINGS, WELCOME }

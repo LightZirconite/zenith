@@ -31,6 +31,8 @@ data class SettingsState(
     val spotifyCanvas: Boolean = true,
     /** Square picture-in-picture window, larger; else a compact strip that leaves Waze visible. */
     val pipLarge: Boolean = false,
+    /** Soft sounds under the finger on every button ([UiSound]); the alerts are not concerned. */
+    val uiSounds: Boolean = true,
 ) {
     val profile: DriverProfile get() = DriverProfile(probationary = probationary, raining = raining)
 }
@@ -63,6 +65,7 @@ object UserSettings {
                 ?: emptyList(),
             spotifyCanvas = p.getBoolean("spotify_canvas", true),
             pipLarge = p.getBoolean("pip_large", false),
+            uiSounds = p.getBoolean("ui_sounds", true),
         )
         loaded = true
     }
@@ -81,6 +84,7 @@ object UserSettings {
             putString("cars", JSONArray(next.cars.map { JSONObject().put("id", it.associationId).put("name", it.name) }).toString())
             putBoolean("spotify_canvas", next.spotifyCanvas)
             putBoolean("pip_large", next.pipLarge)
+            putBoolean("ui_sounds", next.uiSounds)
             remove("pause_music")
             remove("car_id")
             remove("car_name")
