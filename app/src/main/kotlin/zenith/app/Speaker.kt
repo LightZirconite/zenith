@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import kotlinx.coroutines.flow.MutableStateFlow
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
@@ -24,6 +25,8 @@ class Speaker(context: Context, private val ducker: AudioDucker) : TextToSpeech.
     /** Utterances queued or speaking → whether each one paused the music. */
     private val queued = ConcurrentHashMap<String, Boolean>()
     private var ready = false
+    /** No usable French voice: nothing is spoken (the beeps still sound). */
+    private var muted = false
 
     /** A spoken alert is queued or under way (danger beeps wait for it). */
     val speaking: Boolean get() = queued.isNotEmpty()
@@ -31,8 +34,22 @@ class Speaker(context: Context, private val ducker: AudioDucker) : TextToSpeech.
     // Called from the drive thread and from the TTS init callback.
     @Synchronized
     override fun onInit(status: Int) {
-        if (status != TextToSpeech.SUCCESS) return
-        tts.language = Locale.FRANCE
+        if (status != TextToSpeech.SUCCESS) {
+            frenchMissing.value = true
+            mute()
+            return
+        }
+        // A device without a French voice (car head units): only the beeps, never French read
+        // out by a foreign voice. Said in the settings.
+        val french = listOf(Locale.FRANCE, Locale.FRENCH).firstOrNull {
+            runCatching { tts.isLanguageAvailable(it) >= TextToSpeech.LANG_AVAILABLE }.getOrDefault(false)
+        }
+        frenchMissing.value = french == null
+        if (french == null) {
+            mute()
+            return
+        }
+        tts.language = french
         tts.setAudioAttributes(attributes)
         tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String) = Unit
@@ -53,6 +70,7 @@ class Speaker(context: Context, private val ducker: AudioDucker) : TextToSpeech.
      */
     @Synchronized
     fun say(text: String, delayMs: Int = 0, urgent: Boolean = false, pauseMusic: Boolean = false) {
+        if (muted) return
         if (!ready) {
             pending += { say(text, delayMs, urgent, pauseMusic) }
             return
@@ -71,9 +89,20 @@ class Speaker(context: Context, private val ducker: AudioDucker) : TextToSpeech.
     }
 
     fun shutdown() {
+        pending.clear()
         tts.stop()
         tts.shutdown()
         queued.clear()
+    }
+
+    private fun mute() {
+        muted = true
+        pending.clear()
+    }
+
+    companion object {
+        /** No French voice on this device (seen at the last drive): the settings say how to get one. */
+        val frenchMissing = MutableStateFlow(false)
     }
 
     private fun finished(utteranceId: String) {

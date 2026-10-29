@@ -260,6 +260,9 @@ fun DriveScreen(
     /** The music's room chosen by a tap on the music card, until the speed agrees ([Cockpit]). */
     musicChoice: Boolean? = null,
     onMusicChoice: (Boolean) -> Unit = {},
+    /** The last crash's report, kept until shared or put away. */
+    crashReport: String? = null,
+    onShareCrash: () -> Unit = {},
 ) {
     // The start is a flight through space: stars at home, a tunnel while the GPS searches, a jump at
     // the first good position, and the map comes in at the flash. Opened mid-drive: straight to the map.
@@ -664,6 +667,7 @@ fun DriveScreen(
         ) {
             StatusRow(running && landed, gps, data, demo, snapshot)
             UpdateBanner(update, canInstall, onInstallUpdate)
+            CrashBanner(visible = !running && crashReport != null, onShareCrash)
             if (!landscape) {
                 Column(
                     modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -768,6 +772,22 @@ private fun Chip(text: String, dot: Color, onClick: (() -> Unit)? = null) {
         Box(Modifier.size(8.dp).background(dot, CircleShape))
         Spacer(Modifier.width(8.dp))
         Text(text, color = Color.White, fontSize = 13.sp)
+    }
+}
+
+/** After a crash, at home: one tap shares what happened (the driver decides where it goes). */
+@Composable
+private fun CrashBanner(visible: Boolean, onShare: () -> Unit) {
+    AnimatedVisibility(visible = visible) {
+        Text(
+            "Zenith s'est fermé la dernière fois · toucher pour envoyer le rapport",
+            color = Color.White,
+            fontSize = 14.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                .tap(shape = RoundedCornerShape(12.dp), sound = UiSound.Kind.OPEN, lift = 1.03f, onClick = onShare)
+                .glass(RoundedCornerShape(12.dp)).padding(12.dp),
+        )
     }
 }
 

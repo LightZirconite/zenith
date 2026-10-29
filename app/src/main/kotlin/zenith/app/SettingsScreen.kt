@@ -25,6 +25,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -66,7 +68,17 @@ fun SettingsScreen(
         var order = 0
         Spacer(Modifier.height(4.dp))
         Section("Alertes", order++) {
-            ToggleRow("Annonces vocales", "Désactivé : seulement les bips, sans voix.", settings.voice) { on ->
+            val noFrench by Speaker.frenchMissing.collectAsState()
+            ToggleRow(
+                "Annonces vocales",
+                if (noFrench) {
+                    "Pas de voix française sur cet appareil : installe « Services vocaux Google » (ou une voix française) " +
+                        "dans les réglages de synthèse vocale. En attendant, seuls les bips sonnent."
+                } else {
+                    "Désactivé : seulement les bips, sans voix."
+                },
+                settings.voice,
+            ) { on ->
                 onChange { it.copy(voice = on) }
             }
             Divider()

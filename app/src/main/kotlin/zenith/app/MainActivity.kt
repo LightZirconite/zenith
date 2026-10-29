@@ -97,6 +97,7 @@ class MainActivity : ComponentActivity() {
             val startNow by startRequested.collectAsStateWithLifecycle()
             val musicChoice by DriveState.musicChoice.collectAsStateWithLifecycle()
             var showSettings by remember { mutableStateOf(false) }
+            var crashReport by remember { mutableStateOf(CrashGuard.report(context)) }
             val scope = rememberCoroutineScope()
             val pairLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { }
             val view = LocalView.current
@@ -308,6 +309,12 @@ class MainActivity : ComponentActivity() {
                     onMediaSeek = NowPlaying::seekBy,
                     musicChoice = musicChoice,
                     onMusicChoice = DriveState::chooseMusic,
+                    crashReport = crashReport,
+                    onShareCrash = {
+                        crashReport?.let(::shareCrash)
+                        CrashGuard.clearReport(context)
+                        crashReport = null
+                    },
                 )
                 }
             }
@@ -395,6 +402,14 @@ class MainActivity : ComponentActivity() {
             prefs.edit { putBoolean(key, true) }
             request(permissions)
         }
+    }
+
+    private fun shareCrash(report: String) {
+        runCatching {
+            val send = Intent(Intent.ACTION_SEND).setType("text/plain")
+                .putExtra(Intent.EXTRA_SUBJECT, "Rapport de plantage Zenith").putExtra(Intent.EXTRA_TEXT, report)
+            startActivity(Intent.createChooser(send, "Envoyer le rapport"))
+        }.onFailure { Log.w("Zenith", "share crash", it) }
     }
 
     private fun shareTrip(file: File) {

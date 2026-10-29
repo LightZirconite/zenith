@@ -2,6 +2,7 @@ package zenith.app
 
 import android.content.Context
 import android.location.Location
+import android.os.SystemClock
 import android.util.Log
 import zenith.core.GpsFix
 import zenith.core.Gpx
@@ -10,6 +11,7 @@ import java.io.File
 import java.io.RandomAccessFile
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import kotlin.math.abs
 
 /**
  * Records the raw fixes of a drive as GPX in the app's external files ("trips" folder), so a
@@ -69,8 +71,19 @@ class TripRecorder(context: Context, private val flushEvery: Int = 30) {
 fun latestTrip(context: Context): File? =
     TripRecorder.dir(context).listFiles { f -> f.extension == "gpx" && f.length() > 0 }?.maxByOrNull { it.name }
 
+/**
+ * Some head-unit GPS modules give a wrong date (GPS week rollover: years off). Then the fix is
+ * dated by the system clock instead, so the drive's timings stay right. Within an hour, the
+ * receiver's own time is kept (more precise).
+ */
+private fun Location.fixTimeMs(): Long {
+    val now = System.currentTimeMillis()
+    if (abs(time - now) <= 3_600_000L) return time
+    return now - (SystemClock.elapsedRealtimeNanos() - elapsedRealtimeNanos) / 1_000_000L
+}
+
 fun Location.toFix() = GpsFix(
-    timeMs = time,
+    timeMs = fixTimeMs(),
     position = LatLon(latitude, longitude),
     accuracyM = if (hasAccuracy()) accuracy.toDouble() else null,
     speedMps = if (hasSpeed()) speed.toDouble() else null,

@@ -51,10 +51,13 @@ android {
     // Android 10 is a real target (a car head unit): any call to a newer API without a version
     // check fails the build, in the app and in core.
     lint {
-        checkOnly += "NewApi"
+        checkOnly += setOf("NewApi", "InlinedApi")
         error += "NewApi"
         checkDependencies = true
         abortOnError = true
+        // The findings in the CI log, warnings included.
+        textReport = true
+        textOutput = file("stdout")
     }
 }
 
