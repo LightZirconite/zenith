@@ -269,7 +269,12 @@ fun DriveScreen(
 ) {
     // The start is a flight through space: stars at home, a tunnel while the GPS searches, a jump at
     // the first good position, and the map comes in at the flash. Opened mid-drive: straight to the map.
-    var landed by remember(running) { mutableStateOf(running && snapshot?.speedKmh != null) }
+    // Opened while a drive was already running (back from Waze, the small window): no flight. A
+    // drive started from this screen always flies, even when its first position comes before the
+    // screen sees it running (the demo's comes within milliseconds).
+    var openedMidDrive by remember { mutableStateOf(running) }
+    LaunchedEffect(running) { if (!running) openedMidDrive = false }
+    var landed by remember(running) { mutableStateOf(running && openedMidDrive && snapshot?.speedKmh != null) }
     var flightOver by remember(running) { mutableStateOf(landed) }
     // The jump itself has begun: the flight's words rush past.
     var diving by remember(running) { mutableStateOf(false) }

@@ -62,7 +62,7 @@ class DriveData(context: Context, private val scope: CoroutineScope) {
     private val failedAtMs = ConcurrentHashMap<RoadTiles.Key, Long>()
     /** The tiles around the latest position asked for. */
     @Volatile
-    private var lastWanted: List<RoadTiles.Key> = emptyList()
+    private var lastWanted: Collection<RoadTiles.Key> = emptyList()
     private val mutex = Mutex()
     /** Published tiles and their sizes (manifest); null when the manifest could not be read. */
     private var availableTiles: Map<String, Long?>? = null
@@ -137,7 +137,7 @@ class DriveData(context: Context, private val scope: CoroutineScope) {
     }
 
     /** Each tile is loaded, or failed and waits for its retry (offline): nothing more to wait for. */
-    private fun settled(keys: List<RoadTiles.Key>) = keys.all { (tiles.containsKey(it) || failedAtMs.containsKey(it)) && it !in pending }
+    private fun settled(keys: Collection<RoadTiles.Key>) = keys.all { (tiles.containsKey(it) || failedAtMs.containsKey(it)) && it !in pending }
 
     private fun loadManifest(): Map<String, Long?>? {
         if (!manifestFile.exists() || age(manifestFile) > DAY_MS) {
