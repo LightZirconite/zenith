@@ -47,6 +47,15 @@ android {
     buildFeatures {
         compose = true
     }
+
+    // Android 10 is a real target (a car head unit): any call to a newer API without a version
+    // check fails the build, in the app and in core.
+    lint {
+        checkOnly += "NewApi"
+        error += "NewApi"
+        checkDependencies = true
+        abortOnError = true
+    }
 }
 
 dependencies {

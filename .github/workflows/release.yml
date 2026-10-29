@@ -36,6 +36,8 @@ jobs:
 
       - name: Unit tests
         run: ./gradlew :core:test
+      - name: Android 10 API check
+        run: ./gradlew :app:lintDebug
 
       - name: Signing key
         env:
