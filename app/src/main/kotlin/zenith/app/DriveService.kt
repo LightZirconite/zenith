@@ -93,6 +93,11 @@ class DriveService : Service(), LocationListener {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    override fun onCreate() {
+        super.onCreate()
+        CrashGuard.install(this)
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
             stopSelf()
@@ -118,6 +123,11 @@ class DriveService : Service(), LocationListener {
             return if (demo) START_NOT_STICKY else START_STICKY
         }
         if (started) return START_STICKY
+        // Android restarting the drive right after a crash: declined, or the crash would loop.
+        if (intent == null && CrashGuard.crashedRecently(this)) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         // Android requires the location permission for a "location" foreground service, demo included.
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             stopSelf()
@@ -183,9 +193,15 @@ class DriveService : Service(), LocationListener {
             listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.PASSIVE_PROVIDER)
                 .firstNotNullOfOrNull { manager.getLastKnownLocation(it) }
         }.getOrNull()?.let { live.ensureTiles(LatLon(it.latitude, it.longitude)) }
-        gpsStatus = GpsStatusWatcher(manager, DriveState::satellites).also { it.start() }
+        gpsStatus = GpsStatusWatcher(manager, DriveState::satellites).also { runCatching { it.start() } }
         // As fast as the receiver goes (1 Hz on most phones, more on some): the speed follows the car.
-        manager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 0L, 0f, this, Looper.getMainLooper())
+        // A device without a GPS chip (some head units) falls back to what it has, never crashes.
+        val provider = runCatching {
+            val all = manager.allProviders
+            listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER).firstOrNull { it in all }
+        }.getOrNull()
+        runCatching { manager.requestLocationUpdates(provider ?: LocationManager.GPS_PROVIDER, 0L, 0f, this, Looper.getMainLooper()) }
+            .onFailure { Log.e("Zenith", "location updates", it) }
         // Tunnel: no fix for 2.5 s → the car keeps moving along the road (DrivingSession.coast).
         scope.launch(drive) {
             while (true) {
@@ -383,8 +399,8 @@ class DriveService : Service(), LocationListener {
     override fun onDestroy() {
         scope.cancel()
         if (started) {
-            if (!demo) getSystemService(LocationManager::class.java).removeUpdates(this)
-            gpsStatus?.stop()
+            if (!demo) runCatching { getSystemService(LocationManager::class.java).removeUpdates(this) }
+            runCatching { gpsStatus?.stop() }
             val trip = recorder
             // After the pending fixes, on the drive thread that owns the recorder.
             driveExecutor.execute { trip?.close() }

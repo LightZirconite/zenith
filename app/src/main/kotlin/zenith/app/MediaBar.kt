@@ -150,11 +150,15 @@ private val BackdropMask = listOf(0f to 0f, 0.2f to 0f, 0.3f to 0.5f, 0.42f to 1
  */
 private val BackdropMaskFocus = listOf(0f to 0f, 0.05f to 0f, 0.18f to 0.5f, 0.33f to 1f, 1f to 1f)
 
-/** Landscape: across the width, whole from the speed column, a long soft fade under the map's right side. */
-private val LandBackdropMask = listOf(0f to 0f, 0.3f to 0f, 0.44f to 0.5f, 0.58f to 1f, 1f to 1f)
+/**
+ * Landscape, across the backdrop's own width (62 % of the screen from the right): the reverse of
+ * the map's fade over the Canvas (LandMapOverCanvas, in DriveScreen), stop for stop on screen, so
+ * map and Canvas always add up to a whole picture, no dark seam between them.
+ */
+private val LandBackdropMask = listOf(0f to 0f, 0.13f to 0.45f, 0.31f to 0.82f, 0.45f to 1f, 1f to 1f)
 
-/** Landscape music mode: further over to the left, the map keeping its left part. */
-private val LandBackdropMaskFocus = listOf(0f to 0f, 0.12f to 0f, 0.26f to 0.5f, 0.42f to 1f, 1f to 1f)
+/** Landscape music mode (85 % of the screen): the reverse of LandMapInMusicMode the same way. */
+private val LandBackdropMaskFocus = listOf(0f to 0f, 0.07f to 0f, 0.227f to 0.55f, 0.38f to 0.88f, 0.6f to 1f)
 
 /**
  * Music controls under the alerts, for any player (Spotify, YouTube, Deezer…): cover, title,

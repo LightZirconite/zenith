@@ -51,6 +51,8 @@ import androidx.compose.foundation.layout.statusBarsIgnoringVisibility
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.widthIn
@@ -205,6 +207,10 @@ private const val LAND_SPLIT = 0.56f
 
 /** Landscape: the map's width, as a share of the screen; it melts away under the right column. */
 private const val LAND_MAP_WIDTH = 0.66f
+
+/** Landscape: the Canvas's width from the right edge, as a share of the screen; wider in music mode. */
+private const val LAND_CANVAS_WIDTH = 0.62f
+private const val LAND_CANVAS_WIDE = 0.85f
 
 /** Landscape, the map's opacity across its width: alone, it fades into the black under the speed. */
 private val LandMapAlone = listOf(0f to 1f, 0.62f to 1f, 0.78f to 0.65f, 0.9f to 0.25f, 1f to 0f)
@@ -464,7 +470,13 @@ fun DriveScreen(
                         // An alert on screen: the music steps back.
                         calm = snapshot?.alerts?.isNotEmpty() == true,
                         focus = focus,
-                        modifier = Modifier.fillMaxSize(),
+                        // Landscape: the right part only (the 9:16 video less cropped), a little wider
+                        // in music mode; its fade is the map's in reverse, so the two always add up.
+                        modifier = if (landscape) {
+                            Modifier.align(Alignment.CenterEnd).fillMaxHeight().fillMaxWidth(LAND_CANVAS_WIDTH + (LAND_CANVAS_WIDE - LAND_CANVAS_WIDTH) * focus)
+                        } else {
+                            Modifier.fillMaxSize()
+                        },
                         fromRight = landscape,
                     )
                 }
@@ -601,7 +613,23 @@ fun DriveScreen(
             }
         }
         val buttons: @Composable ColumnScope.() -> Unit = {
-            StartStop(running, onStart, onStop, compact = running && cruising)
+            if (!landscape) {
+                StartStop(running, onStart, onStop, compact = running && cruising)
+            } else {
+                // Landscape: the shortcuts and Stop on one line, the same height, side by side.
+                val shortcuts = running && landed && navApps.isNotEmpty() && !cruising
+                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    AnimatedVisibility(
+                        visible = shortcuts,
+                        modifier = Modifier.weight(navApps.size.coerceAtLeast(1).toFloat()).fillMaxHeight(),
+                        enter = fadeIn(tween(400, delayMillis = 350)) + scaleIn(spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow), initialScale = 0.9f),
+                        exit = fadeOut(tween(250)),
+                    ) {
+                        NavApps(navApps, onOpenNavApp, Modifier.fillMaxSize(), fillHeight = true)
+                    }
+                    StartStop(running, onStart, onStop, compact = running && cruising, modifier = Modifier.weight(1f).fillMaxHeight())
+                }
+            }
             AnimatedVisibility(visible = !running, enter = if (comingHome) BottomInLate else BottomIn, exit = BottomOut) {
                 Text(
                     "Réglages",
@@ -658,7 +686,6 @@ fun DriveScreen(
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) { homeView() }
                         AlertArea(snapshot.takeIf { running && landed })
-                        navShortcuts()
                     }
                     Spacer(Modifier.width(20.dp))
                     Column(
@@ -807,8 +834,14 @@ private fun Idle(data: DataStatus, onDemo: () -> Unit) {
 
 /** Shortcuts to the navigation apps installed: Zenith keeps alerting from behind them. */
 @Composable
-private fun NavApps(apps: List<NavApp>, onOpen: (NavApp) -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+private fun NavApps(
+    apps: List<NavApp>,
+    onOpen: (NavApp) -> Unit,
+    modifier: Modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+    /** In a row of fixed height (landscape, beside Stop): each button takes it all. */
+    fillHeight: Boolean = false,
+) {
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         for (app in apps) {
             Text(
                 "Ouvrir ${app.label}",
@@ -816,8 +849,8 @@ private fun NavApps(apps: List<NavApp>, onOpen: (NavApp) -> Unit) {
                 fontSize = 15.sp,
                 fontWeight = FontWeight.SemiBold,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.weight(1f).tap(shape = RoundedCornerShape(14.dp), sound = UiSound.Kind.OPEN) { onOpen(app) }
-                    .glass(RoundedCornerShape(14.dp)).padding(vertical = 12.dp),
+                modifier = Modifier.weight(1f).then(if (fillHeight) Modifier.fillMaxHeight() else Modifier).tap(shape = RoundedCornerShape(14.dp), sound = UiSound.Kind.OPEN) { onOpen(app) }
+                    .glass(RoundedCornerShape(14.dp)).wrapContentHeight().padding(vertical = 12.dp),
             )
         }
     }
@@ -1016,7 +1049,7 @@ private fun SectionCard(s: SectionStatus) {
 
 /** Start, then Stop; [compact] on the road: lower and quieter, still there. */
 @Composable
-private fun StartStop(running: Boolean, onStart: () -> Unit, onStop: () -> Unit, compact: Boolean = false) {
+private fun StartStop(running: Boolean, onStart: () -> Unit, onStop: () -> Unit, compact: Boolean = false, modifier: Modifier = Modifier.fillMaxWidth()) {
     val bg by animateColorAsState(if (running) Glass else Color.White, label = "buttonBg")
     val height by animateDpAsState(if (compact) 9.dp else 18.dp, spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessLow), label = "buttonHeight")
     val quiet by animateFloatAsState(if (compact) 0.7f else 1f, tween(500), label = "buttonQuiet")
@@ -1025,7 +1058,7 @@ private fun StartStop(running: Boolean, onStart: () -> Unit, onStop: () -> Unit,
     val wave by ping.animateFloat(0f, 1f, infiniteRepeatable(tween(2_600, easing = FastOutSlowInEasing)), label = "startWave")
     Box(
         contentAlignment = Alignment.Center,
-        modifier = Modifier.fillMaxWidth()
+        modifier = modifier
             .drawBehind {
                 if (running || wave > 0.7f) return@drawBehind
                 val k = wave / 0.7f

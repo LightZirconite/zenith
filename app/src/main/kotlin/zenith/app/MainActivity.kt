@@ -73,6 +73,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(SystemBarStyle.dark(android.graphics.Color.TRANSPARENT), SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
         super.onCreate(savedInstanceState)
+        CrashGuard.install(this)
         val prefs = getSharedPreferences("zenith", MODE_PRIVATE)
         UserSettings.init(this)
         UiSound.init(this)

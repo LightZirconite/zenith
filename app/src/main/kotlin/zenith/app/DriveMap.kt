@@ -95,6 +95,8 @@ fun DriveMap(
                 map?.onStop()
                 map?.onDestroy()
             }
+            // Closed before its first frame (the drive stopped at once): not a crash.
+            if (map != null) MapGuard.opened(context)
         }
     }
 
@@ -140,10 +142,20 @@ private class MapHolder {
 
     fun create(context: Context): View = runCatching {
         density = context.resources.displayMetrics.density
+        // Twice dead while opening (native crash, GPU driver): no map on this device.
+        if (!MapGuard.tryOpen(context)) return View(context)
         MapLibre.getInstance(context)
         // TextureView: blends with the Compose fade drawn on top of it.
         MapView(context, MapLibreMapOptions.createFromAttributes(context).textureMode(true)).apply {
             onCreate(null)
+            // Drawn once: this device's GPU gets along with the map.
+            var drawn = false
+            addOnDidFinishRenderingFrameListener(
+                MapView.OnDidFinishRenderingFrameListener { _, _, _ ->
+                    if (!drawn) MapGuard.opened(context)
+                    drawn = true
+                },
+            )
             getMapAsync { m ->
                 map = m
                 m.uiSettings.setCompassEnabled(false)
