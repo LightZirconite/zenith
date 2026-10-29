@@ -108,12 +108,12 @@ internal class Globe {
     /**
      * Spins while searching, slower with each satellite ([lock], 0 to 1). [aim]: home comes to the
      * center like a camera settling, from the speed the globe already has and always by the shortest
-     * way (never a whole turn when home moves a little behind); [firm] for the airlock before the
-     * jump, where it must be dead center within a second.
+     * way (never a whole turn when home moves a little behind); [firm] through the jump, where it must
+     * be dead center before the Earth grows large.
      */
     fun step(dt: Float, lock: Float, aim: Boolean, firm: Boolean = false) {
         if (aim) {
-            val w = if (firm) 6.5f else 3f
+            val w = if (firm) 10f else 3f
             spinSpeed += (w * w * wrap(homeSpin - spin) - 2 * w * spinSpeed) * dt
             tiltSpeed += (w * w * (homeTilt - tilt) - 2 * w * tiltSpeed) * dt
         } else {

@@ -92,26 +92,26 @@ internal const val HEART_Y = 0.42f
 internal const val GLOBE_SHARE = 0.15f
 
 /**
- * The airlock: the position is locked, the Earth turns it dead center and the tunnel holds its
- * breath this long before the jump.
+ * Connected: just a beat (the lock-on ring, "Position verrouillée") before the jump. The calm
+ * belongs to the search; once the position is there, everything goes fast.
  */
-internal const val HOLD_MS = 1_100
+internal const val HOLD_MS = 250
 
 /** The dive, from the first frame of the rush to the last star; the flash comes at [LANDING] of it. */
-private const val DIVE_MS = 1_800
-private const val LANDING = 0.68f
+private const val DIVE_MS = 1_300
+private const val LANDING = 0.66f
 
 /** From the start of the arrival (position locked) to the flash: the boom, the map, the music back. */
 internal const val JUMP_IMPACT_MS = HOLD_MS + (DIVE_MS * LANDING).toInt()
 
-/** The way back: the scene closes into the heart through a flash at [CLOSE_MS]... */
-internal const val CLOSE_MS = 650
+/** The way back: the scene steps back and fades into the stars over [CLOSE_MS]... */
+internal const val CLOSE_MS = 500
 
-/** ...the Earth falls back from the screen to its size in the tunnel... */
-private const val RECEDE_MS = 1_400
+/** ...the Earth, behind it, drifts away to its size in the tunnel... */
+private const val RECEDE_MS = 1_300
 
 /** ...then fades into the calm sky of home. */
-internal const val HOMECOMING_MS = 3_300
+internal const val HOMECOMING_MS = 2_000
 
 /** A sound heard later than this after it was started is not believed (a broken timestamp). */
 private const val MAX_LAG_NS = 350_000_000L
@@ -122,15 +122,14 @@ private const val MAX_LAG_NS = 350_000_000L
  * and as satellites lock, rings of light marking its walls; at its end the Earth ([Globe]) turns,
  * its satellites locking one by one onto [home] (the driver's position; France until known).
  *
- * [FlightPhase.ARRIVE]: the airlock first ([HOLD_MS]): the position locks with a ring of light, the
- * Earth settles it dead center and leans in while the stars slow down, holding their breath
- * ([onDive] at its end). Then the jump: the stars stretch into streaks and the Earth rushes at the
- * viewer, onto home, until it fills the screen; a white flash and the map opens beneath it
- * ([onLanded]), then the stars fade out ([onGone]).
+ * [FlightPhase.ARRIVE]: a beat ([HOLD_MS]) as the position locks with a ring of light ([onDive] at
+ * its end), then the jump, fast: the stars stretch into streaks and the Earth rushes at the viewer,
+ * swinging home dead center on the way, until it fills the screen; a white flash and the map opens
+ * beneath it ([onLanded]), then the stars fade out ([onGone]).
  *
- * [comingHome]: a drive just ended, the arrival backwards. Around the scene closing into the heart
- * the stars rush back in and a flash builds; out of it the Earth, home in front, falls away from
- * the viewer to its size in the tunnel and fades into the stars, which slow down to the calm of home.
+ * [comingHome]: a drive just ended. Behind the scene fading away, the Earth, home in front, drifts
+ * back from the viewer and fades into the stars, which slow down to the calm of home. Soft, short,
+ * nothing crossing the screen.
  *
  * Both follow their sound ([heardAt]: when it is first heard, Bluetooth included when Android knows),
  * so the boom lands on the flash.
@@ -213,8 +212,8 @@ fun Starfield(
                 // Progressive: from a cruise to a race over the first seconds, a little more per satellite.
                 val cruise = 0.035f + tunnel * (0.45f + 0.9f * (searched / 8f).coerceAtMost(1f) + 0.06f * locked.coerceAtMost(8))
                 val a = Jump(arriveMs)
-                // The airlock holds its breath (the stars slow down), then the rush.
-                speed = cruise * (1f - 0.5f * smooth(a.hold)) + 16f * a.dive.pow(3) + Back(backMs).speed
+                // The rush, from the very start of the dive.
+                speed = cruise + 18f * a.dive.pow(2) + Back(backMs).speed
                 if (last != 0L) {
                     val dt = ((now - last) / 1e9f).coerceAtMost(0.05f)
                     sky.step(dt, speed * 0.35f + 0.02f)
@@ -243,18 +242,17 @@ fun Starfield(
             tubeRings(cx, cy, scale, t, speed, tunnel * fade)
             tube.draw(this, cx, cy, scale, speed, t, fade * tunnel, twinkle = false)
             // The Earth ahead: out of the distance as the tube forms, a little nearer as satellites
-            // lock, leaning in through the airlock, then rushing at the viewer until it fills the
-            // screen at the flash.
+            // lock, then rushing at the viewer until it fills the screen at the flash.
             val rush = (a.dive / LANDING).coerceAtMost(1f)
-            val r = base * (0.2f + 0.8f * tunnel) * (0.92f + 0.08f * lock) * (1f + 0.12f * smooth(a.hold)) * (1f + 14f * rush.pow(2.4f))
-            val flare = if (arriveMs < 0f) 0f else (arriveMs / 900f).coerceIn(0f, 1f)
+            val r = base * (0.2f + 0.8f * tunnel) * (0.92f + 0.08f * lock) * (1f + 14f * rush.pow(2f))
+            val flare = if (arriveMs < 0f) 0f else (arriveMs / 600f).coerceIn(0f, 1f)
             if (backMs < 0f) {
                 globe.draw(this, cx, cy, r, alpha = tunnel * fade, orbits = orbit * fade, t = t, visible = gps.visible, used = gps.used, lock = if (arriveMs >= 0f) 1f else lock, flare = flare)
             }
         }
         if (backMs >= 0f) {
-            // Back from a drive: the tunnel's walls rush past backwards, the Earth falls away from the
-            // viewer, home in front, and fades into the stars; a glow at the heart while it recedes.
+            // Back from a drive: the tunnel's walls drift backwards, the Earth drifts away from the
+            // viewer, home in front, and fades into the stars; a soft glow at the heart while it recedes.
             tube.draw(this, cx, cy, scale, speed, t, b.tube, twinkle = false)
             if (b.glow > 0.01f) {
                 drawRect(
@@ -269,9 +267,8 @@ fun Starfield(
             }
             globe.draw(this, cx, cy, base * b.size, alpha = b.globe, orbits = 0f, t = t, visible = 0, used = 0, lock = 1f)
         }
-        // The flash: of the jump, at its brightest as the map opens; of the way back, as the scene
-        // closes. White at the heart, blue at the edges.
-        val flash = max(if (arriveMs >= 0f) exp(-((a.dive - LANDING) / 0.09f).pow(2)) else 0f, b.flash)
+        // The jump's flash: white at the heart, blue at the edges, at its brightest as the map opens.
+        val flash = if (arriveMs >= 0f) exp(-((a.dive - LANDING) / 0.09f).pow(2)) else 0f
         if (flash > 0.01f) {
             drawRect(
                 Brush.radialGradient(
@@ -286,9 +283,8 @@ fun Starfield(
     }
 }
 
-/** Where the arrival stands at [ms] since its start (-1: not arriving): the airlock, then the dive, each 0 to 1. */
+/** Where the arrival stands at [ms] since its start (-1: not arriving): the dive, 0 to 1, after the lock-on beat. */
 private class Jump(ms: Float) {
-    val hold = if (ms < 0f) 0f else (ms / HOLD_MS).coerceIn(0f, 1f)
     val dive = if (ms < 0f) 0f else ((ms - HOLD_MS) / DIVE_MS).coerceIn(0f, 1f)
 }
 
@@ -296,24 +292,18 @@ private class Jump(ms: Float) {
 private class Back(ms: Float) {
     private val on = ms >= 0f
 
-    /** Closing (0 to 1) until the flash, then falling away (0 to 1), then fading into the stars (0 to 1). */
-    private val close = if (on) (ms / CLOSE_MS).coerceIn(0f, 1f) else 0f
-    private val recede = if (on) ((ms - CLOSE_MS) / RECEDE_MS).coerceIn(0f, 1f) else 0f
-    private val vanish = if (on) ((ms - CLOSE_MS - RECEDE_MS) / (HOMECOMING_MS - CLOSE_MS - RECEDE_MS)).coerceIn(0f, 1f) else 0f
+    /** Drifting away (0 to 1), then fading into the stars (0 to 1). */
+    private val recede = if (on) (ms / RECEDE_MS).coerceIn(0f, 1f) else 0f
+    private val vanish = if (on) ((ms - RECEDE_MS) / (HOMECOMING_MS - RECEDE_MS)).coerceIn(0f, 1f) else 0f
 
-    /** The stars: drawn into the heart ever faster while the scene closes, then slowing down to rest. */
-    val speed = when {
-        !on -> 0f
-        ms < CLOSE_MS -> -16f * close * close
-        else -> -16f * (1f - recede).pow(3)
-    }
-    val tube = if (on) 1f - smooth(vanish) else 0f
-    val flash = if (on) exp(-((ms - CLOSE_MS) / 210f).pow(2)) else 0f
-    val glow = if (on && ms >= CLOSE_MS) (1f - recede).pow(2) else 0f
+    /** The stars drift gently back toward the heart, then rest. */
+    val speed = if (on) -3f * (1f - recede).pow(2) else 0f
+    val tube = if (on) 0.6f * (1f - smooth(vanish)) else 0f
+    val glow = if (on) 0.5f * (1f - recede).pow(2) * smooth(ms / CLOSE_MS) else 0f
 
-    /** The Earth's radius in globe radii: the whole screen out of the flash, its size in the tunnel, then a point. */
-    val size = (1f + 14f * (1f - recede).pow(2.4f)) * (1f - 0.8f * smooth(vanish))
-    val globe = if (on) ((ms - CLOSE_MS + 230f) / 230f).coerceIn(0f, 1f) * (1f - smooth(vanish)) else 0f
+    /** The Earth's radius in globe radii: near behind the scene, its size in the tunnel, then a point. */
+    val size = (1f + 2.5f * (1f - recede).pow(2)) * (1f - 0.8f * smooth(vanish))
+    val globe = if (on) smooth((ms - 120f) / (CLOSE_MS - 120f)) * (1f - smooth(vanish)) else 0f
 }
 
 private fun smooth(x: Float): Float {
@@ -338,33 +328,6 @@ private fun DrawScope.tubeRings(cx: Float, cy: Float, scale: Float, t: Float, sp
             )
         }
         z += spacing
-    }
-}
-
-/**
- * The rim of the scene closing into the heart at the end of a drive ([progress] of the portal, 1 open,
- * 0 shut): a ring of light on its edge, brighter as it tightens.
- */
-@Composable
-fun PortalRim(progress: Float, modifier: Modifier = Modifier) {
-    if (progress <= 0f || progress >= 1f) return
-    Canvas(modifier) {
-        val reach = kotlin.math.hypot(size.width, size.height)
-        val k = 1f - progress
-        val center = Offset(size.width / 2, size.height * HEART_Y)
-        val r = progress * 1.15f * 0.91f * reach
-        drawCircle(
-            Brush.radialGradient(
-                (0.8f) to Color.Transparent,
-                (0.97f) to StarBlue.copy(alpha = 0.5f * k),
-                1f to Color.Transparent,
-                center = center,
-                radius = r * 1.12f,
-            ),
-            radius = r * 1.12f,
-            center = center,
-        )
-        drawCircle(Color.White.copy(alpha = 0.85f * k), radius = r, center = center, style = Stroke((1.5f + 3f * k) * density))
     }
 }
 
@@ -506,9 +469,9 @@ private class Stars(private val count: Int, private val tube: Boolean) {
 /**
  * The flight's sounds, synthesized like the alert tones (no assets): the engines spooling up at
  * Start, a low hum looping while the GPS searches, a soft note at each satellite locked, then the
- * arrival: a deep tone gathering itself in the airlock, the rush of the jump ending in a round deep
- * boom and a warm chord as the map appears. At the end of a drive, the way back: air drawn into the
- * heart, a soft thump out of the flash, a whoosh falling away and the chord of home. The music
+ * arrival: a deep tone swelling at the lock-on, the rush of the jump ending in a round deep boom
+ * and a warm chord as the map appears. At the end of a drive, the way back: a soft breath falling
+ * away and the chord of home. The music
  * steps aside for the flight: it slides down and pauses at Start, plays again low under the boom's
  * chord and rises back to where it was; it only ducks under the way back.
  */
@@ -553,10 +516,10 @@ class WarpSound(context: Context) {
     /** Satellite [n] (1 to 4) locked: a soft round note, a step higher each time, the fourth a chord. */
     fun lock(n: Int) = replay(locks.getOrNull(n - 1))
 
-    /** The airlock, the jump and the boom, in one sound: the pictures follow it ([heardAt]). */
+    /** The lock-on, the jump and the boom, in one sound: the pictures follow it ([heardAt]). */
     fun arrive() = play(FlightSound.ARRIVE, arrivePcm)
 
-    /** The way back at the end of a drive; the music ducks under it. */
+    /** The way back at the end of a drive; the music ducks a moment under it. */
     fun homecoming() {
         play(FlightSound.HOMECOMING, homecomingPcm)
         music.duckFor(HOMECOMING_MS.toLong(), holdMs = 500)
@@ -680,7 +643,7 @@ class WarpSound(context: Context) {
         const val HUM_SAMPLES = 2 * RATE
 
         /** After the boom, the music stays low this long under the chord before rising. */
-        const val MUSIC_RISE_MS = 1_600L
+        const val MUSIC_RISE_MS = 800L
 
         /** E major, rising: E4, G#4, B4, then E5 with its chord. */
         val LOCK_NOTES = floatArrayOf(329.63f, 415.3f, 493.88f, 659.25f)
@@ -716,8 +679,8 @@ class WarpSound(context: Context) {
         }
 
         /**
-         * The arrival, timed on the pictures: in the airlock a deep tone gathers itself, rising, air
-         * drawn in; the rush of the jump rises fast out of it; at the flash a round deep boom, the
+         * The arrival, timed on the pictures: at the lock-on a deep tone swells, rising; the rush of
+         * the jump rises fast out of it; at the flash a round deep boom, the
          * air settling and a warm chord swelling under it, the whole dying away slowly: an arrival,
          * not a cut.
          */
@@ -731,16 +694,16 @@ class WarpSound(context: Context) {
             return pcm(length) { t, noise ->
                 var v = 0f
                 if (t < impact + 0.05f) {
-                    // The airlock: from the hum's 55 Hz up an octave, swelling, then handing over to the rush.
+                    // The lock-on: from the hum's 55 Hz up an octave, swelling at once, then handing over to the rush.
                     charge += TWO_PI * (55f + 55f * smooth(t / impact)) / RATE
-                    val swell = smooth(t / 0.35f) * (0.32f + 0.2f * smooth(t / hold)) * (1f - smooth((t - hold) / (impact - hold)))
+                    val swell = smooth(t / 0.06f) * (0.32f + 0.2f * smooth(t / hold)) * (1f - smooth((t - hold) / (impact - hold)))
                     v += swell * (sin(charge) + 0.4f * sin(charge * 2f)) + noise * 0.2f * smooth(t / hold) * (1f - smooth((t - hold) / 0.4f))
-                    // The rush, starting under the end of the airlock, gone 40 ms after the flash.
+                    // The rush, starting under the lock-on, gone 50 ms after the flash.
                     val k = ((t - hold + 0.15f) / (impact - hold + 0.15f)).coerceIn(0f, 1f)
                     if (k > 0f) {
                         rush += TWO_PI * (120f + 900f * k * k * k) / RATE
                         val out = if (t <= impact) 1f else 1f - (t - impact) / 0.05f
-                        v += out * k * k * (0.35f * sin(rush) + noise * 0.9f)
+                        v += out * k.pow(1.5f) * (0.35f * sin(rush) + noise * 0.9f)
                     }
                 }
                 if (t >= impact) {
@@ -760,35 +723,23 @@ class WarpSound(context: Context) {
         }
 
         /**
-         * The way back, timed on the pictures: air drawn into the heart while the scene closes, a
-         * soft deep thump out of the flash (no impact), a whoosh falling away with the Earth, and the
-         * warm chord of home settling in slowly.
+         * The way back: a soft breath of air drifting down with the Earth and the warm chord of
+         * home settling in; no impact.
          */
         fun homecomingWave(): ShortArray {
-            val close = CLOSE_MS / 1_000f
             val recede = RECEDE_MS / 1_000f
             val length = HOMECOMING_MS / 1_000f + 0.8f
             var sweep = 0f
-            var thump = 0f
             return pcm(length) { t, noise ->
-                var v = 0f
-                if (t < close) {
-                    val k = t / close
-                    sweep += TWO_PI * (180f + 340f * k * k) / RATE
-                    v += k * k * (0.28f * sin(sweep) + 0.7f * noise)
-                } else {
-                    val d = t - close
-                    val u = (d / recede).coerceIn(0f, 1f)
-                    sweep += TWO_PI * (520f - 420f * smooth(u)) / RATE
-                    v += (1f - u) * (1f - u) * 0.28f * sin(sweep) + noise * 0.7f * exp(-d / 0.45f)
-                    thump += TWO_PI * (38f + 24f * exp(-d / 0.2f)) / RATE
-                    v += 0.7f * smooth(d / 0.04f) * exp(-d / 0.55f) * sin(thump)
-                    val c = d - 0.8f
-                    if (c > 0f) {
-                        val w = TWO_PI * c
-                        val pad = 0.11f * smooth(c / 0.6f) * exp(-c / 1.4f)
-                        v += pad * (sin(w * 164.81f) + sin(w * 207.65f) + sin(w * 246.94f) + 0.5f * sin(w * 329.63f))
-                    }
+                val u = (t / recede).coerceIn(0f, 1f)
+                sweep += TWO_PI * (440f - 330f * smooth(u)) / RATE
+                val air = smooth(t / 0.12f) * (1f - smooth(u))
+                var v = air * (0.18f * sin(sweep) + 0.45f * noise)
+                val c = t - 0.35f
+                if (c > 0f) {
+                    val w = TWO_PI * c
+                    val pad = 0.11f * smooth(c / 0.4f) * exp(-c / 1.2f)
+                    v += pad * (sin(w * 164.81f) + sin(w * 207.65f) + sin(w * 246.94f) + 0.5f * sin(w * 329.63f))
                 }
                 v * (1f - smooth((t - (length - 0.6f)) / 0.6f))
             }

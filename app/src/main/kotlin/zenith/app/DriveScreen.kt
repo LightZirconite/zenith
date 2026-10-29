@@ -7,7 +7,6 @@ import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.EaseOutBack
-import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
@@ -150,13 +149,13 @@ private const val WEAK_FIX_WAIT_MS = 15_000L
 private val BottomIn = fadeIn(tween(500, delayMillis = 400)) +
     slideInVertically(spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessLow)) { it }
 
-/** After a drive, once the Earth has fallen away into the stars. */
-private val BottomInLate = fadeIn(tween(600, delayMillis = 2_200)) +
-    slideInVertically(tween(900, delayMillis = 2_100, easing = EaseOutBack)) { it }
+/** After a drive, once the Earth has drifted away into the stars. */
+private val BottomInLate = fadeIn(tween(500, delayMillis = 1_100)) +
+    slideInVertically(tween(700, delayMillis = 1_000, easing = EaseOutBack)) { it }
 private val BottomOut = fadeOut(tween(200)) + slideOutVertically(tween(300)) { it / 2 }
 
-/** The drive's cards leave toward the heart as the scene closes. */
-private val DriveOut = fadeOut(tween(220)) + scaleOut(tween(320, easing = FastOutLinearInEasing), targetScale = 0.8f)
+/** The drive's cards step back and fade with the scene. */
+private val DriveOut = fadeOut(tween(220)) + scaleOut(tween(320), targetScale = 0.9f)
 
 /** Chips pop in with a spring and shrink away. */
 private val ChipIn = fadeIn(tween(300)) + scaleIn(spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMedium), initialScale = 0.7f)
@@ -233,7 +232,7 @@ fun DriveScreen(
     // the first good position, and the map comes in at the flash. Opened mid-drive: straight to the map.
     var landed by remember(running) { mutableStateOf(running && snapshot?.speedKmh != null) }
     var flightOver by remember(running) { mutableStateOf(landed) }
-    // The jump itself has begun: the airlock is over, the flight's words rush past.
+    // The jump itself has begun: the flight's words rush past.
     var diving by remember(running) { mutableStateOf(false) }
     var minFlightDone by remember(running) { mutableStateOf(false) }
     var weakFixWaited by remember(running) { mutableStateOf(false) }
@@ -291,10 +290,10 @@ fun DriveScreen(
                 sound.startHum()
             }
             phase == FlightPhase.ARRIVE && before == FlightPhase.SEARCH -> {
-                // The airlock, the jump and the boom are one sound, the pictures follow it; the
-                // hum dies away under the airlock's deep tone.
+                // The lock-on, the jump and the boom are one sound, the pictures follow it; the
+                // hum dies away under it.
                 sound.arrive()
-                sound.fadeHum(HOLD_MS.toLong())
+                sound.fadeHum(400)
             }
             else -> {
                 if (phase == FlightPhase.IDLE) {
@@ -348,22 +347,21 @@ fun DriveScreen(
     val withMusic by animateFloatAsState(if (media != null) 1f else 0f, tween(900), label = "withMusic")
     // The arrival: the whole scene (map and Canvas, loaded during the flight) opens like a portal
     // from the heart of the tunnel at the flash, rushing in from a zoom, with a shock ring. At the
-    // stop it closes back into the heart, ever faster and receding, a rim of light on its edge,
-    // into the flash of the way back.
+    // stop it simply steps back and fades into the stars.
     val portal = remember { Animatable(if (landed) 1f else 0f) }
     var sceneUp by remember { mutableStateOf(running) }
     LaunchedEffect(running, showMap) {
         when {
             showMap -> {
                 sceneUp = true
-                portal.animateTo(1f, tween(1_000, easing = FastOutSlowInEasing))
+                portal.animateTo(1f, tween(650, easing = FastOutSlowInEasing))
             }
             running -> {
                 sceneUp = true
                 portal.snapTo(0f)
             }
             portal.value > 0f -> {
-                portal.animateTo(0f, tween(CLOSE_MS, easing = FastOutLinearInEasing))
+                portal.animateTo(0f, tween(CLOSE_MS, easing = FastOutSlowInEasing))
                 sceneUp = false
             }
             else -> sceneUp = false
@@ -393,7 +391,7 @@ fun DriveScreen(
     Box(Modifier.fillMaxSize().background(Bg)) {
         AnimatedVisibility(
             visible = !flightOver,
-            // The way back starts under the closing scene at once, its flash already building.
+            // The way back starts under the fading scene at once.
             enter = if (comingHome) EnterTransition.None else fadeIn(tween(800)),
             exit = fadeOut(tween(200)),
         ) {
@@ -415,10 +413,11 @@ fun DriveScreen(
         }
         if (running || sceneUp) {
             Box(
-                Modifier.fillMaxSize().portalReveal(portal.value).graphicsLayer {
+                Modifier.fillMaxSize().portalReveal(if (running) portal.value else 1f).graphicsLayer {
                     val k = portal.value
-                    alpha = if (k <= 0f) 0f else 1f
-                    val scale = if (running) 1.35f - 0.35f * k else 0.7f + 0.3f * k
+                    // Opening: a portal from the heart. Leaving: the whole scene steps back and fades.
+                    alpha = if (running) (if (k <= 0f) 0f else 1f) else k
+                    val scale = if (running) 1.35f - 0.35f * k else 0.88f + 0.12f * k
                     scaleX = scale
                     scaleY = scale
                 },
@@ -455,10 +454,10 @@ fun DriveScreen(
                     overlay = if (media != null) MapOverMusic else MapAlone,
                 )
             }
-            if (running) ShockRing(portal.value, modifier = Modifier.fillMaxSize()) else PortalRim(portal.value, modifier = Modifier.fillMaxSize())
+            if (running) ShockRing(portal.value, modifier = Modifier.fillMaxSize())
         }
-        // The flight's words, under the globe at the tunnel's heart, through the airlock too; they
-        // rush past the viewer as the jump begins.
+        // The flight's words, under the globe at the tunnel's heart; "Position verrouillée" a beat,
+        // then they rush past the viewer as the jump begins.
         AnimatedVisibility(
             visible = phase == FlightPhase.SEARCH || (phase == FlightPhase.ARRIVE && !diving && !landed),
             enter = fadeIn(tween(700, delayMillis = 900)) +
@@ -508,13 +507,13 @@ fun DriveScreen(
                                 EnterTransition.None
                                     .togetherWith(fadeOut(tween(450)) + scaleOut(tween(600, easing = FastOutSlowInEasing), targetScale = 2.4f))
                             initialState == HomeView.FLIGHT && targetState == HomeView.DRIVE ->
-                                (fadeIn(tween(400, delayMillis = 100)) + scaleIn(spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessLow), initialScale = 1.5f))
+                                (fadeIn(tween(250, delayMillis = 50)) + scaleIn(spring(dampingRatio = 0.65f, stiffness = Spring.StiffnessMediumLow), initialScale = 1.5f))
                                     .togetherWith(fadeOut(tween(300)) + scaleOut(tween(350), targetScale = 2.6f))
-                            // Back from a drive: the speed is drawn into the heart with the scene; home
-                            // comes out of the distance once the Earth has fallen away.
+                            // Back from a drive: the speed steps back with the scene; home comes out of
+                            // the distance as the Earth drifts away.
                             initialState == HomeView.DRIVE && targetState == HomeView.IDLE ->
-                                (fadeIn(tween(700, delayMillis = 1_700)) + scaleIn(tween(1_300, delayMillis = 1_550, easing = EaseOutBack), initialScale = 0.35f))
-                                    .togetherWith(fadeOut(tween(260)) + scaleOut(tween(420, easing = FastOutLinearInEasing), targetScale = 0.3f))
+                                (fadeIn(tween(500, delayMillis = 800)) + scaleIn(tween(800, delayMillis = 700, easing = EaseOutBack), initialScale = 0.6f))
+                                    .togetherWith(fadeOut(tween(250)) + scaleOut(tween(400), targetScale = 0.85f))
                             // A flight cut short: home comes out of the distance as the stars slow down.
                             targetState == HomeView.IDLE ->
                                 (fadeIn(tween(700, delayMillis = 350)) + scaleIn(spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessVeryLow), initialScale = 0.55f))
@@ -545,7 +544,7 @@ fun DriveScreen(
             // After the arrival, the rest settles in one after the other, from the speed down to the music.
             AnimatedVisibility(
                 visible = running && landed && media != null,
-                enter = fadeIn(tween(600, delayMillis = 500)) + slideInVertically(tween(700, delayMillis = 500, easing = FastOutSlowInEasing)) { it / 2 },
+                enter = fadeIn(tween(400, delayMillis = 200)) + slideInVertically(spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow)) { it / 2 },
                 exit = DriveOut,
             ) {
                 media?.let {
@@ -567,7 +566,7 @@ fun DriveScreen(
             }
             AnimatedVisibility(
                 visible = running && landed && navApps.isNotEmpty() && !cruising,
-                enter = fadeIn(tween(600, delayMillis = 750)) + slideInVertically(tween(700, delayMillis = 750, easing = FastOutSlowInEasing)) { it / 2 },
+                enter = fadeIn(tween(400, delayMillis = 350)) + slideInVertically(spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow)) { it / 2 },
                 exit = DriveOut,
             ) {
                 NavApps(navApps, onOpenNavApp)
