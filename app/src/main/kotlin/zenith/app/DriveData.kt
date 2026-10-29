@@ -35,6 +35,8 @@ data class DataStatus(
     val radarsUpdatedMs: Long? = null,
     val tilesLoaded: Int = 0,
     val loading: Boolean = false,
+    /** The road tiles around the car's latest position are in (or known unavailable): the take-off may land. */
+    val roadsReady: Boolean = false,
     /** Radar list unavailable (no cache and no network). */
     val radarError: String? = null,
     /** Road tiles around the car unavailable; cleared once they load. */
@@ -58,6 +60,9 @@ class DriveData(context: Context, private val scope: CoroutineScope) {
     private val tiles = ConcurrentHashMap<RoadTiles.Key, List<RoadSegment>>()
     private val pending = ConcurrentHashMap.newKeySet<RoadTiles.Key>()
     private val failedAtMs = ConcurrentHashMap<RoadTiles.Key, Long>()
+    /** The tiles around the latest position asked for. */
+    @Volatile
+    private var lastWanted: List<RoadTiles.Key> = emptyList()
     private val mutex = Mutex()
     /** Published tiles and their sizes (manifest); null when the manifest could not be read. */
     private var availableTiles: Map<String, Long?>? = null
@@ -83,9 +88,15 @@ class DriveData(context: Context, private val scope: CoroutineScope) {
     /** Makes sure the road tiles around [p] are loaded; cheap to call on every fix. */
     fun ensureTiles(p: LatLon) {
         val wanted = RoadTiles.keysAround(p, 5_000.0)
+        lastWanted = wanted
         val now = System.currentTimeMillis()
         val missing = wanted.filter { !tiles.containsKey(it) && it !in pending && now - (failedAtMs[it] ?: 0L) > RETRY_MS }
-        if (missing.isEmpty()) return
+        if (missing.isEmpty()) {
+            val ready = settled(wanted)
+            if (_status.value.roadsReady != ready) _status.update { it.copy(roadsReady = ready) }
+            return
+        }
+        _status.update { it.copy(roadsReady = false) }
         pending += missing
         scope.launch(Dispatchers.IO) {
             mutex.withLock {
@@ -120,10 +131,13 @@ class DriveData(context: Context, private val scope: CoroutineScope) {
                 tiles.keys.retainAll(keep)
                 network = RoadNetwork(tiles.values.flatten().distinctBy { it.id })
                 // A tile that failed once and came back (network back) no longer shows an error.
-                _status.update { it.copy(tilesLoaded = tiles.size, loading = false, tileError = failed) }
+                _status.update { it.copy(tilesLoaded = tiles.size, loading = false, tileError = failed, roadsReady = settled(lastWanted)) }
             }
         }
     }
+
+    /** Each tile is loaded, or failed and waits for its retry (offline): nothing more to wait for. */
+    private fun settled(keys: List<RoadTiles.Key>) = keys.all { (tiles.containsKey(it) || failedAtMs.containsKey(it)) && it !in pending }
 
     private fun loadManifest(): Map<String, Long?>? {
         if (!manifestFile.exists() || age(manifestFile) > DAY_MS) {

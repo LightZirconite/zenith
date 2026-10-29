@@ -152,6 +152,9 @@ private const val MUSIC_AWAY_MAX_MS = 12_000L
 /** A position without a trusted speed (indoors) still lands after this wait. */
 private const val WEAK_FIX_WAIT_MS = 15_000L
 
+/** Position locked, the roads around it still loading (slow network): the flight lands anyway after this. */
+private const val ROADS_WAIT_MS = 20_000L
+
 /** Home's buttons rise back into place after a flight cut short, and sink away at Start. */
 private val BottomIn = fadeIn(tween(500, delayMillis = 400)) +
     slideInVertically(spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessLow)) { it }
@@ -287,9 +290,19 @@ fun DriveScreen(
         }
     }
     val fixGood = hasFix && (snapshot?.speedKmh != null || weakFixWaited || demo)
+    // Locked on: the flight stays in the tunnel while the roads around load, so the map lands
+    // whole (speed limits and radars on the road); offline, it does not wait forever.
+    var roadsWaited by remember(running) { mutableStateOf(false) }
+    LaunchedEffect(running, fixGood) {
+        if (running && fixGood) {
+            delay(ROADS_WAIT_MS)
+            roadsWaited = true
+        }
+    }
+    val roadsOk = demo || data.roadsReady || roadsWaited
     val phase = when {
         !running -> FlightPhase.IDLE
-        landed || (fixGood && minFlightDone) -> FlightPhase.ARRIVE
+        landed || (fixGood && roadsOk && minFlightDone) -> FlightPhase.ARRIVE
         else -> FlightPhase.SEARCH
     }
     // The demo has no GPS: its satellites lock by themselves during the flight.
@@ -525,6 +538,7 @@ fun DriveScreen(
                     demo,
                     Modifier.align(Alignment.TopCenter).padding(top = maxHeight * HEART_Y + globe * 1.75f + 16.dp),
                     locked = phase == FlightPhase.ARRIVE,
+                    roadsLoading = fixGood && !roadsOk,
                 )
             }
         }

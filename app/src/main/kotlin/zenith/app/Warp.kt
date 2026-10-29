@@ -355,11 +355,13 @@ fun ShockRing(progress: Float, modifier: Modifier = Modifier) {
  * there. In the demo, [gps] is simulated.
  */
 @Composable
-fun FlightCaption(gps: GpsInfo, demo: Boolean, modifier: Modifier = Modifier, locked: Boolean = false) {
+fun FlightCaption(gps: GpsInfo, demo: Boolean, modifier: Modifier = Modifier, locked: Boolean = false, roadsLoading: Boolean = false) {
     val ready = locked || gps.used >= 4
     val halo = TextStyle(shadow = Shadow(Color.Black, blurRadius = 18f))
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         val status = when {
+            // Position found, the roads around it still coming: the tunnel waits for them.
+            roadsLoading && !locked -> "Chargement des routes…"
             ready -> "Position verrouillée"
             gps.used > 0 -> "Triangulation · ${gps.used} sur 4"
             gps.visible > 0 -> "Contact des satellites…"
@@ -373,11 +375,11 @@ fun FlightCaption(gps: GpsInfo, demo: Boolean, modifier: Modifier = Modifier, lo
             },
             label = "flightStatus",
         ) { text ->
-            Text(text, color = if (ready) Green else Color.White, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, style = halo)
+            Text(text, color = if (ready && !(roadsLoading && !locked)) Green else Color.White, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, style = halo)
         }
         Spacer(Modifier.height(14.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            for (i in 0 until 4) LockLight(on = locked || i < gps.used, ready = ready)
+            for (i in 0 until 4) LockLight(on = locked || roadsLoading || i < gps.used, ready = ready)
         }
         Spacer(Modifier.height(12.dp))
         Text(
