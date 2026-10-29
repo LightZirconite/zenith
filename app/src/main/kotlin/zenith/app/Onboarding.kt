@@ -1,6 +1,7 @@
 package zenith.app
 
 import android.Manifest
+import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -78,25 +79,59 @@ data class Permissions(
     val motionAvailable: Boolean = false,
     val activity: Boolean = false,
     val backgroundLocation: Boolean = false,
+    /** "Display over other apps": lets an automatic start open the small window at once. */
+    val overlay: Boolean = false,
+    /** The device lets the user grant it (not on Android Go, nor where the screen is missing). */
+    val overlayAvailable: Boolean = false,
 ) {
     val motion: Boolean get() = motionAvailable && activity && backgroundLocation
 
+    /** The small window opens by itself only after an automatic start (riding, or a paired car). */
+    fun overlayNeeded(motionWanted: Boolean): Boolean = overlayAvailable && ((motionAvailable && motionWanted) || CarLink.supported)
+
     /** Permissions still missing; the motion start counts only when wanted and possible here. */
     fun missing(motionWanted: Boolean): Int =
-        listOf(location, notifications, installs, battery, media, !(motionAvailable && motionWanted) || motion).count { !it }
+        listOf(
+            location, notifications, installs, battery, media,
+            !(motionAvailable && motionWanted) || motion,
+            !overlayNeeded(motionWanted) || overlay,
+        ).count { !it }
 
     companion object {
-        fun read(context: Context) = Permissions(
-            location = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
-                PackageManager.PERMISSION_GRANTED,
-            notifications = NotificationManagerCompat.from(context).areNotificationsEnabled(),
-            installs = context.packageManager.canRequestPackageInstalls(),
-            battery = context.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(context.packageName),
-            media = NowPlaying.allowed(context),
-            motionAvailable = Motion.available(context),
-            activity = Motion.hasActivity(context),
-            backgroundLocation = Motion.hasBackgroundLocation(context),
-        )
+        /**
+         * A setting the device has no screen for (car head units, Android Go) cannot be granted:
+         * it counts as done, or the welcome screen would never let the driver through.
+         */
+        fun read(context: Context): Permissions {
+            val lowRam = runCatching { context.getSystemService(ActivityManager::class.java).isLowRamDevice }.getOrDefault(false)
+            return Permissions(
+                location = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
+                    PackageManager.PERMISSION_GRANTED,
+                notifications = NotificationManagerCompat.from(context).areNotificationsEnabled(),
+                installs = context.packageManager.canRequestPackageInstalls() || !canOpen(context, installsIntent(context)),
+                battery = context.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(context.packageName) ||
+                    !canOpen(context, batteryIntent(context)),
+                media = NowPlaying.allowed(context) || lowRam || !canOpen(context, NowPlaying.accessIntent(context)),
+                motionAvailable = Motion.available(context),
+                activity = Motion.hasActivity(context),
+                backgroundLocation = Motion.hasBackgroundLocation(context),
+                overlay = canOverlay(context),
+                overlayAvailable = !lowRam && canOpen(context, overlayIntent(context)),
+            )
+        }
+
+        /**
+         * Whether the device has the settings screen. Android 11+ hides other apps from this check
+         * (package visibility) and every phone has these screens: only older systems are asked.
+         */
+        private fun canOpen(context: Context, intent: Intent): Boolean =
+            Build.VERSION.SDK_INT >= 30 || runCatching { intent.resolveActivity(context.packageManager) != null }.getOrDefault(true)
+
+        fun canOverlay(context: Context): Boolean = runCatching { Settings.canDrawOverlays(context) }.getOrDefault(false)
+
+        /** Android's "display over other apps" switch (its list of apps on Android 11+). */
+        fun overlayIntent(context: Context) =
+            Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
 
         fun locationPermissions() = arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
 
@@ -136,6 +171,7 @@ fun Onboarding(
     motionWanted: Boolean = true,
     onMotion: () -> Unit = {},
     onMedia: () -> Unit = {},
+    onOverlay: () -> Unit = {},
     /** Where the notification access stands on Android 13+: 0 activate, 1 unlock (blocked), 2 activate again. */
     mediaStep: Int = 0,
     /** The big button: the next missing permission, one after the other. */
@@ -143,7 +179,8 @@ fun Onboarding(
 ) {
     val missing = permissions.missing(motionWanted)
     val showMotion = permissions.motionAvailable && motionWanted
-    val total = if (showMotion) 6 else 5
+    val showOverlay = permissions.overlayNeeded(motionWanted)
+    val total = 5 + (if (showMotion) 1 else 0) + (if (showOverlay) 1 else 0)
     LargeTitlePage(
         title = if (returning) "Autorisations" else "Bienvenue",
         bottom = { GoButton(missing, onClick = if (missing == 0) onDone else onNext) },
@@ -227,6 +264,17 @@ fun Onboarding(
             action = if (unlock) "Débloquer" else "Activer",
             modifier = Modifier.cascade(order++),
         )
+        if (showOverlay) {
+            Step(
+                title = "Petite fenêtre automatique",
+                text = "Quand Zenith démarre seul en voiture, sa petite fenêtre s'ouvre aussitôt par-dessus tes applis. " +
+                    "Android appelle cela « superposition » : active Zenith puis reviens.",
+                granted = permissions.overlay,
+                onClick = onOverlay,
+                action = "Activer",
+                modifier = Modifier.cascade(order++),
+            )
+        }
         Spacer(Modifier.height(12.dp))
     }
 }

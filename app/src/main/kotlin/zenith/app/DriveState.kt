@@ -34,6 +34,7 @@ object DriveState {
     private val _demo = MutableStateFlow(false)
     private val _origin = MutableStateFlow(DriveOrigin.HAND)
     private val _musicChoice = MutableStateFlow<Boolean?>(null)
+    private val _liveSpeed = MutableStateFlow<Int?>(null)
     @Volatile
     private var musicChoiceAtMs = 0L
 
@@ -47,6 +48,12 @@ object DriveState {
 
     /** Control itineraries around the car, for the map. */
     val nearbyZones: StateFlow<List<ControlZone>> = _nearbyZones
+
+    /**
+     * Speed straight from each GPS fix, as soon as it arrives (before the road horizon runs): what
+     * the big number shows. Null before the first usable fix, or in the demo (its snapshot has it).
+     */
+    val liveSpeed: StateFlow<Int?> = _liveSpeed
 
     /** The running drive is the hidden simulated one. */
     val demo: StateFlow<Boolean> = _demo
@@ -72,6 +79,7 @@ object DriveState {
         _demo.value = origin == DriveOrigin.DEMO
         _origin.value = origin
         _musicChoice.value = null
+        _liveSpeed.value = null
         _running.value = true
     }
 
@@ -79,6 +87,10 @@ object DriveState {
         _snapshot.value = snapshot
         _musicChoice.update { Cockpit.keepChoice(it, snapshot.speedKmh, System.currentTimeMillis() - musicChoiceAtMs) }
         _gps.update { it.copy(accuracyM = snapshot.gpsAccuracyM, lastFixMs = System.currentTimeMillis()) }
+    }
+
+    internal fun liveSpeed(kmh: Int?) {
+        _liveSpeed.value = kmh
     }
 
     internal fun satellites(used: Int, visible: Int) = _gps.update { it.copy(used = used, visible = visible) }
@@ -95,6 +107,7 @@ object DriveState {
     internal fun stopped() {
         _running.value = false
         _snapshot.value = null
+        _liveSpeed.value = null
         _demo.value = false
         _origin.value = DriveOrigin.HAND
         _nearbyRadars.value = emptyList()

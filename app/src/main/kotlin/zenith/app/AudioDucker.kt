@@ -81,6 +81,14 @@ class AudioDucker(context: Context) {
         audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { it.type in BLUETOOTH }
     }.getOrDefault(false)
 
+    /**
+     * The Bluetooth media output (car, headphones) when one is connected, null otherwise. Each of
+     * Zenith's sounds is pinned to it, so it plays there only, never on the phone's speaker too.
+     */
+    fun bluetoothMedia(): AudioDeviceInfo? = runCatching {
+        audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstOrNull { it.type in BLUETOOTH_MEDIA }
+    }.getOrNull()
+
     @Synchronized
     fun shutdown() {
         handler.removeCallbacksAndMessages(null)
@@ -130,6 +138,12 @@ class AudioDucker(context: Context) {
 
         /** Silence played before a sound on Bluetooth. */
         const val BLUETOOTH_LEAD_MS = 300
+
+        private val BLUETOOTH_MEDIA = setOf(
+            AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+            AudioDeviceInfo.TYPE_BLE_HEADSET,
+            AudioDeviceInfo.TYPE_BLE_SPEAKER,
+        )
 
         private val BLUETOOTH = setOf(
             AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,

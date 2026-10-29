@@ -50,6 +50,8 @@ class TonePlayer(private val ducker: AudioDucker) {
         runCatching {
             track.stop()
             track.reloadStaticData()
+            // Pinned to the car's Bluetooth when there is one (null: Android's usual route).
+            track.preferredDevice = if (bluetooth) ducker.bluetoothMedia() else null
             track.play()
         }
     }

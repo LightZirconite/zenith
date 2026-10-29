@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -78,7 +79,8 @@ fun PipScreen(
         label = "pipMusic",
     )
     val limit = s?.limitKmh
-    val speed = s?.speedKmh
+    val live by DriveState.liveSpeed.collectAsState()
+    val speed = live ?: s?.speedKmh
     val danger = alert?.overLimit == true
     val digitsColor by animateColorAsState(speedColor(speed, limit), label = "pipSpeed")
     val pulse = rememberInfiniteTransition(label = "pipPulse")

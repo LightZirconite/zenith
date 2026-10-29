@@ -41,6 +41,7 @@ import zenith.core.OverspeedLevel
 import zenith.core.ParkDetector
 import zenith.core.RadarIndex
 import zenith.core.RainDetector
+import zenith.core.SpeedStabilizer
 import zenith.core.Weather
 import java.net.HttpURLConnection
 import java.net.URL
@@ -83,6 +84,9 @@ class DriveService : Service(), LocationListener {
     private var lastNearbyMs = 0L
     /** GPS fixes handed to the drive thread and not yet taken up. */
     private val queuedFixes = AtomicInteger()
+    /** Speed for the big number, from each fix as it comes (main thread). */
+    private val liveSpeed = SpeedStabilizer()
+    private var lastPipelineFixMs = 0L
     /** Wall time of a vehicle exit received while still fast; 0 when none is pending. */
     @Volatile
     private var vehicleLeftAtMs = 0L
@@ -149,6 +153,8 @@ class DriveService : Service(), LocationListener {
         DriveState.started(origin)
         NowPlaying.start(this)
         if (demo) startDemo() else startLive()
+        // Started by itself (car, riding): the small window opens at once over whatever is in front.
+        if (origin == DriveOrigin.MOTION || origin == DriveOrigin.CAR) MainActivity.openSmallWindow(this)
         scope.launch { UserSettings.state.collect { session.profile = it.profile } }
         return if (demo) START_NOT_STICKY else START_STICKY
     }
@@ -178,7 +184,8 @@ class DriveService : Service(), LocationListener {
                 .firstNotNullOfOrNull { manager.getLastKnownLocation(it) }
         }.getOrNull()?.let { live.ensureTiles(LatLon(it.latitude, it.longitude)) }
         gpsStatus = GpsStatusWatcher(manager, DriveState::satellites).also { it.start() }
-        manager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1_000L, 0f, this, Looper.getMainLooper())
+        // As fast as the receiver goes (1 Hz on most phones, more on some): the speed follows the car.
+        manager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 0L, 0f, this, Looper.getMainLooper())
         // Tunnel: no fix for 2.5 s → the car keeps moving along the road (DrivingSession.coast).
         scope.launch(drive) {
             while (true) {
@@ -265,6 +272,13 @@ class DriveService : Service(), LocationListener {
 
     override fun onLocationChanged(location: Location) {
         val fix = location.toFix()
+        // The big number first, from this very fix: no wait for the road horizon on the drive thread.
+        DriveState.liveSpeed(liveSpeed.update(fix, (DriveState.snapshot.value?.speedKmh ?: 0) / 3.6))
+        // The receiver may give several fixes a second: the rest of the drive (map matching, alerts,
+        // GPX, parking) keeps its pace of about one a second, which its rules are tuned for.
+        // A clock that jumped back (receiver reset) restarts the pace rather than blocking it.
+        if (fix.timeMs - lastPipelineFixMs in 0 until PIPELINE_EVERY_MS) return
+        lastPipelineFixMs = fix.timeMs
         data?.ensureTiles(fix.position)
         val wallMs = System.currentTimeMillis()
         queuedFixes.incrementAndGet()
@@ -478,6 +492,8 @@ class DriveService : Service(), LocationListener {
         private const val ACTION_DEMO = "zenith.app.DEMO"
         private const val ACTION_AUTO = "zenith.app.AUTO"
         private const val ACTION_MOTION = "zenith.app.MOTION"
+        /** The drive's own pace through the pipeline, whatever the receiver's rate. */
+        private const val PIPELINE_EVERY_MS = 900L
         private const val ACTION_MOTION_EXIT = "zenith.app.MOTION_EXIT"
         private const val ACTION_RESHOW = "zenith.app.RESHOW"
         private const val WEATHER_EVERY_MS = 10 * 60_000L

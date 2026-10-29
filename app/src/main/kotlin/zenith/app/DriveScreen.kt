@@ -59,6 +59,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -825,7 +826,9 @@ private fun NavApps(apps: List<NavApp>, onOpen: (NavApp) -> Unit) {
 @Composable
 private fun Dashboard(s: DriveSnapshot?, modifier: Modifier = Modifier, compact: Boolean = false) {
     val limit = s?.limitKmh
-    val speed = s?.speedKmh
+    // Straight from each GPS fix, ahead of the rest of the drive (the demo has only its snapshot).
+    val live by DriveState.liveSpeed.collectAsState()
+    val speed = live ?: s?.speedKmh
     // Short roll between two fixes: the number glides but keeps up with the car.
     val animatedSpeed by animateIntAsState(speed ?: 0, tween(250, easing = LinearOutSlowInEasing), label = "speed")
     val color by animateColorAsState(speedColor(speed, limit), label = "speedColor")

@@ -574,6 +574,7 @@ class WarpSound(context: Context) {
         runCatching {
             h.setVolume(0.55f)
             if (h.playState != AudioTrack.PLAYSTATE_PLAYING) {
+                h.preferredDevice = music.bluetoothMedia()
                 h.reloadStaticData()
                 h.setLoopPoints(0, HUM_SAMPLES, -1)
                 h.play()
@@ -611,6 +612,7 @@ class WarpSound(context: Context) {
             momentKind = kind
             momentLagNs = null
             momentStartNs = System.nanoTime()
+            track.preferredDevice = music.bluetoothMedia()
             track.play()
         }
     }
@@ -620,6 +622,7 @@ class WarpSound(context: Context) {
         runCatching {
             t.stop()
             t.reloadStaticData()
+            t.preferredDevice = music.bluetoothMedia()
             t.play()
         }
     }

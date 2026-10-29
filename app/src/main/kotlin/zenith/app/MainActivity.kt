@@ -2,6 +2,7 @@ package zenith.app
 
 import android.Manifest
 import android.app.PictureInPictureParams
+import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
 import android.net.Uri
@@ -63,12 +64,16 @@ class MainActivity : ComponentActivity() {
     /** Driving: leaving Zenith (for Waze, Maps…) shrinks it into a picture-in-picture window. */
     private var pipWanted = false
 
+    /** Opened by [openSmallWindow]: the activity goes into its small window once resumed. */
+    private var smallWindowAsked = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(SystemBarStyle.dark(android.graphics.Color.TRANSPARENT), SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
         super.onCreate(savedInstanceState)
         val prefs = getSharedPreferences("zenith", MODE_PRIVATE)
         UserSettings.init(this)
         UiSound.init(this)
+        inPip.value = isInPictureInPictureMode
         handleIntent(intent)
         setContent {
             val context = LocalContext.current
@@ -166,6 +171,7 @@ class MainActivity : ComponentActivity() {
                     !permissions.installs -> openSettings(Permissions.installsIntent(context))
                     permissions.motionAvailable && settings.motionStart && !permissions.motion -> onMotion()
                     !permissions.media -> onMedia()
+                    permissions.overlayNeeded(settings.motionStart) && !permissions.overlay -> openSettings(Permissions.overlayIntent(context))
                     else -> Unit
                 }
             }
@@ -258,6 +264,7 @@ class MainActivity : ComponentActivity() {
                     onBattery = { openSettings(Permissions.batteryIntent(context)) },
                     onMotion = onMotion,
                     onMedia = onMedia,
+                    onOverlay = { openSettings(Permissions.overlayIntent(context)) },
                     mediaStep = mediaStep,
                     onNext = onNext,
                     onDone = {
@@ -309,11 +316,29 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIntent(intent: Intent?) {
         if (intent?.action == ACTION_START_DRIVE) startRequested.value = true
+        if (intent?.action == ACTION_OPEN_SMALL_WINDOW) smallWindowAsked = true
+    }
+
+    override fun onStart() {
+        super.onStart()
+        visible = true
+    }
+
+    override fun onStop() {
+        super.onStop()
+        visible = false
     }
 
     override fun onResume() {
         super.onResume()
         resumes.value++
+        // Opened by an automatic start: straight into the small window, over what was in front.
+        if (smallWindowAsked) {
+            smallWindowAsked = false
+            if (DriveState.running.value && !isInPictureInPictureMode) {
+                window.decorView.post { runCatching { enterPictureInPictureMode(pipParams()) } }
+            }
+        }
     }
 
     override fun onUserLeaveHint() {
@@ -372,7 +397,7 @@ class MainActivity : ComponentActivity() {
 
     private fun openSettings(intent: Intent) {
         runCatching { startActivity(intent) }
-            .onFailure { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) }
+            .onFailure { runCatching { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) } }
     }
 
     /**
@@ -400,6 +425,26 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val ACTION_START_DRIVE = "zenith.app.START_DRIVE"
+        private const val ACTION_OPEN_SMALL_WINDOW = "zenith.app.OPEN_SMALL_WINDOW"
+
+        /** An activity of Zenith is on screen (full or in its small window). */
+        @Volatile
+        private var visible = false
+
+        /**
+         * A drive started by itself (riding, car connected): Zenith opens straight into its small
+         * window over what is in front. Android lets an app open a window from the background only
+         * with "display over other apps" ([Permissions.overlay]); without it, the drive runs as before.
+         */
+        fun openSmallWindow(context: Context) {
+            if (visible || !Permissions.canOverlay(context)) return
+            runCatching {
+                context.startActivity(
+                    Intent(context, MainActivity::class.java).setAction(ACTION_OPEN_SMALL_WINDOW)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }.onFailure { Log.w("Zenith", "small window", it) }
+        }
         private const val KEY_ONBOARDED = "onboarded"
         private const val KEY_MEDIA_STEP = "media_step"
     }
