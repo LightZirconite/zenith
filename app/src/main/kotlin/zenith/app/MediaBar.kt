@@ -188,6 +188,8 @@ fun MediaBar(
     val view = LocalView.current
     val next by rememberUpdatedState(onNext)
     val previous by rememberUpdatedState(onPrevious)
+    // Spotify through its Web API without Premium: no command works, so no swipe either.
+    val canSwipe by rememberUpdatedState(media.canControl)
     val swipe = remember { Animatable(0f) }
     val threshold = with(LocalDensity.current) { SWIPE_THRESHOLD.toPx() }
     BoxWithConstraints(
@@ -215,6 +217,7 @@ fun MediaBar(
                     },
                     onDragCancel = { settle() },
                 ) { change, drag ->
+                    if (!canSwipe) return@detectDragGestures
                     change.consume()
                     drift += abs(drag.y)
                     // Resistance: the strip moves slower than the finger.
@@ -280,9 +283,10 @@ fun MediaBar(
             }
             val like = media.like
             if (like != null && roomForLike) HeartButton(like.liked, onLike)
-            if (media.video) SeekButton("−10", "Reculer de 10 secondes") { onSeek(-10_000) } else GlyphButton(Glyph.PREVIOUS, "Précédent", onPrevious)
-            PlayButton(media.playing, onPlayPause)
-            if (media.video) SeekButton("+10", "Avancer de 10 secondes") { onSeek(10_000) } else GlyphButton(Glyph.NEXT, "Suivant", onNext)
+            val control = media.canControl
+            if (media.video) SeekButton("−10", "Reculer de 10 secondes") { onSeek(-10_000) } else GlyphButton(Glyph.PREVIOUS, "Précédent", control, onPrevious)
+            PlayButton(media.playing, control, onPlayPause)
+            if (media.video) SeekButton("+10", "Avancer de 10 secondes") { onSeek(10_000) } else GlyphButton(Glyph.NEXT, "Suivant", control, onNext)
         }
         media.progress?.let { ProgressLine(it, media.playing, Modifier.align(Alignment.BottomStart)) }
     }
@@ -307,11 +311,12 @@ private fun ProgressLine(progress: PlaybackProgress, playing: Boolean, modifier:
     )
 }
 
-/** Big touch target, small drawn glyph: no icon library needed. */
+/** Big touch target, small drawn glyph: no icon library needed. Dimmed when the player takes no command. */
 @Composable
-private fun GlyphButton(glyph: Glyph, label: String, onClick: () -> Unit) {
+private fun GlyphButton(glyph: Glyph, label: String, enabled: Boolean, onClick: () -> Unit) {
     Box(
-        Modifier.size(44.dp).tap(shape = CircleShape, lift = 1.15f, onClick = onClick).clip(CircleShape).semantics { contentDescription = label },
+        Modifier.size(44.dp).tap(enabled = enabled, shape = CircleShape, lift = 1.15f, onClick = onClick).clip(CircleShape)
+            .graphicsLayer { alpha = if (enabled) 1f else 0.35f }.semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {
         Canvas(Modifier.size(15.dp)) { drawGlyph(glyph, Color.White) }
@@ -331,12 +336,23 @@ private fun SeekButton(text: String, label: String, onClick: () -> Unit) {
     }
 }
 
-/** Play / pause, the main button: a white disc; the glyph turns into the other with a little spin. */
+/**
+ * Play / pause, the main button: a white disc; the glyph turns into the other with a little spin.
+ * Dimmed when the player takes no command.
+ */
 @Composable
-private fun PlayButton(playing: Boolean, onClick: () -> Unit) {
+private fun PlayButton(playing: Boolean, enabled: Boolean, onClick: () -> Unit) {
     Box(
         Modifier.size(48.dp)
-            .tap(shape = CircleShape, sound = if (playing) UiSound.Kind.PAUSE else UiSound.Kind.PLAY, lift = 1.12f, glow = PressShade, onClick = onClick)
+            .tap(
+                enabled = enabled,
+                shape = CircleShape,
+                sound = if (playing) UiSound.Kind.PAUSE else UiSound.Kind.PLAY,
+                lift = 1.12f,
+                glow = PressShade,
+                onClick = onClick,
+            )
+            .graphicsLayer { alpha = if (enabled) 1f else 0.35f }
             .clip(CircleShape).padding(3.dp).background(Color.White, CircleShape)
             .semantics { contentDescription = if (playing) "Pause" else "Lecture" },
         contentAlignment = Alignment.Center,

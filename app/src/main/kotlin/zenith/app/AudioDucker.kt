@@ -7,14 +7,18 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
+import android.os.Build
 import android.os.SystemClock
+import android.provider.Settings
 
 /**
  * Makes room for Zenith's sounds, like a navigation app. The music ducks under the beeps and the
  * voice: Android slides it down and back up smoothly, a little after the last sound so close alerts
  * do not make it pump. A voice may pause it instead (setting): the music slides down first, then
  * stops, and plays on ducked if beeps go on once the voice is done; beeps alone never pause it.
- * One focus owner for the tones and the voice, so one never releases the other's.
+ * One focus owner for the tones and the voice, so one never releases the other's. Spotify playing
+ * on another device (car, speaker), out of the focus's reach, is lowered and put back at the same
+ * moments through the driver's account ([SpotifyPlayer.duckRemote]).
  */
 class AudioDucker(context: Context) {
     private val audio = context.getSystemService(AudioManager::class.java)
@@ -32,6 +36,14 @@ class AudioDucker(context: Context) {
     private var pausers = 0
     private var held: AudioFocusRequest? = null
     private var duckedAtMs = 0L
+    /** Spotify on another device was asked to go down: it comes back with the focus. */
+    private var remoteDucked = false
+
+    init {
+        // How Spotify may name this phone, so it is never lowered twice (Android ducks it already).
+        val deviceName = runCatching { Settings.Global.getString(context.contentResolver, Settings.Global.DEVICE_NAME) }.getOrNull()
+        SpotifyPlayer.phoneNames = listOfNotNull(Build.MODEL, "${Build.MANUFACTURER} ${Build.MODEL}", deviceName).distinct()
+    }
 
     /** [pause]: the music must stop rather than duck (spoken alerts, setting; the start of a drive). */
     @Synchronized
@@ -39,6 +51,10 @@ class AudioDucker(context: Context) {
         holders++
         handler.removeCallbacks(abandon)
         if (held == null) request(duckFocus)
+        if (!remoteDucked) {
+            remoteDucked = true
+            SpotifyPlayer.duckRemote()
+        }
         if (!pause) return
         pausers++
         handler.removeCallbacks(toDuck)
@@ -102,6 +118,10 @@ class AudioDucker(context: Context) {
         if (holders == 0) {
             held?.let(audio::abandonAudioFocusRequest)
             held = null
+            if (remoteDucked) {
+                remoteDucked = false
+                SpotifyPlayer.restoreRemote()
+            }
         }
     }
 

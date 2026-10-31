@@ -26,6 +26,7 @@ import zenith.core.RoadNetwork
 import zenith.core.RoadSegment
 import zenith.core.RoadTiles
 import zenith.core.SpeedStabilizer
+import zenith.core.SpotifyDuck
 import zenith.core.SpotifyTrack
 import zenith.core.Weather
 
@@ -199,6 +200,22 @@ object Bridge {
         runCatching {
             PlayerChoice.pick(ids.indices.map { PlayerSession(ids[it], packages[it], playing[it], hasTitle[it]) }, current)?.id
         }.getOrNull()
+
+    /** Spotify playing on another device (car, speaker) to lower while Zenith speaks; [premium] -1 unknown. */
+    fun spotifyShouldDuck(
+        deviceType: String?,
+        deviceName: String?,
+        supportsVolume: Boolean,
+        playing: Boolean,
+        premium: Int,
+        phoneNames: List<String>,
+    ): Boolean = SpotifyDuck.shouldDuck(deviceType, deviceName, supportsVolume, playing, premium.toChoice(), phoneNames)
+
+    fun spotifyDuckedVolume(current: Int): Int = SpotifyDuck.duckedVolume(current)
+
+    /** Volume to put back, -1 for none; [now] -1 unknown. */
+    fun spotifyRestoreVolume(before: Int, duckedTo: Int, now: Int): Int =
+        SpotifyDuck.restoreVolume(before, duckedTo, now.takeIf { it >= 0 }) ?: -1
 
     /** Canvas services to ask in order for a Spotify track. */
     fun canvasUrls(trackId: String): List<String> = CanvasService.entries.map { it.url(trackId) }

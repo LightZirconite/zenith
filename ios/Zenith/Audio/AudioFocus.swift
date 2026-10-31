@@ -36,7 +36,11 @@ final class AudioFocus {
     func acquire(pause: Bool = false) {
         holders += 1
         cancel(&abandon)
-        if held == .none { activate(.duck) }
+        if held == .none {
+            activate(.duck)
+            // Spotify playing on the car or a speaker: lowered there too.
+            SpotifyRemoteDuck.duck()
+        }
         guard pause else { return }
         pausers += 1
         cancel(&toDuck)
@@ -171,12 +175,14 @@ final class AudioFocus {
         do {
             try session.setActive(false, options: .notifyOthersOnDeactivation)
             held = .none
+            SpotifyRemoteDuck.restore()
         } catch {
             // Something else still holds the output (a video): tried again in a moment.
             if tries < 130 {
                 abandon = schedule(after: 0.4) { [weak self] in self?.releaseNow(tries: tries + 1) }
             } else {
                 held = .none
+                SpotifyRemoteDuck.restore()
             }
         }
     }

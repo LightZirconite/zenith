@@ -26,6 +26,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ZENITH_BUILD_NUMBER: ${{ github.run_number }}
+      # The author's Spotify app, for the Spotify sign-in (empty: the app says it is absent).
+      SPOTIFY_CLIENT_ID: ${{ vars.SPOTIFY_CLIENT_ID }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-java@v5

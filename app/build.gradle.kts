@@ -17,6 +17,9 @@ android {
         versionName = "0.1.$build"
         // MapLibre ships native code: 64-bit ARM only keeps the APK (and each update) small.
         ndk { abiFilters += "arm64-v8a" }
+        // The author's Spotify app (repository variable SPOTIFY_CLIENT_ID, given by the CI); empty: no sign-in.
+        val spotifyClientId = System.getenv("SPOTIFY_CLIENT_ID").orEmpty().filter { it.isLetterOrDigit() }
+        buildConfigField("String", "SPOTIFY_CLIENT_ID", "\"$spotifyClientId\"")
     }
 
     signingConfigs {
@@ -46,6 +49,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     // Android 10 is a real target (a car head unit): any call to a newer API without a version

@@ -1,5 +1,6 @@
 package zenith.app
 
+import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.MutableTransitionState
@@ -58,6 +59,11 @@ fun SettingsScreen(
     onShareTrip: (() -> Unit)? = null,
     mediaAllowed: Boolean = false,
     onAllowMedia: () -> Unit = {},
+    /** Where the notification access stands on Android 13+: 0 activate, 1 unlock (blocked), 2 activate again. */
+    mediaStep: Int = 0,
+    spotify: SpotifyAccount = SpotifyAccount(configured = false),
+    onSpotifyConnect: () -> Unit = {},
+    onSpotifyDisconnect: () -> Unit = {},
     permissions: Permissions? = null,
     onMotionPermission: () -> Unit = {},
     update: UpdateState = UpdateState.Idle,
@@ -129,16 +135,23 @@ fun SettingsScreen(
                     "Le titre en cours (Spotify, YouTube, Deezer…), sa progression et ses commandes s'affichent sous les alertes " +
                         "pendant la conduite. Une touche sur le titre ouvre le lecteur."
                 } else {
-                    "Titre en cours et commandes de Spotify ou de ton lecteur, sous les alertes. Sans compte ni clé. Android appelle " +
-                        "cela « accès aux notifications » : Zenith n'y lit que le lecteur de musique. Si l'option est grisée : " +
-                        "Infos de l'appli Zenith → ⋮ → Autoriser les paramètres restreints."
+                    "Conseillé : titre en cours, Canvas et commandes de ton lecteur (Deezer, YouTube Music, Apple Music…) sous les " +
+                        "alertes. Sans compte ni clé. Android appelle cela « accès aux notifications » : Zenith n'y lit que le lecteur " +
+                        "de musique. Si l'option est grisée : Infos de l'appli Zenith → ⋮ → Autoriser les paramètres restreints. " +
+                        "Avec Spotify, le compte ci-dessous suffit aussi."
                 },
                 done = mediaAllowed,
             )
             if (!mediaAllowed) {
                 Divider()
-                ActionRow("Autoriser l'accès", sound = UiSound.Kind.OPEN, onClick = onAllowMedia)
+                ActionRow(
+                    if (Build.VERSION.SDK_INT >= 33 && mediaStep == 1) "Débloquer (paramètres restreints)" else "Autoriser l'accès",
+                    sound = UiSound.Kind.OPEN,
+                    onClick = onAllowMedia,
+                )
             }
+            Divider()
+            SpotifyRows(spotify, mediaAllowed, onSpotifyConnect, onSpotifyDisconnect)
             Divider()
             ToggleRow(
                 "Canvas",
@@ -335,6 +348,35 @@ private fun CarRow(car: Car, onRemove: (Car) -> Unit) {
                 )
             }
         }
+    }
+}
+
+/**
+ * The Spotify account, read through its Web API: the music card for a Spotify user without the
+ * notification access. Spotify's own session wins when the access is there.
+ */
+@Composable
+private fun SpotifyRows(account: SpotifyAccount, mediaAllowed: Boolean, onConnect: () -> Unit, onDisconnect: () -> Unit) {
+    InfoRow(
+        "Compte Spotify",
+        when {
+            !account.configured -> "Identifiant Spotify absent de cette version."
+            account.connected -> "Connecté : ${account.userName ?: "ton compte"}. " + when {
+                account.premium == false -> "Sans Premium, Spotify ne laisse pas piloter la lecture : précédent, pause et suivant restent grisés."
+                mediaAllowed -> "L'accès aux notifications est là aussi : la carte suit d'abord l'appli Spotify elle-même."
+                else -> "Titre, pochette, Canvas, cœur et commandes (avec Premium) pendant la conduite, sans l'accès aux notifications."
+            }
+            else -> "Sans l'accès aux notifications : connecte ton compte, la carte Musique le lit directement (titre, pochette, " +
+                "Canvas, cœur ; commandes avec Premium). Spotify n'accepte que les comptes ajoutés par l'auteur (5 au plus)."
+        },
+        done = account.connected,
+    )
+    if (!account.configured) return
+    Divider()
+    if (account.connected) {
+        ActionRow("Se déconnecter", color = Destructive, sound = UiSound.Kind.CLOSE, onClick = onDisconnect)
+    } else {
+        ActionRow("Se connecter à Spotify", sound = UiSound.Kind.OPEN, onClick = onConnect)
     }
 }
 

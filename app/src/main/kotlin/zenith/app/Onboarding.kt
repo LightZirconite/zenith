@@ -9,7 +9,9 @@ import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -30,18 +32,24 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -59,6 +67,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -73,7 +82,7 @@ data class Permissions(
     val notifications: Boolean,
     val installs: Boolean,
     val battery: Boolean,
-    /** Notification access, for the music bar (Spotify…). */
+    /** Notification access, for the music bar (Spotify…): advised, not required. */
     val media: Boolean = false,
     /** Automatic start by activity recognition: Play Services present, activity and "all the time" location. */
     val motionAvailable: Boolean = false,
@@ -89,10 +98,14 @@ data class Permissions(
     /** The small window opens by itself only after an automatic start (riding, or a paired car). */
     fun overlayNeeded(motionWanted: Boolean): Boolean = overlayAvailable && ((motionAvailable && motionWanted) || CarLink.supported)
 
-    /** Permissions still missing; the motion start counts only when wanted and possible here. */
+    /**
+     * Required permissions still missing; the motion start counts only when wanted and possible
+     * here. The notification access is not among them: a Spotify account can stand in for it, and
+     * [MusicInvite] asks for one or the other.
+     */
     fun missing(motionWanted: Boolean): Int =
         listOf(
-            location, notifications, installs, battery, media,
+            location, notifications, installs, battery,
             !(motionAvailable && motionWanted) || motion,
             !overlayNeeded(motionWanted) || overlay,
         ).count { !it }
@@ -154,9 +167,9 @@ private val Dim = Color(0xFF8E8E93)
 
 /**
  * Every permission Zenith needs, each with the reason in plain words, so none of Android's prompts
- * comes as a surprise. All are required: the screen comes back whenever one is missing (outside a
- * drive), and lets the driver through only once everything is granted. A bar fills as they come,
- * each granted step lights up with a check and a ring of light.
+ * comes as a surprise. All are required but the music's (advised): the screen comes back whenever
+ * one is missing (outside a drive), and lets the driver through only once they are granted. A bar
+ * fills as they come, each granted step lights up with a check and a ring of light.
  */
 @Composable
 fun Onboarding(
@@ -174,13 +187,15 @@ fun Onboarding(
     onOverlay: () -> Unit = {},
     /** Where the notification access stands on Android 13+: 0 activate, 1 unlock (blocked), 2 activate again. */
     mediaStep: Int = 0,
+    /** A Spotify account already shows the music: the access only adds the other players. */
+    spotifyConnected: Boolean = false,
     /** The big button: the next missing permission, one after the other. */
     onNext: () -> Unit = {},
 ) {
     val missing = permissions.missing(motionWanted)
     val showMotion = permissions.motionAvailable && motionWanted
     val showOverlay = permissions.overlayNeeded(motionWanted)
-    val total = 5 + (if (showMotion) 1 else 0) + (if (showOverlay) 1 else 0)
+    val total = 4 + (if (showMotion) 1 else 0) + (if (showOverlay) 1 else 0)
     LargeTitlePage(
         title = if (returning) "Autorisations" else "Bienvenue",
         bottom = { GoButton(missing, onClick = if (missing == 0) onDone else onNext) },
@@ -251,13 +266,16 @@ fun Onboarding(
         // option only after a first try, so the button walks through the three steps.
         val unlock = Build.VERSION.SDK_INT >= 33 && mediaStep == 1
         Step(
-            title = "Musique",
+            title = "Musique · conseillé",
             text = when {
                 unlock -> "Android l'a bloqué ? Touche Débloquer : ⋮ en haut à droite → « Autoriser les paramètres restreints », " +
                     "valide avec ton code, puis reviens ici."
                 mediaStep == 2 -> "Débloqué : touche Activer, puis active Zenith."
-                else -> "Titre et commandes de Spotify, YouTube ou ton lecteur pendant la conduite, sans compte. Android appelle " +
-                    "cela « accès aux notifications » : Zenith n'y lit que le lecteur. Touche Activer, puis active Zenith."
+                spotifyConnected -> "Spotify est connecté. L'accès ajoute les autres lecteurs (Deezer, YouTube Music, Apple Music…). " +
+                    "Android appelle cela « accès aux notifications » : Zenith n'y lit que le lecteur."
+                else -> "Titre, Canvas et commandes de ton lecteur (Spotify, Deezer, YouTube Music…) pendant la conduite, sans compte. " +
+                    "Android appelle cela « accès aux notifications » : Zenith n'y lit que le lecteur. Pas obligatoire : " +
+                    "avec Spotify, tu peux aussi connecter ton compte dans les réglages."
             },
             granted = permissions.media,
             onClick = onMedia,
@@ -415,5 +433,105 @@ private fun Step(
                 )
             }
         }
+    }
+}
+
+private val SpotifyGreen = Color(0xFF1ED760)
+
+/**
+ * The invitation to let Zenith see the music, on home once the required permissions are granted:
+ * the notification access is no longer required, but without it (or a Spotify account) the music
+ * card, its Canvas and its controls stay away. A glass card rising on a dim veil with a soft breath;
+ * the access walks through Android 13's unlock like the welcome screen, Spotify signs in in the
+ * browser. Never closed by accident: the veil holds the touches, only "Plus tard" or back close it.
+ */
+@Composable
+fun MusicInvite(
+    visible: Boolean,
+    /** Where the notification access stands on Android 13+: 0 activate, 1 unlock (blocked), 2 activate again. */
+    mediaStep: Int,
+    /** A Spotify client id is built in: the account can stand in for the access. */
+    spotifyAvailable: Boolean,
+    onAllowMedia: () -> Unit,
+    onSpotify: () -> Unit,
+    onLater: () -> Unit,
+) {
+    val view = LocalView.current
+    LaunchedEffect(visible) { if (visible) UiSound.play(UiSound.Kind.OPEN, view) }
+    BackHandler(enabled = visible) {
+        UiSound.play(UiSound.Kind.CLOSE, view)
+        onLater()
+    }
+    AnimatedVisibility(visible, enter = fadeIn(tween(350)), exit = fadeOut(tween(300))) {
+        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)).pointerInput(Unit) { detectTapGestures { } })
+    }
+    Box(Modifier.fillMaxSize().systemBarsPadding().padding(16.dp), contentAlignment = Alignment.BottomCenter) {
+        AnimatedVisibility(
+            visible,
+            enter = slideInVertically(spring(dampingRatio = 0.78f, stiffness = Spring.StiffnessMediumLow)) { it / 2 } +
+                scaleIn(spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow), initialScale = 0.9f) + fadeIn(tween(250)),
+            exit = slideOutVertically(tween(300)) { it / 3 } + scaleOut(tween(300), targetScale = 0.95f) + fadeOut(tween(250)),
+        ) {
+            val unlock = Build.VERSION.SDK_INT >= 33 && mediaStep == 1
+            Column(
+                Modifier.widthIn(max = 520.dp).fillMaxWidth().glass(RoundedCornerShape(28.dp), Surface).sheen()
+                    .verticalScroll(rememberScrollState()).padding(20.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(34.dp).background(SpotifyGreen, CircleShape), contentAlignment = Alignment.Center) {
+                        Text("♪", color = Color.Black, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Text("Ta musique pendant la conduite", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                }
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "Sans l'accès aux notifications, la carte Musique, le Canvas et les commandes ne marchent pas pour Deezer, " +
+                        "YouTube Music, Apple Music, etc. C'est son nom chez Android : Zenith n'y lit que le lecteur. Vivement conseillé.",
+                    color = Color.White.copy(alpha = 0.8f),
+                    fontSize = 15.sp,
+                    lineHeight = 20.sp,
+                )
+                if (unlock) {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "Android l'a bloqué ? Touche Débloquer : ⋮ en haut à droite → « Autoriser les paramètres restreints », " +
+                            "valide avec ton code, puis reviens et touche Activer.",
+                        color = Color.White.copy(alpha = 0.8f),
+                        fontSize = 15.sp,
+                        lineHeight = 20.sp,
+                    )
+                }
+                if (spotifyAvailable) {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "Si tu utilises Spotify et n'arrives pas à activer l'accès (paramètres restreints), connecte plutôt Spotify : " +
+                            "c'est aussi complet et plus rapide.",
+                        color = Dim,
+                        fontSize = 14.sp,
+                        lineHeight = 19.sp,
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                InviteButton(if (unlock) "Débloquer" else "Activer l'accès", Color.White, Color.Black, UiSound.Kind.OPEN, onAllowMedia)
+                if (spotifyAvailable) InviteButton("Se connecter à Spotify", SpotifyGreen, Color.Black, UiSound.Kind.OPEN, onSpotify)
+                InviteButton("Plus tard", null, Color.White.copy(alpha = 0.85f), UiSound.Kind.CLOSE, onLater)
+            }
+        }
+    }
+}
+
+/** A full-width button of [MusicInvite]: filled with [fill], or glass when null. */
+@Composable
+private fun InviteButton(label: String, fill: Color?, textColor: Color, sound: UiSound.Kind, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(18.dp)
+    Box(
+        Modifier.fillMaxWidth().padding(top = 10.dp)
+            .tap(shape = shape, sound = sound, lift = 1.04f, glow = if (fill != null) PressShade else PressLight, onClick = onClick)
+            .then(if (fill != null) Modifier.clip(shape).background(fill) else Modifier.glass(shape))
+            .padding(vertical = 15.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, color = textColor, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
     }
 }

@@ -48,8 +48,8 @@ Zenith ne vient pas de l'App Store : il s'installe avec [SideStore](https://side
 |---|---|---|
 | Petite fenêtre au-dessus de Waze | fenêtre libre, carte complète | fenêtre image dans l'image, carte des routes autour de toi dessinée par Zenith (mêmes infos) |
 | Écran verrouillé | notification avec la vitesse et « Arrêter » | Activité en direct et Dynamic Island, avec « Arrêter » |
-| Musique | tous les lecteurs (Spotify, YouTube, Deezer…) | Spotify (compte connecté) et Apple Music seulement |
-| Contrôle de Spotify | toujours | précédent / pause / suivant avec Spotify Premium (règle de Spotify) |
+| Musique | tous les lecteurs (Spotify, YouTube, Deezer…) avec l'accès aux notifications ; sinon Spotify par compte connecté | Spotify (compte connecté) et Apple Music seulement |
+| Contrôle de Spotify | toujours avec l'accès aux notifications ; par compte connecté, avec Premium | précédent / pause / suivant avec Spotify Premium (règle de Spotify) |
 | Démarrage auto | en roulant ou à la connexion de la voiture | en roulant, et à la connexion de la voiture par une automatisation Raccourcis (voir plus bas) |
 | Mises à jour | installées seules | proposées par SideStore, une confirmation |
 | Volume monté pendant la conduite | oui | oui (glissière de volume du système) |
@@ -86,7 +86,7 @@ Au premier lancement, Zenith explique chaque autorisation et un seul bouton « C
 - **Installer des applis inconnues** : pour les mises à jour automatiques, l'app ne vient pas du Play Store. Active l'interrupteur puis reviens.
 - **Batterie sans restriction** : pour qu'Android ne coupe pas les alertes pendant un long trajet. Accepte la fenêtre d'Android.
 - **Activité physique et position « Toujours »** : pour démarrer seul quand tu roules. Autorise l'activité, puis choisis « Toujours autoriser » pour la position.
-- **Accès aux notifications** : pour afficher et contrôler ta musique. Zenith n'y lit que le lecteur. Touche « Activer » ; si Android bloque, va dans Infos de l'appli → ⋮ → « Autoriser les paramètres restreints », puis « Activer » à nouveau.
+- **Accès aux notifications** (conseillé, pas obligatoire) : pour afficher et contrôler ta musique, quel que soit le lecteur. Zenith n'y lit que le lecteur. Touche « Activer » ; si Android bloque, va dans Infos de l'appli → ⋮ → « Autoriser les paramètres restreints », puis « Activer » à nouveau. Avec Spotify, tu peux à la place connecter ton compte (Réglages → **Se connecter à Spotify**, mêmes limites que sur iPhone : 5 comptes ajoutés par l'auteur, commandes avec Premium). Le compte connecté baisse aussi Spotify pendant les alertes quand il joue sur l'autoradio ou une enceinte (Spotify Connect).
 
 ## Autorisations (iPhone)
 

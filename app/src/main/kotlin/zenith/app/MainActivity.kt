@@ -33,6 +33,8 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -40,6 +42,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.IntOffset
@@ -77,6 +80,7 @@ class MainActivity : ComponentActivity() {
         val prefs = getSharedPreferences("zenith", MODE_PRIVATE)
         UserSettings.init(this)
         UiSound.init(this)
+        SpotifyAuth.init(this)
         inPip.value = isInPictureInPictureMode
         handleIntent(intent)
         setContent {
@@ -96,6 +100,7 @@ class MainActivity : ComponentActivity() {
             val media by NowPlaying.state.collectAsStateWithLifecycle()
             val startNow by startRequested.collectAsStateWithLifecycle()
             val musicChoice by DriveState.musicChoice.collectAsStateWithLifecycle()
+            val spotify by SpotifyAuth.state.collectAsStateWithLifecycle()
             var showSettings by remember { mutableStateOf(false) }
             var crashReport by remember { mutableStateOf(CrashGuard.report(context)) }
             val scope = rememberCoroutineScope()
@@ -109,8 +114,8 @@ class MainActivity : ComponentActivity() {
             var permissionResults by remember { mutableIntStateOf(0) }
             val permissions = remember(resumeCount, permissionResults) { Permissions.read(context) }
             var onboarded by remember { mutableStateOf(prefs.getBoolean(KEY_ONBOARDED, false)) }
-            // Every permission is required: the welcome screen comes back whenever one is missing,
-            // a new one or one taken back (never during a drive).
+            // Every permission is required (the music's notification access aside): the welcome screen
+            // comes back whenever one is missing, a new one or one taken back (never during a drive).
             val showWelcome = !running && (!onboarded || permissions.missing(settings.motionStart) > 0)
             // "Car connected · tap to start" notification.
             LaunchedEffect(startNow, permissions.location) {
@@ -176,7 +181,6 @@ class MainActivity : ComponentActivity() {
                     !permissions.battery -> openSettings(Permissions.batteryIntent(context))
                     !permissions.installs -> openSettings(Permissions.installsIntent(context))
                     permissions.motionAvailable && settings.motionStart && !permissions.motion -> onMotion()
-                    !permissions.media -> onMedia()
                     permissions.overlayNeeded(settings.motionStart) && !permissions.overlay -> openSettings(Permissions.overlayIntent(context))
                     else -> Unit
                 }
@@ -219,6 +223,24 @@ class MainActivity : ComponentActivity() {
                 Updater.confirmationShown()
             }
 
+            // The music invitation: notification access is no longer required, but without it (or a
+            // Spotify account) the music card stays empty. Asked once per version, on home, until done.
+            var inviteShownFor by remember { mutableIntStateOf(prefs.getInt(KEY_MUSIC_INVITE, 0)) }
+            var inviteOpen by remember { mutableStateOf(false) }
+            val musicMissing = !permissions.media && !spotify.connected
+            val inviteWanted = onboarded && !showWelcome && !showSettings && !running && musicMissing
+            LaunchedEffect(inviteWanted) {
+                if (inviteWanted && inviteShownFor != BuildConfig.VERSION_CODE) {
+                    // A moment on home first: the welcome screen or the flight back are still settling.
+                    delay(700)
+                    inviteShownFor = BuildConfig.VERSION_CODE
+                    prefs.edit { putInt(KEY_MUSIC_INVITE, inviteShownFor) }
+                    inviteOpen = true
+                }
+            }
+            // Access granted or Spotify connected: done for good.
+            LaunchedEffect(musicMissing) { if (!musicMissing) inviteOpen = false }
+
             val screen = when {
                 showWelcome -> Screen.WELCOME
                 showSettings -> Screen.SETTINGS
@@ -226,7 +248,8 @@ class MainActivity : ComponentActivity() {
             }
             if (pip || smallSoon) {
                 PipScreen(snapshot, radars, zones, media = media, canvas = settings.spotifyCanvas, musicChoice = musicChoice)
-            } else AnimatedContent(screen, transitionSpec = { screenTransition(initialState, targetState) }, label = "screen") { shown ->
+            } else Box(Modifier.fillMaxSize()) {
+                AnimatedContent(screen, transitionSpec = { screenTransition(initialState, targetState) }, label = "screen") { shown ->
                 when (shown) {
                 Screen.SETTINGS -> SettingsScreen(
                     settings = settings,
@@ -255,6 +278,10 @@ class MainActivity : ComponentActivity() {
                     onShareTrip = remember(resumeCount) { latestTrip(context) }?.let { trip -> { shareTrip(trip) } },
                     mediaAllowed = permissions.media,
                     onAllowMedia = onMedia,
+                    mediaStep = mediaStep,
+                    spotify = spotify,
+                    onSpotifyConnect = { SpotifyAuth.connect(context) },
+                    onSpotifyDisconnect = SpotifyAuth::disconnect,
                     permissions = permissions,
                     onMotionPermission = onMotion,
                     update = update,
@@ -272,6 +299,7 @@ class MainActivity : ComponentActivity() {
                     onMedia = onMedia,
                     onOverlay = { openSettings(Permissions.overlayIntent(context)) },
                     mediaStep = mediaStep,
+                    spotifyConnected = spotify.connected,
                     onNext = onNext,
                     onDone = {
                         prefs.edit { putBoolean(KEY_ONBOARDED, true) }
@@ -317,6 +345,15 @@ class MainActivity : ComponentActivity() {
                     },
                 )
                 }
+                }
+                MusicInvite(
+                    visible = inviteOpen && musicMissing && screen == Screen.DRIVE && !running,
+                    mediaStep = mediaStep,
+                    spotifyAvailable = spotify.configured,
+                    onAllowMedia = onMedia,
+                    onSpotify = { SpotifyAuth.connect(context) },
+                    onLater = { inviteOpen = false },
+                )
             }
         }
     }
@@ -327,6 +364,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleIntent(intent: Intent?) {
+        // Back from Spotify's sign-in page in the browser.
+        intent?.data?.takeIf(SpotifyAuth::isCallback)?.let { SpotifyAuth.finish(this, it) }
         if (intent?.action == ACTION_START_DRIVE) startRequested.value = true
         if (intent?.action == ACTION_OPEN_SMALL_WINDOW) openingSmall.value = true
     }
@@ -343,6 +382,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        inFront = true
         resumes.value++
         // Opened by an automatic start: straight into the small window, over what was in front.
         if (openingSmall.value) {
@@ -356,6 +396,11 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        inFront = false
     }
 
     override fun onUserLeaveHint() {
@@ -457,6 +502,11 @@ class MainActivity : ComponentActivity() {
         @Volatile
         private var visible = false
 
+        /** Zenith is in front, full screen (resumed): the Spotify account's player is read more often. */
+        @Volatile
+        var inFront = false
+            private set
+
         /**
          * A drive started by itself (riding, car connected): Zenith opens straight into its small
          * window over what is in front. Android lets an app open a window from the background only
@@ -473,6 +523,8 @@ class MainActivity : ComponentActivity() {
         }
         private const val KEY_ONBOARDED = "onboarded"
         private const val KEY_MEDIA_STEP = "media_step"
+        /** Version code the music invitation was last shown for. */
+        private const val KEY_MUSIC_INVITE = "music_invite_version"
     }
 }
 

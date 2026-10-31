@@ -20,6 +20,7 @@ import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlin.math.abs
 import zenith.core.LikeAction
 import zenith.core.PlaybackProgress
 import zenith.core.PlayerActions
@@ -47,6 +48,8 @@ data class MediaInfo(
     val video: Boolean = false,
     /** Any other music player (Deezer, YouTube Music, Apple Music…): its Canvas is looked up by title. */
     val canvasQuery: CanvasQuery? = null,
+    /** Previous / play-pause / next work (Spotify through its Web API needs Premium for them). */
+    val canControl: Boolean = true,
 )
 
 /** A track known by its words, to find its Spotify twin and Canvas. */
@@ -57,7 +60,9 @@ data class CanvasQuery(val title: String, val artist: String, val album: String?
  * use, its progress and its controls, with no account, no key and no server. Spotify also puts the
  * track's `spotify:track:<id>` in the media id (for the Canvas) and offers "like" as a custom
  * action. Reading other apps' sessions needs the notification access ([MediaListener] exists only
- * for that); without it nothing shows. Main thread only.
+ * for that). Without it, a connected Spotify account ([SpotifyPlayer], Web API) stands in as one
+ * more Spotify session; Spotify's own media session wins when both exist (no second card).
+ * Main thread only.
  */
 object NowPlaying {
     private val _state = MutableStateFlow<MediaInfo?>(null)
@@ -72,6 +77,10 @@ object NowPlaying {
     private var artSource: Bitmap? = null
     private var art: Bitmap? = null
     private var likeAction: PlaybackState.CustomAction? = null
+    /** The card shows the Spotify account's player ([SpotifyPlayer]) rather than a media session. */
+    private var webShown = false
+    /** Between [start] and [stop]: a drive runs. */
+    private var following = false
 
     private val sessions = MediaSessionManager.OnActiveSessionsChangedListener { pick(it.orEmpty()) }
     private val callback = object : MediaController.Callback() {
@@ -93,8 +102,16 @@ object NowPlaying {
         }
     }
 
-    /** Starts following the players; cheap and idempotent, does nothing without the access. */
+    /** Starts following the players (media sessions, Spotify account); cheap and idempotent. */
     fun start(context: Context) {
+        following = true
+        SpotifyAuth.init(context)
+        SpotifyPlayer.start()
+        startSessions(context)
+    }
+
+    /** The media sessions, only with the notification access. */
+    private fun startSessions(context: Context) {
         if (manager != null || !allowed(context)) return
         val m = context.getSystemService(MediaSessionManager::class.java)
         val name = ComponentName(context, MediaListener::class.java)
@@ -107,6 +124,9 @@ object NowPlaying {
     }
 
     fun stop() {
+        following = false
+        webShown = false
+        SpotifyPlayer.stop()
         runCatching { manager?.removeOnActiveSessionsChangedListener(sessions) }
         sessionsSeen.forEach { runCatching { it.unregisterCallback(callback) } }
         sessionsSeen = emptyList()
@@ -118,21 +138,40 @@ object NowPlaying {
         _state.value = null
     }
 
+    /** The Spotify account was connected or disconnected (settings): its player is read again. */
+    fun spotifyAccountChanged() {
+        SpotifyPlayer.stop()
+        if (following) SpotifyPlayer.start()
+        choose()
+    }
+
+    /** [SpotifyPlayer] read something new (track, cover, heart, Premium). */
+    fun spotifyWebChanged() {
+        if (following) choose()
+    }
+
+    /** Spotify's own media session is there: it shows the card, the account's player waits. */
+    fun spotifySessionPresent(): Boolean = sessionsSeen.any { it.packageName == SpotifyTrack.PACKAGE }
+
     fun playPause() {
+        if (webShown) return SpotifyPlayer.playPause()
         val c = controller ?: return
         runCatching { if (c.playbackState?.state == PlaybackState.STATE_PLAYING) c.transportControls.pause() else c.transportControls.play() }
     }
 
     fun next() {
+        if (webShown) return SpotifyPlayer.next()
         runCatching { controller?.transportControls?.skipToNext() }
     }
 
     fun previous() {
+        if (webShown) return SpotifyPlayer.previous()
         runCatching { controller?.transportControls?.skipToPrevious() }
     }
 
     /** Moves within a video by [deltaMs] from where it is now (the position moves on while playing). */
     fun seekBy(deltaMs: Long) {
+        if (webShown) return SpotifyPlayer.seekBy(deltaMs)
         val c = controller ?: return
         val p = c.playbackState ?: return
         val moved = if (p.state == PlaybackState.STATE_PLAYING) ((SystemClock.elapsedRealtime() - p.lastPositionUpdateTime) * p.playbackSpeed).toLong() else 0L
@@ -141,17 +180,19 @@ object NowPlaying {
 
     /** Adds the track to the player's likes, or takes it out (the action the player offers now). */
     fun toggleLike() {
+        if (webShown) return SpotifyPlayer.toggleLike()
         val a = likeAction ?: return
         runCatching { controller?.transportControls?.sendCustomAction(a.action, a.extras) }
     }
 
     /** Brings the player to the front: its own "open" intent, else its launcher activity. */
     fun open(context: Context) {
-        val c = controller ?: return
-        val opened = runCatching { c.sessionActivity?.let { send(it) } != null }.getOrDefault(false)
+        val c = controller
+        val packageName = if (webShown) SpotifyTrack.PACKAGE else c?.packageName ?: return
+        val opened = !webShown && runCatching { c?.sessionActivity?.let { send(it) } != null }.getOrDefault(false)
         if (!opened) {
             runCatching {
-                context.packageManager.getLaunchIntentForPackage(c.packageName)
+                context.packageManager.getLaunchIntentForPackage(packageName)
                     ?.let { context.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
             }.onFailure { Log.w("Zenith", "open player", it) }
         }
@@ -177,11 +218,14 @@ object NowPlaying {
 
     /** New list of sessions (Android lists them most recent first): watches them all, then chooses. */
     private fun pick(list: List<MediaController>) {
+        val hadSpotify = spotifySessionPresent()
         val known = sessionsSeen.map { it.sessionToken }.toSet()
         val now = list.map { it.sessionToken }.toSet()
         sessionsSeen.filter { it.sessionToken !in now }.forEach { runCatching { it.unregisterCallback(callback) } }
         list.filter { it.sessionToken !in known }.forEach { runCatching { it.registerCallback(callback, handler) } }
         sessionsSeen = list
+        // Spotify's session gone (app closed): the account's player takes over at once.
+        if (hadSpotify && !spotifySessionPresent()) SpotifyPlayer.poke(0)
         choose()
     }
 
@@ -191,10 +235,16 @@ object NowPlaying {
             val md = c.metadata
             val title = md?.getString(MediaMetadata.METADATA_KEY_TITLE) ?: md?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
             PlayerSession(idOf(c), c.packageName, c.playbackState?.state == PlaybackState.STATE_PLAYING, !title.isNullOrBlank())
-        }
-        val chosen = PlayerChoice.pick(candidates, controller?.let(::idOf))?.let { p -> sessionsSeen.firstOrNull { idOf(it) == p.id } }
+        }.toMutableList()
+        // The account's player, unless Spotify's own session is there.
+        val web = SpotifyPlayer.track?.takeIf { following && !spotifySessionPresent() }
+        if (web != null) candidates += PlayerSession(WEB_ID, SpotifyTrack.PACKAGE, web.playing, hasTitle = true)
+        val current = if (webShown) WEB_ID else controller?.let(::idOf)
+        val picked = PlayerChoice.pick(candidates, current)
+        webShown = picked?.id == WEB_ID
+        val chosen = if (webShown) null else picked?.let { p -> sessionsSeen.firstOrNull { idOf(it) == p.id } }
         if (chosen?.sessionToken != controller?.sessionToken) controller = chosen
-        publish()
+        if (webShown) publishWeb() else publish()
     }
 
     private fun idOf(c: MediaController) = c.sessionToken.hashCode().toString()
@@ -246,7 +296,41 @@ object NowPlaying {
         )
     }
 
-    private const val ART_PX = 160
+    /** The track of the Spotify account's player. */
+    private fun publishWeb() {
+        val t = SpotifyPlayer.track ?: return run { _state.value = null }
+        val next = MediaInfo(
+            title = t.title,
+            artist = t.artist,
+            art = SpotifyPlayer.art,
+            playing = t.playing,
+            player = SpotifyTrack.PACKAGE,
+            spotifyTrackId = t.trackId,
+            progress = PlaybackProgress.of(t.positionMs, t.readAtMs, 1f, t.durationMs),
+            like = if (t.trackId == null) null else SpotifyPlayer.liked?.let { LikeAction(WEB_ID, it) },
+            canControl = SpotifyAuth.state.value.premium != false,
+        )
+        _state.value = settled(next)
+    }
+
+    /**
+     * Each read of the Web API restates the position; when it agrees with the line already drawn
+     * (within 1.5 s), the card keeps its progress and nothing redraws for it.
+     */
+    private fun settled(next: MediaInfo): MediaInfo {
+        val old = _state.value ?: return next
+        val p = next.progress ?: return next
+        val q = old.progress ?: return next
+        if (p.durationMs != q.durationMs || old.copy(progress = null) != next.copy(progress = null)) return next
+        val now = SystemClock.elapsedRealtime()
+        return if (abs(p.positionAt(now, next.playing) - q.positionAt(now, old.playing)) < 1_500) next.copy(progress = q) else next
+    }
+
+    /** Cover size on the card: a small copy is all it needs. */
+    const val ART_PX = 160
+
+    /** The Spotify account's player among the sessions (no media session has this id). */
+    private const val WEB_ID = "spotify-web-api"
 }
 
 /** Only there so Android lets [NowPlaying] read the media sessions; it reads no notification. */
