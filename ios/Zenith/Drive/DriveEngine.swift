@@ -127,7 +127,8 @@ final class DriveEngine: NSObject, CLLocationManagerDelegate {
         speaker = nil
         tones?.release()
         tones = nil
-        AudioFocus.shared.shutdown()
+        // No AudioFocus.shutdown(): the voice gave its hold back above and the tones' timed holds end
+        // by themselves, while the take-off's hum may still be fading out (no hard ending).
         VolumeRaiser.shared.restore()
         MusicCenter.shared.deactivate()
         LiveActivityManager.shared.end()

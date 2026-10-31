@@ -41,7 +41,8 @@ final class Permissions: NSObject, CLLocationManagerDelegate {
         var n = 0
         if location != .always { n += 1 }
         if !notifications { n += 1 }
-        if SettingsStore.shared.motionStart && !motion { n += 1 }
+        // A device without motion coprocessor (some iPads) cannot give it: never blocks the welcome.
+        if SettingsStore.shared.motionStart && CMMotionActivityManager.isActivityAvailable() && !motion { n += 1 }
         if !appleMusic { n += 1 }
         return n
     }
