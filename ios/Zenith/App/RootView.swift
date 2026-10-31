@@ -34,6 +34,8 @@ struct RootView: View {
                         .allowsHitTesting(!showSettings)
                         .transition(.opacity.combined(with: .scale(scale: 0.96)))
                         .zIndex(0)
+                    // The small window's layer must be on screen for iOS to open it over Waze / Maps.
+                    if model.running { PipAnchor().allowsHitTesting(false) }
                     if showSettings {
                         SettingsView(onBack: { withAnimation(Self.push) { showSettings = false } })
                             .transition(.move(edge: .trailing))
