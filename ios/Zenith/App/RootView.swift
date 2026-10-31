@@ -51,11 +51,6 @@ struct RootView: View {
             MotionStarter.shared.sync()
             Updater.shared.checkIfDue()
         }
-        // The Live Activity follows its setting during a drive too.
-        .onChange(of: SettingsStore.shared.liveActivity) { _, on in
-            guard model.running else { return }
-            if on { LiveActivityManager.shared.start(demo: model.demo) } else { LiveActivityManager.shared.end() }
-        }
         .task(id: scenePhase) {
             // While in front: a new version never waits.
             while scenePhase == .active && !Task.isCancelled {

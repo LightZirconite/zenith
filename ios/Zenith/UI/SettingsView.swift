@@ -164,16 +164,25 @@ struct SettingsView: View {
                 on: settings.pipLarge
             ) { settings.pipLarge = $0 }
             SettingsSeparator()
-            SettingsToggleRow(
-                title: "Activité en direct",
-                text: "Vitesse, limite et prochain radar sur l'écran verrouillé et dans la Dynamic Island pendant la conduite.",
-                on: settings.liveActivity
-            ) { on in
-                settings.liveActivity = on
-                // Changed during a drive: shown or taken away at once.
-                let model = DriveModel.shared
-                guard model.running else { return }
-                if on { LiveActivityManager.shared.start(demo: model.demo) } else { LiveActivityManager.shared.end() }
+            if !LiveActivityManager.installed {
+                // SideStore's "Remove extension" at the install takes the Live Activity away with it.
+                SettingsInfoRow(
+                    title: "Activité en direct",
+                    text: "Indisponible : l'extension a été retirée à l'installation. Pour l'écran verrouillé et la Dynamic Island, " +
+                        "réinstalle Zenith depuis SideStore en choisissant « Keep extension » (un App ID de plus, une seule fois)."
+                )
+            } else {
+                SettingsToggleRow(
+                    title: "Activité en direct",
+                    text: "Vitesse, limite et prochain radar sur l'écran verrouillé et dans la Dynamic Island pendant la conduite.",
+                    on: settings.liveActivity
+                ) { on in
+                    settings.liveActivity = on
+                    // Changed during a drive: shown or taken away at once.
+                    let model = DriveModel.shared
+                    guard model.running else { return }
+                    if on { LiveActivityManager.shared.start(demo: model.demo) } else { LiveActivityManager.shared.end() }
+                }
             }
         }
     }

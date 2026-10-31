@@ -34,7 +34,18 @@ final class LiveActivityManager {
     /** Between two requests while iOS refuses one (Zenith in the background). */
     private static let askEvery: TimeInterval = 5
 
+    /**
+     * The widget extension is in the app: SideStore offers to remove extensions at the install (it
+     * saves an App ID of a free account), and the Live Activity goes with it.
+     */
+    static let installed: Bool = {
+        guard let plugins = Bundle.main.builtInPlugInsURL,
+              let names = try? FileManager.default.contentsOfDirectory(atPath: plugins.path) else { return false }
+        return names.contains("ZenithLiveActivity.appex")
+    }()
+
     func start(demo: Bool) {
+        guard Self.installed else { return }
         end()
         wanted = true
         self.demo = demo
