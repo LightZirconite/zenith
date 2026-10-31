@@ -11,12 +11,18 @@ Quota: the database keeps the time of every call of the last 24 hours, and the c
 runs). The workflow runs several times a day at irregular times; each run spends a random share
 of what is left, with irregular pauses (never under 6.5 s: 10 requests / minute).
 
-Usage: LUFOP_API_KEY=... harvest_lufop.py <lufop.json> [budget per 24 h] [all]
+Only circles that touch France count: with --france <manifest.json> (the road tiles of the data
+release, built from the France extract), circles that reach no French road tile (sea, England,
+Germany, Switzerland, Italy, Spain: the grid's rectangle spills over them) are removed and never
+asked again, so the whole quota goes to France and its border roads.
+
+Usage: LUFOP_API_KEY=... harvest_lufop.py <lufop.json> [budget per 24 h] [all] [--france manifest.json]
 """
 import json
 import math
 import os
 import random
+import re
 import sys
 import time
 import urllib.parse
@@ -68,6 +74,32 @@ def split(cell):
     ]
 
 
+def france_tiles(path):
+    """(i, j) of the 0.5° road tiles of France listed by the data release manifest; None when unreadable."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            names = json.load(f)["tiles"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    tiles = set()
+    for name in names:
+        m = re.fullmatch(r"roads_(-?\d+)_(-?\d+)\.json\.gz", name)
+        if m:
+            tiles.add((int(m.group(1)), int(m.group(2))))
+    return tiles or None
+
+
+def touches_france(cell, tiles):
+    """The circle reaches at least one French road tile (tiles: i = floor(lat * 2), j = floor(lon * 2))."""
+    dlat = cell["r"] / 111.32
+    dlon = cell["r"] / (111.32 * math.cos(math.radians(cell["lat"])))
+    for i in range(math.floor((cell["lat"] - dlat) * 2), math.floor((cell["lat"] + dlat) * 2) + 1):
+        for j in range(math.floor((cell["lon"] - dlon) * 2), math.floor((cell["lon"] + dlon) * 2) + 1):
+            if (i, j) in tiles:
+                return True
+    return False
+
+
 def query(key, cell):
     params = {
         "key": key, "format": "json", "pays": "FR", "nbr": str(MAX_RESULTS),
@@ -90,20 +122,31 @@ def radar_id(r):
 
 
 def main():
-    path = sys.argv[1]
-    budget = int(sys.argv[2]) if len(sys.argv) > 2 else 150
+    args = sys.argv[1:]
+    france = None
+    if "--france" in args:
+        k = args.index("--france")
+        france = france_tiles(args[k + 1]) if k + 1 < len(args) else None
+        del args[k:k + 2]
+    path = args[0]
+    budget = int(args[1]) if len(args) > 1 else 150
     key = os.environ.get("LUFOP_API_KEY")
     if not key:
         print("LUFOP_API_KEY absent: récolte Lufop ignorée")
         return
     db = json.load(open(path)) if os.path.exists(path) else {"v": 1, "cells": initial_cells(), "radars": {}}
+    if france:
+        kept = [c for c in db["cells"] if touches_france(c, france)]
+        if kept and len(kept) < len(db["cells"]):
+            print(f"{len(db['cells']) - len(kept)} zones hors de France retirées de la grille, {len(kept)} gardées")
+            db["cells"] = kept
     now = int(time.time())
     if "calls" not in db and db.get("updated"):
         # Base from before the call log: its last run counts as a full budget spent at that time.
         db["calls"] = [int(datetime.fromisoformat(db["updated"]).timestamp())] * budget
     db["calls"] = [t for t in db.get("calls", []) if t > now - WINDOW_S]
     left = budget - len(db["calls"])
-    spend_all = len(sys.argv) > 3 and sys.argv[3] == "all"  # manual run: no random share
+    spend_all = len(args) > 2 and args[2] == "all"  # manual run: no random share
     share = left if spend_all else min(left, random.randint(*RUN_SHARE))
     print(f"{len(db['calls'])} requêtes ces dernières 24 h, {max(left, 0)} restantes, {max(share, 0)} pour ce passage")
     used = added = dropped = 0
@@ -142,7 +185,9 @@ def main():
             db["radars"][rid] = entry
         if len(results) >= MAX_RESULTS and cell["r"] > MIN_RADIUS_KM:
             db["cells"].remove(cell)
-            db["cells"].extend(split(cell))
+            children = split(cell)
+            # A child circle off French soil (a dense foreign city next to the border) is never asked.
+            db["cells"].extend([c for c in children if touches_france(c, france)] if france else children)
             continue
         # Fully read circle: radars we know inside it but not returned are probably gone.
         returned = {radar_id(r) for r in results if "lat" in r and "lng" in r}
