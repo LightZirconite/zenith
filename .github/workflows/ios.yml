@@ -39,7 +39,7 @@ jobs:
           java-version: 21
       - uses: gradle/actions/setup-gradle@v6
       - name: Kotlin/Native toolchain cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.konan
           key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
@@ -51,7 +51,7 @@ jobs:
       - name: Core as Swift sees it
         run: |
           h=$(find core-ios/build/XCFrameworks/release -name ZenithCore.h | head -1)
-          grep -E "swift_name\(\"(Bridge|Core[A-Z][a-zA-Z]*|RadarData|RoadSegment|RoadNetwork|DrivingSession|GpsFix|ParkDetector|RainDetector|SpeedStabilizer|RadarIndex|DemoScenario|CanvasResult)\"\)|^- \(|^@property" "$h" | grep -v "^- (instancetype)init" | head -300
+          awk '/^@interface ZenithCore(Bridge|Core[A-Z][A-Za-z]*|CanvasResult) /{on=1} on{print} /^@end/{on=0}' "$h" | grep -v "^ *$" | grep -vE "hash\(\)|description\(\)|isEqual" | head -400
 
       - name: Xcode project
         run: |

@@ -148,7 +148,7 @@ class CoreSnapshot(
     val ahead: List<Double>,
     val events: List<CoreEvent>,
     val estimated: Boolean,
-    val zone: CoreZone?,
+    val drivenZone: CoreZone?,
 ) {
     internal companion object {
         fun of(s: DriveSnapshot) = CoreSnapshot(
@@ -170,7 +170,7 @@ class CoreSnapshot(
             ahead = s.ahead.flatMap { listOf(it.lat, it.lon) },
             events = s.events.map(CoreEvent::of),
             estimated = s.estimated,
-            zone = s.zone?.let { CoreZone.of(it.zone, it.remainingM) },
+            drivenZone = s.zone?.let { CoreZone.of(it.zone, it.remainingM) },
         )
     }
 }

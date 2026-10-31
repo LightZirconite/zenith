@@ -160,7 +160,7 @@ struct Snapshot: Equatable {
 private func optInt(_ v: Int32) -> Int? { v >= 0 ? Int(v) : nil }
 private func optDouble(_ v: Double) -> Double? { v >= 0 ? v : nil }
 
-private func points(_ flat: [KotlinDouble]) -> [GeoPoint] {
+private func geoPoints(_ flat: [KotlinDouble]) -> [GeoPoint] {
     var out: [GeoPoint] = []
     out.reserveCapacity(flat.count / 2)
     var i = 0
@@ -189,7 +189,7 @@ extension RadarInfo {
 
 extension ZoneInfo {
     init(_ z: CoreZone) {
-        self.init(id: z.zoneId, points: points(z.points), lengthM: z.lengthM, remainingM: optDouble(z.remainingM))
+        self.init(id: z.zoneId, points: geoPoints(z.points), lengthM: z.lengthM, remainingM: optDouble(z.remainingM))
     }
 }
 
@@ -236,10 +236,10 @@ extension Snapshot {
                 UpcomingInfo(radar: RadarInfo($0.radar), distanceM: $0.distanceM, limitKmh: optInt($0.limitKmh), roadName: $0.roadName)
             },
             limitAhead: s.limitAheadKmh >= 0 ? LimitAheadInfo(distanceM: s.limitAheadM, limitKmh: Int(s.limitAheadKmh)) : nil,
-            ahead: points(s.ahead),
+            ahead: geoPoints(s.ahead),
             events: s.events.map(DriveEvent.init),
             estimated: s.estimated,
-            zone: s.zone.map(ZoneInfo.init)
+            zone: s.drivenZone.map(ZoneInfo.init)
         )
     }
 }
