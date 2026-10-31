@@ -25,6 +25,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         UiSound.prepare()
         WarpSound.shared.prepare()
         MotionStarter.shared.sync()
+        // A Live Activity left by a killed app goes away at once.
+        if !DriveModel.shared.running { LiveActivityManager.shared.end() }
         return true
     }
 
