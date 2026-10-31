@@ -41,6 +41,9 @@ class CoreRadar(
     }
 }
 
+/** A road around the car, for the small window's map: [points] flat [lat, lon, …], OSM [roadClass]. */
+class CoreRoad(val points: List<Double>, val roadClass: String?)
+
 /** A radar being announced; [ageMs] -1 unless a dated mobile report. */
 class CoreAlert(val radar: CoreRadar, val distanceM: Double, val limitKmh: Int, val overLimit: Boolean, val ageMs: Long) {
     internal companion object {

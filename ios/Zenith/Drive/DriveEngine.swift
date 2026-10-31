@@ -1,6 +1,7 @@
 import CoreLocation
 import Foundation
 import UIKit
+import UserNotifications
 import ZenithCore
 
 /**
@@ -41,6 +42,8 @@ final class DriveEngine: NSObject, CLLocationManagerDelegate {
     private var parking: ParkDetector?
     private var radarData: RadarData?
     private var radarIndex: RadarIndex?
+    /** Road network of the drive (the tiles around the car, or the demo's). */
+    private var roadNetwork: () -> RoadNetwork? = { nil }
     private var queueGeneration = 0
     private var lastFixTimeMs: Int64 = 0
     private var lastFixWall: Date?
@@ -81,6 +84,16 @@ final class DriveEngine: NSObject, CLLocationManagerDelegate {
         MusicCenter.shared.activate()
         if settings.liveActivity { LiveActivityManager.shared.start(demo: origin == .demo) }
         if origin == .demo { startDemo(gen) } else { startLive(gen) }
+        // Started by itself (car, riding), Zenith in the background: a notification says so and opens it.
+        if (origin == .car || origin == .motion) && UIApplication.shared.applicationState != .active { notifyStarted() }
+    }
+
+    private func notifyStarted() {
+        let content = UNMutableNotificationContent()
+        content.title = "Zenith est en route"
+        content.body = "Les alertes radars sont actives. Touche pour ouvrir la petite fenêtre."
+        content.interruptionLevel = .timeSensitive
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "drive-start", content: content, trigger: nil))
     }
 
     func stop() {
@@ -103,6 +116,7 @@ final class DriveEngine: NSObject, CLLocationManagerDelegate {
             recorder = nil
             session = nil
             parking = nil
+            roadNetwork = { nil }
             radarData = nil
             radarIndex = nil
             lastFixWall = nil
@@ -123,6 +137,11 @@ final class DriveEngine: NSObject, CLLocationManagerDelegate {
         model.stopped()
     }
 
+    /** The car disconnected: ends the drive only if [origin] started it (a drive started by hand goes on). */
+    func stopIfStartedBy(_ origin: DriveOrigin) {
+        if running && self.origin == origin { stop() }
+    }
+
     /** The phone left the vehicle: a drive it started ends once the car is slow, now or within 3 min. */
     func motionExit() {
         guard running, origin == .motion else { return }
@@ -134,7 +153,8 @@ final class DriveEngine: NSObject, CLLocationManagerDelegate {
      * GPS), when the setting allows.
      */
     private func endByItself() {
-        guard running, !ending, settings.autoStop else { return }
+        // A drive started by the car ends when the car disconnects instead.
+        guard running, origin != .car, !ending, settings.autoStop else { return }
         ending = true
         NSLog("Zenith: drive over, stopping by itself")
         stop()
@@ -154,6 +174,7 @@ final class DriveEngine: NSObject, CLLocationManagerDelegate {
             session = sess
             parking = park
             recorder = rec
+            roadNetwork = { [weak live] in live?.network }
             lastNearbyMs = 0
         }
         live.loadRadars { [weak self] pack in
@@ -326,17 +347,21 @@ final class DriveEngine: NSObject, CLLocationManagerDelegate {
     /** Drive queue: hands a snapshot to the screens and the sounds. */
     private func show(_ s: Snapshot, _ gen: Int) {
         lastShown = s
-        var nearby: ([RadarInfo], [ZoneInfo])?
+        var nearby: ([RadarInfo], [ZoneInfo], [RoadLine])?
         if lastNearbyMs == 0 || s.timeMs - lastNearbyMs >= 3_000 {
             lastNearbyMs = s.timeMs
             let radars = radarIndex.map { Bridge.shared.nearbyRadars(index: $0, lat: s.position.lat, lon: s.position.lon, radiusM: 3_000).map(RadarInfo.init) } ?? []
             let zones = radarData.map { Bridge.shared.nearbyZones(data: $0, lat: s.position.lat, lon: s.position.lon, marginM: 4_000).map(ZoneInfo.init) } ?? []
-            nearby = (radars, zones)
+            let roads = Bridge.shared.roadsNear(network: roadNetwork(), lat: s.position.lat, lon: s.position.lon, radiusM: 600).map(RoadLine.init)
+            nearby = (radars, zones, roads)
         }
         DispatchQueue.main.async { [weak self] in
             guard let self, self.generation == gen, self.running else { return }
             self.model.update(s)
-            if let n = nearby { self.model.setNearby(radars: n.0, zones: n.1) }
+            if let n = nearby {
+                self.model.setNearby(radars: n.0, zones: n.1)
+                self.model.setRoads(n.2)
+            }
             s.events.forEach(self.announce)
             self.dangerBeep(s)
             if self.settings.liveActivity { LiveActivityManager.shared.update(s) }
@@ -442,6 +467,8 @@ final class DriveEngine: NSObject, CLLocationManagerDelegate {
             session = sess
             radarData = pack
             radarIndex = Bridge.shared.radarIndex(data: pack)
+            let network = Bridge.shared.demoNetwork(s: scenario)
+            roadNetwork = { network }
             lastNearbyMs = 0
         }
         var lastAt: Int64 = 0

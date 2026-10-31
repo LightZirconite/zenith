@@ -9,6 +9,15 @@ enum DriveOrigin {
     case demo
     /** The phone started riding in a vehicle (motion + significant location changes). */
     case motion
+    /** The car connected (Shortcuts automation "Voiture connectée"): it ends with the car. */
+    case car
+}
+
+/** A road around the car, for the small window's map. */
+struct RoadLine: Equatable {
+    let points: [GeoPoint]
+    /** OSM class: motorway, trunk, primary… */
+    let roadClass: String?
 }
 
 /**
@@ -53,6 +62,8 @@ final class DriveModel {
     private(set) var nearbyRadars: [RadarInfo] = []
     /** Control itineraries around the car, for the map. */
     private(set) var nearbyZones: [ZoneInfo] = []
+    /** Roads within about 600 m of the car, for the small window's own map. */
+    private(set) var nearbyRoads: [RoadLine] = []
     /** Speed straight from each fix, before the road horizon: the big number. Nil in the demo. */
     private(set) var liveSpeed: Int?
     private(set) var demo = false
@@ -108,6 +119,10 @@ final class DriveModel {
         if zones != nearbyZones { nearbyZones = zones }
     }
 
+    func setRoads(_ roads: [RoadLine]) {
+        if roads != nearbyRoads { nearbyRoads = roads }
+    }
+
     func setData(_ status: DataStatus) {
         if status != data { data = status }
     }
@@ -120,5 +135,6 @@ final class DriveModel {
         origin = .hand
         nearbyRadars = []
         nearbyZones = []
+        nearbyRoads = []
     }
 }

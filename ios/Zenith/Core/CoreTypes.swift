@@ -187,6 +187,12 @@ extension RadarInfo {
     }
 }
 
+extension RoadLine {
+    init(_ r: CoreRoad) {
+        self.init(points: geoPoints(r.points), roadClass: r.roadClass)
+    }
+}
+
 extension ZoneInfo {
     init(_ z: CoreZone) {
         self.init(id: z.zoneId, points: geoPoints(z.points), lengthM: z.lengthM, remainingM: optDouble(z.remainingM))

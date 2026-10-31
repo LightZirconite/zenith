@@ -1,6 +1,5 @@
 import CoreLocation
 import CoreMotion
-import UserNotifications
 
 /**
  * "Démarrage en roulant" on iOS: with the position "Toujours", significant location changes wake
@@ -68,10 +67,5 @@ final class MotionStarter: NSObject, CLLocationManagerDelegate {
     private func startIfIdle() {
         guard !DriveModel.shared.running else { return }
         DriveEngine.shared.start(origin: .motion)
-        let content = UNMutableNotificationContent()
-        content.title = "Zenith est en route"
-        content.body = "Les alertes radars sont actives. Touche pour ouvrir la petite fenêtre."
-        content.interruptionLevel = .timeSensitive
-        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "motion-start", content: content, trigger: nil))
     }
 }

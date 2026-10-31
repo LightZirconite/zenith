@@ -20,6 +20,7 @@ struct ZenithApp: App {
  */
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        CrashGuard.shared.install()
         UNUserNotificationCenter.current().delegate = self
         UiSound.prepare()
         WarpSound.shared.prepare()

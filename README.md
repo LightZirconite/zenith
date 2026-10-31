@@ -38,15 +38,17 @@ Zenith ne vient pas de l'App Store : il s'installe avec [SideStore](https://side
 
 **Spotify sur iPhone** : iOS ne laisse pas Zenith voir ce que joue Spotify. Il faut connecter ton compte dans les réglages de Zenith (**Se connecter à Spotify**). Pour l'auteur du dépôt : crée une app sur [developer.spotify.com](https://developer.spotify.com/dashboard) (Web API, adresse de retour `zenith://spotify-callback`, ton compte dans les utilisateurs autorisés ; Spotify exige un compte Premium pour le mode développement), puis mets son *Client ID* dans la variable `SPOTIFY_CLIENT_ID` du dépôt (Settings → Secrets and variables → Actions → Variables). La version suivante le contient.
 
+**Démarrage à la connexion de la voiture** : iOS ne prévient pas les apps quand la voiture se connecte, mais l'app Raccourcis le fait. Une fois par voiture : Raccourcis → **Automatisation** → **+** → **CarPlay** (ou **Bluetooth** → ta voiture) → **Est connecté** → action Zenith **Voiture connectée** → **Exécuter immédiatement**. Puis la même chose avec **Est déconnecté** → **Voiture déconnectée** (la conduite s'arrête si c'est la voiture qui l'a démarrée). Siri comprend aussi « Démarre Zenith » et « Arrête Zenith ».
+
 ### Ce qui change sur iPhone
 
 | | Android | iPhone |
 |---|---|---|
-| Petite fenêtre au-dessus de Waze | fenêtre libre, carte complète | fenêtre image dans l'image, mini-carte dessinée (vitesse, limite, prochain radar) |
-| Écran verrouillé | notification avec la vitesse | Activité en direct et Dynamic Island |
+| Petite fenêtre au-dessus de Waze | fenêtre libre, carte complète | fenêtre image dans l'image, carte des routes autour de toi dessinée par Zenith (mêmes infos) |
+| Écran verrouillé | notification avec la vitesse et « Arrêter » | Activité en direct et Dynamic Island, avec « Arrêter » |
 | Musique | tous les lecteurs (Spotify, YouTube, Deezer…) | Spotify (compte connecté) et Apple Music seulement |
 | Contrôle de Spotify | toujours | précédent / pause / suivant avec Spotify Premium (règle de Spotify) |
-| Démarrage auto | en roulant ou à la connexion de la voiture | en roulant seulement (iOS ne donne pas la connexion Bluetooth) |
+| Démarrage auto | en roulant ou à la connexion de la voiture | en roulant, et à la connexion de la voiture par une automatisation Raccourcis (voir plus bas) |
 | Mises à jour | installées seules | proposées par SideStore, une confirmation |
 | Volume monté pendant la conduite | oui | oui (glissière de volume du système) |
 

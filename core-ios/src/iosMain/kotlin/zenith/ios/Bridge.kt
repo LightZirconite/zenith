@@ -96,6 +96,13 @@ object Bridge {
         }.map { CoreZone.of(it) }
     }.getOrDefault(emptyList())
 
+    /** Roads within [radiusM] of the car (grid index of the network), for the small window's map. */
+    fun roadsNear(network: RoadNetwork?, lat: Double, lon: Double, radiusM: Double): List<CoreRoad> = runCatching {
+        network?.candidates(LatLon(lat, lon), radiusM).orEmpty().distinctBy { it.segment.id }.map { c ->
+            CoreRoad(c.segment.points.flatMap { listOf(it.lat, it.lon) }, c.segment.roadClass)
+        }
+    }.getOrDefault(emptyList())
+
     fun tile(text: String): List<RoadSegment>? = runCatching { RoadTiles.parse(text) }.getOrNull()
 
     fun network(tiles: List<List<RoadSegment>>): RoadNetwork = RoadNetwork(tiles.flatten().distinctBy { it.id })
@@ -115,6 +122,8 @@ object Bridge {
     fun demoFixes(s: DemoScenario): List<GpsFix> = s.fixes
 
     fun demoData(s: DemoScenario): RadarData = RadarData(s.radars, s.zones)
+
+    fun demoNetwork(s: DemoScenario): RoadNetwork = s.network
 
     // ---- Parking, weather, trip ----
 
