@@ -42,4 +42,11 @@ class LoudnessTest {
     fun `no volume range means no change`() {
         assertEquals(1f, Loudness.uiGain(5, 0))
     }
+
+    @Test
+    fun `button sounds sit 6 dB under the take-off ones`() {
+        for (v in listOf(0, 3, 8, 12, 15)) {
+            assertEquals(Loudness.uiGain(v, 15) * 0.5f, Loudness.tapGain(v, 15), 0.01f)
+        }
+    }
 }

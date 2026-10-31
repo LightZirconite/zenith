@@ -51,6 +51,8 @@ final class VolumeRaiser {
             guard let slider = self?.volumeView.subviews.compactMap({ $0 as? UISlider }).first else { return }
             slider.setValue(value, animated: false)
             slider.sendActions(for: .valueChanged)
+            // Left in the window, it would hide iOS's volume display and seem to take the buttons.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self?.volumeView.removeFromSuperview() }
         }
     }
 }

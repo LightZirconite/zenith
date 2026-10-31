@@ -33,5 +33,14 @@ object Loudness {
         return 10.0.pow(min(0.0, -overDb) / 20).toFloat()
     }
 
+    /**
+     * Button sounds a further 6 dB under the take-off's (31/10/2026, the author: "le son quand tu
+     * cliques sur les boutons est trop fort", on Android and iOS alike).
+     */
+    const val TAP_DB = -6.0
+
+    /** Gain from 0 to 1 for a button sound: [uiGain], [TAP_DB] lower. */
+    fun tapGain(volume: Int, max: Int): Float = uiGain(volume, max) * 10.0.pow(TAP_DB / 20).toFloat()
+
     private val CURVE = listOf(0.01 to -56.0, 0.2 to -34.0, 0.6 to -11.0, 1.0 to 0.0)
 }

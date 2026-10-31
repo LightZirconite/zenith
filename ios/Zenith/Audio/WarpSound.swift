@@ -9,10 +9,10 @@ import Foundation
  * away and the chord of home.
  *
  * The music steps aside for the flight through [AudioFocus], the app's one audio session: it slides
- * down and pauses at Start, then comes back low and rises to where it was; it only ducks under the
- * way back. On iOS, handing the session back to the music stops every sound of the app, so the
- * music comes back once the flight's own sounds have rung out (the boom's chord included), and a
- * flight cut short fades them out first: nothing ever ends dead. The sounds follow the media volume
+ * down at Start, with the animation, stays low under the flight and rises again from the boom. On
+ * iOS it is ducked, not paused as on Android: a paused player only plays again once the session is
+ * handed back, which stops every sound of the app, so the music came back seconds after the landing.
+ * A flight cut short fades its sounds out first: nothing ever ends dead. The sounds follow the media volume
  * like the interface sounds ([Cockpit.uiGain]). Main thread.
  */
 final class WarpSound {
@@ -40,10 +40,8 @@ final class WarpSound {
 
     /** [musicAway] asked, [musicBack] not yet. */
     private var away = false
-    /** The music paused for the flight: our pausing hold on [AudioFocus]. */
-    private var pauseHeld = false
-    /** The music back but still low: our ducking hold until it rises. */
-    private var riseHeld = false
+    /** The music ducked for the flight: our hold on [AudioFocus]. */
+    private var duckHeld = false
     /** The next step of the music's way back, waiting. */
     private var musicStep: DispatchWorkItem?
 
@@ -93,7 +91,7 @@ final class WarpSound {
     func homecoming() {
         // A flight cut short just before (the music still on its way back): given back now, so it
         // does not tear the way back's session down in the middle of it.
-        if pauseHeld || riseHeld { giveBack() }
+        if duckHeld { giveBack() }
         // Until the sound has died away: ending the duck stops whatever still sounds.
         AudioFocus.shared.duckFor(
             durationMs: Int((WarpSound.homecomingSeconds * 1_000).rounded()) - WarpSound.homecomingHoldMs,
@@ -111,37 +109,35 @@ final class WarpSound {
         return momentHeard
     }
 
-    /** At Start: the music slides down, then pauses for the flight. */
+    /** At Start: the music slides down with the animation and stays low under the flight. */
     func musicAway() {
         guard !away else { return }
         away = true
         cancelStep()
-        if !pauseHeld {
-            pauseHeld = true
-            AudioFocus.shared.acquire(pause: true)
-        }
-        if riseHeld {
-            riseHeld = false
-            AudioFocus.shared.release(holdMs: 0)
+        if !duckHeld {
+            duckHeld = true
+            AudioFocus.shared.acquire()
         }
     }
 
     /**
-     * At the boom (or after a long search): the music plays again, low at first, then rises to where
-     * it was. It waits for the flight's own sounds to ring out (the boom's chord, a lock note): giving
-     * the session back stops them on iOS.
+     * At the boom (or after a long search): the music stays low under the chord a moment, then rises;
+     * [AudioFocus] hands the session back only once the flight's sounds have rung out.
      */
     func musicBack() {
         guard away else { return }
         away = false
-        handBack(until: Date().addingTimeInterval(WarpSound.ringMax))
+        cancelStep()
+        guard duckHeld else { return }
+        duckHeld = false
+        AudioFocus.shared.release(holdMs: WarpSound.musicRiseMs)
     }
 
     /** Flight cut short: the music comes back at once, the flight's sounds fading out just before. */
     func musicNow() {
         away = false
         cancelStep()
-        guard pauseHeld || riseHeld else { return }
+        guard duckHeld else { return }
         let sounding = playing
         if sounding.isEmpty {
             giveBack()
@@ -198,49 +194,12 @@ final class WarpSound {
 
     // MARK: - Music
 
-    /** Waits (until [deadline] at most) for the flight's sounds to ring out and the hum to fade, then hands the music back. */
-    private func handBack(until deadline: Date) {
-        cancelStep()
-        let ringing = Date() < deadline ? ringingFor : 0
-        if ringing > 0 {
-            step(after: ringing + 0.05) { [weak self] in self?.handBack(until: deadline) }
-            return
-        }
-        if let hum = humPlayer, hum.isPlaying {
-            hum.setVolume(0, fadeDuration: WarpSound.cutFade)
-            step(after: WarpSound.cutFade) { [weak self] in
-                self?.humPlayer?.pause()
-                self?.handBack(until: deadline)
-            }
-            return
-        }
-        guard pauseHeld else {
-            resumeHum()
-            return
-        }
-        // The pause becomes a duck: the music plays again, low; then the duck ends and it rises.
-        pauseHeld = false
-        riseHeld = true
-        AudioFocus.shared.acquire()
-        AudioFocus.shared.release(pause: true, holdMs: 0)
-        step(after: Double(WarpSound.musicRiseMs) / 1_000) { [weak self] in
-            guard let self else { return }
-            self.riseHeld = false
-            AudioFocus.shared.release(holdMs: 0)
-            self.step(after: WarpSound.settleSeconds) { [weak self] in self?.resumeHum() }
-        }
-    }
-
     /** Our holds on the music given back now (whatever still sounds is silent by then). */
     private func giveBack() {
         cancelStep()
         for player in playing { player.stop() }
-        if pauseHeld {
-            pauseHeld = false
-            AudioFocus.shared.release(pause: true, holdMs: 0)
-        }
-        if riseHeld {
-            riseHeld = false
+        if duckHeld {
+            duckHeld = false
             AudioFocus.shared.release(holdMs: 0)
         }
         step(after: WarpSound.settleSeconds) { [weak self] in self?.resumeHum() }
@@ -276,15 +235,6 @@ final class WarpSound {
 
     private var playing: [AVAudioPlayer] { all.filter { $0.isPlaying } }
 
-    /** Seconds until the engines, a lock note and the arrival or the way back have all rung out. */
-    private var ringingFor: TimeInterval {
-        ([engagePlayer, moment] + lockPlayers)
-            .compactMap { $0 }
-            .filter { $0.isPlaying }
-            .map { $0.duration - $0.currentTime }
-            .max() ?? 0
-    }
-
     private func load(_ waves: Waves) {
         engagePlayer = WarpSound.player(waves.engage)
         humPlayer = WarpSound.player(waves.hum)
@@ -303,6 +253,7 @@ final class WarpSound {
         AudioFocus.shared.ensureActive()
         player.volume = gain()
         player.prepareToPlay()
+        AudioFocus.shared.track(player)
         moment = player
         momentKind = kind
         let session = AVAudioSession.sharedInstance()
@@ -323,6 +274,7 @@ final class WarpSound {
     private static func player(_ wav: Data) -> AVAudioPlayer? {
         let player = try? AVAudioPlayer(data: wav, fileTypeHint: AVFileType.wav.rawValue)
         player?.prepareToPlay()
+        if let player { AudioFocus.shared.track(player) }
         return player
     }
 
@@ -339,9 +291,6 @@ final class WarpSound {
 
     /** A sound heard later than this after it was started is not believed. */
     private static let maxLag: TimeInterval = 0.35
-
-    /** The longest the music waits for the flight's sounds: the boom's chord rings 3.6 s. */
-    private static let ringMax: TimeInterval = 4
 
     /** Fade of the flight's sounds before the music takes the session back. */
     private static let cutFade: TimeInterval = 0.25

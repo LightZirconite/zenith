@@ -184,6 +184,8 @@ object Bridge {
 
     fun uiGain(volume: Int, max: Int): Float = Loudness.uiGain(volume, max)
 
+    fun tapGain(volume: Int, max: Int): Float = Loudness.tapGain(volume, max)
+
     // ---- Music ----
 
     /** The Spotify track id in a "spotify:track:…" URI or open.spotify.com link, else nil. */

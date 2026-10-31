@@ -29,6 +29,7 @@ enum Synth {
     static func player(_ samples: [Float], rate: Int = Synth.rate) -> AVAudioPlayer? {
         let p = try? AVAudioPlayer(data: wav(samples, rate: rate), fileTypeHint: AVFileType.wav.rawValue)
         p?.prepareToPlay()
+        if let p { AudioFocus.shared.track(p) }
         return p
     }
 }

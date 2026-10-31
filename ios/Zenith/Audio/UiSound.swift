@@ -83,7 +83,7 @@ enum UiSound {
         }
         AudioFocus.shared.ensureActive()
         // Turned down when the volume is high (car, loud phone): never louder than the alerts.
-        player.volume = Cockpit.uiGain(volume: AVAudioSession.sharedInstance().outputVolume)
+        player.volume = Cockpit.tapGain(volume: AVAudioSession.sharedInstance().outputVolume)
         player.currentTime = 0
         player.play()
     }
@@ -91,6 +91,7 @@ enum UiSound {
     private static func makePlayer(_ data: Data) -> AVAudioPlayer? {
         guard let player = try? AVAudioPlayer(data: data, fileTypeHint: AVFileType.wav.rawValue) else { return nil }
         player.prepareToPlay()
+        AudioFocus.shared.track(player)
         return player
     }
 

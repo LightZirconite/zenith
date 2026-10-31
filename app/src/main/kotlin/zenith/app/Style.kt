@@ -25,6 +25,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.widthIn
@@ -43,6 +45,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -68,6 +71,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.node.DelegatableNode
 import androidx.compose.ui.node.DrawModifierNode
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
@@ -156,6 +160,7 @@ fun LargeTitlePage(
     scroll: ScrollState = rememberScrollState(),
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val collapseAtPx = with(LocalDensity.current) { 56.dp.toPx() }
     Box(Modifier.fillMaxSize()) {
         SpaceBackdrop(Modifier.fillMaxSize())
         // Tablet or car screen: a readable column in the middle rather than rows across the whole width.
@@ -163,8 +168,15 @@ fun LargeTitlePage(
             Modifier.align(Alignment.TopCenter).fillMaxHeight().widthIn(max = PAGE_MAX_WIDTH).fillMaxWidth()
                 .safeDrawingPadding().padding(horizontal = 20.dp, vertical = 12.dp),
         ) {
+            // Once the large title has gone into the bar, the back button follows it there.
+            val collapsed by remember { derivedStateOf { scroll.value > collapseAtPx / 2 } }
             Box(Modifier.fillMaxWidth().height(44.dp)) {
-                Box(Modifier.align(Alignment.CenterStart)) { leading() }
+                androidx.compose.animation.AnimatedVisibility(
+                    collapsed,
+                    Modifier.align(Alignment.CenterStart),
+                    enter = androidx.compose.animation.fadeIn(),
+                    exit = androidx.compose.animation.fadeOut(),
+                ) { leading() }
                 Text(
                     title,
                     color = Color.White,
@@ -179,11 +191,9 @@ fun LargeTitlePage(
             }
             Column(Modifier.weight(1f).verticalScroll(scroll)) {
                 Spacer(Modifier.height(4.dp))
-                Text(
-                    title,
-                    color = Color.White,
-                    fontSize = 34.sp,
-                    fontWeight = FontWeight.Bold,
+                // The back button beside the large title ("‹ Réglages"), as the author asked.
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.graphicsLayer {
                         val k = collapse(scroll)
                         alpha = 1f - k
@@ -192,7 +202,11 @@ fun LargeTitlePage(
                         scaleY = s
                         transformOrigin = TransformOrigin(0f, 0.5f)
                     },
-                )
+                ) {
+                    leading()
+                    Spacer(Modifier.width(12.dp))
+                    Text(title, color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                }
                 content()
             }
             bottom()

@@ -36,6 +36,11 @@ enum Cockpit {
         Bridge.shared.uiGain(volume: Int32((volume * 16).rounded()), max: 16)
     }
 
+    /** Gain for a button sound: [uiGain], 6 dB lower (core Loudness.tapGain). */
+    static func tapGain(volume: Float) -> Float {
+        Bridge.shared.tapGain(volume: Int32((volume * 16).rounded()), max: 16)
+    }
+
     private static func code(_ choice: Bool?) -> Int32 {
         switch choice {
         case .some(true): return 1

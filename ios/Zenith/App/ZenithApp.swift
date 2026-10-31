@@ -23,6 +23,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         CrashGuard.shared.install()
         UNUserNotificationCenter.current().delegate = self
         UiSound.prepare()
+        Speaker.prewarm()
         WarpSound.shared.prepare()
         MotionStarter.shared.sync()
         // A Live Activity left by a killed app goes away at once.

@@ -372,22 +372,30 @@ struct LargeTitlePage<Leading: View, Bottom: View, Content: View>: View {
                         .lineLimit(1)
                         .opacity(Double(collapse))
                         .offset(y: (1 - collapse) * 10)
+                    // Once the large title has gone into the bar, the back button follows it there.
                     HStack(spacing: 0) {
-                        leading()
+                        if collapse > 0.5 { leading().transition(.opacity) }
                         Spacer(minLength: 0)
                     }
+                    .animation(.easeOut(duration: 0.2), value: collapse > 0.5)
                 }
                 .frame(height: 44)
                 .padding(.horizontal, 20)
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
-                        Text(title)
-                            .font(.system(size: 34, weight: .bold))
-                            .foregroundStyle(.white)
-                            .opacity(Double(1 - collapse))
-                            .scaleEffect(1 - 0.12 * collapse, anchor: .leading)
-                            .padding(.top, 4)
+                        // The back button beside the large title ("‹ Réglages"), as the author asked.
+                        HStack(spacing: 12) {
+                            leading()
+                            Text(title)
+                                .font(.system(size: 34, weight: .bold))
+                                .foregroundStyle(.white)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
+                        }
+                        .opacity(Double(1 - collapse))
+                        .scaleEffect(1 - 0.12 * collapse, anchor: .leading)
+                        .padding(.top, 4)
                         content()
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)

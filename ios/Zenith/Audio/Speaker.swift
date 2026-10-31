@@ -19,8 +19,19 @@ final class Speaker: NSObject, AVSpeechSynthesizerDelegate {
     /** A spoken alert is queued or under way (danger beeps wait for it). */
     var speaking: Bool { !queued.isEmpty }
 
+    /** Looked up once (listing the voices is slow): warmed up off the main thread at launch. */
+    static let frenchVoice: AVSpeechSynthesisVoice? = bestFrenchVoice()
+
+    /** Finds the voice in the background, so "Démarrer" never waits for it. */
+    static func prewarm() {
+        DispatchQueue.global(qos: .utility).async {
+            let missing = frenchVoice == nil
+            DispatchQueue.main.async { VoiceStatus.shared.frenchMissing = missing }
+        }
+    }
+
     override init() {
-        voice = Self.bestFrenchVoice()
+        voice = Self.frenchVoice
         super.init()
         VoiceStatus.shared.frenchMissing = voice == nil
         synth.usesApplicationAudioSession = true

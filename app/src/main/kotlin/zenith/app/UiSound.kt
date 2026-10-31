@@ -111,7 +111,7 @@ object UiSound {
         val id = ids.get(kind.ordinal)
         if (id == 0) return
         // Turned down when the media volume is high (car head unit): never louder than the alerts.
-        val gain = runCatching { audio?.let { Loudness.uiGain(it.getStreamVolume(AudioManager.STREAM_MUSIC), it.getStreamMaxVolume(AudioManager.STREAM_MUSIC)) } }
+        val gain = runCatching { audio?.let { Loudness.tapGain(it.getStreamVolume(AudioManager.STREAM_MUSIC), it.getStreamMaxVolume(AudioManager.STREAM_MUSIC)) } }
             .getOrNull() ?: 1f
         runCatching { pool?.play(id, gain, gain, 1, 0, 1f) }
     }

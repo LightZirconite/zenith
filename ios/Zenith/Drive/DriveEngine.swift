@@ -80,10 +80,15 @@ final class DriveEngine: NSObject, CLLocationManagerDelegate {
         speaker = Speaker()
         UIApplication.shared.isIdleTimerDisabled = true
         UIDevice.current.isBatteryMonitoringEnabled = true
-        VolumeRaiser.shared.raise()
-        MusicCenter.shared.activate()
-        if settings.liveActivity { LiveActivityManager.shared.start(demo: origin == .demo) }
         if origin == .demo { startDemo(gen) } else { startLive(gen) }
+        // The rest after the take-off's first frames: "Démarrer" answers at once, the music slides
+        // down with the animation instead of before it.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            guard let self, self.generation == gen else { return }
+            VolumeRaiser.shared.raise()
+            MusicCenter.shared.activate()
+            if self.settings.liveActivity { LiveActivityManager.shared.start(demo: origin == .demo) }
+        }
         // Started by itself (car, riding), Zenith in the background: a notification says so and opens it.
         if (origin == .car || origin == .motion) && UIApplication.shared.applicationState != .active { notifyStarted() }
     }

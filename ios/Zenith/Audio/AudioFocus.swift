@@ -22,6 +22,9 @@ final class AudioFocus {
     private var abandon: DispatchWorkItem?
     private var toPause: DispatchWorkItem?
     private var toDuck: DispatchWorkItem?
+    /** Every player of the app's own sounds: the session is never handed back while one sounds. */
+    private let players = NSHashTable<AVAudioPlayer>.weakObjects()
+    private let playersLock = NSLock()
 
     static let holdMs = 1_500
     /** iOS's own duck ramp: the pause waits for the bottom of it. */
@@ -70,6 +73,22 @@ final class AudioFocus {
         }
     }
 
+    /**
+     * Registers a player of Zenith's own sounds (any thread). Handing the session back (to let the
+     * music up) stops every sound of the app on iOS, so it waits until none of them sounds.
+     */
+    func track(_ player: AVAudioPlayer) {
+        playersLock.lock()
+        players.add(player)
+        playersLock.unlock()
+    }
+
+    private var sounding: Bool {
+        playersLock.lock()
+        defer { playersLock.unlock() }
+        return players.allObjects.contains { $0.isPlaying }
+    }
+
     /** Bluetooth or CarPlay output: sounds start after a short silence. Checked at each sound. */
     var bluetooth: Bool {
         session.currentRoute.outputs.contains { [.bluetoothA2DP, .bluetoothLE, .bluetoothHFP, .carAudio].contains($0.portType) }
@@ -105,11 +124,12 @@ final class AudioFocus {
         do {
             switch wanted {
             case .duck:
-                try session.setCategory(.playback, mode: .voicePrompt, options: [.duckOthers, .interruptSpokenAudioAndMixWithOthers])
+                // Mode .default, not .voicePrompt: the volume buttons stay on the media volume during an alert.
+                try session.setCategory(.playback, mode: .default, options: [.duckOthers, .interruptSpokenAudioAndMixWithOthers])
                 duckedAt = Date()
             case .pause:
                 // Not mixable: the other app is interrupted (and resumes when this session ends).
-                try session.setCategory(.playback, mode: .voicePrompt, options: [])
+                try session.setCategory(.playback, mode: .default, options: [])
             case .none:
                 return
             }
@@ -129,6 +149,11 @@ final class AudioFocus {
     /** Back from pause to duck: the paused player resumes on the hand-over, then ducks at once. */
     private func duckNow() {
         guard pausers == 0, holders > 0, held == .pause else { return }
+        // Handing the session over would cut a sound of ours: once they have rung out.
+        if sounding {
+            toDuck = schedule(after: 0.2) { [weak self] in self?.duckNow() }
+            return
+        }
         try? session.setActive(false, options: .notifyOthersOnDeactivation)
         held = .none
         activate(.duck)
@@ -136,14 +161,19 @@ final class AudioFocus {
 
     private func releaseNow(tries: Int) {
         guard holders == 0, held != .none else { return }
-        // Stop ducking first (works while other sounds still play), then hand the audio back.
-        try? session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+        // Stop ducking at once (the music rises while our last sounds ring out)…
+        if held == .duck { try? session.setCategory(.playback, mode: .default, options: [.mixWithOthers]) }
+        // …and hand the session back once none of them sounds: on iOS that would cut them dead.
+        if sounding && tries < 120 {
+            abandon = schedule(after: 0.2) { [weak self] in self?.releaseNow(tries: tries + 1) }
+            return
+        }
         do {
             try session.setActive(false, options: .notifyOthersOnDeactivation)
             held = .none
         } catch {
-            // A sound still playing (button, video): tried again in a moment.
-            if tries < 8 {
+            // Something else still holds the output (a video): tried again in a moment.
+            if tries < 130 {
                 abandon = schedule(after: 0.4) { [weak self] in self?.releaseNow(tries: tries + 1) }
             } else {
                 held = .none
