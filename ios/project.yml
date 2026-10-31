@@ -1,0 +1,123 @@
+# Xcode project of the iOS app, generated on the macOS runner (xcodegen generate): no .xcodeproj in git.
+# Built unsigned by .github/workflows/ios.yml; SideStore signs it on the phone with a free Apple ID.
+name: Zenith
+options:
+  bundleIdPrefix: io.github.lightzirconite
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+  developmentLanguage: fr
+
+settings:
+  base:
+    # Overridden by the CI (xcodebuild MARKETING_VERSION=… CURRENT_PROJECT_VERSION=…).
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.0"
+    SWIFT_STRICT_CONCURRENCY: minimal
+    TARGETED_DEVICE_FAMILY: "1,2"
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    DEAD_CODE_STRIPPING: YES
+    # Spotify app of the author (developer.spotify.com), given by the CI from the repository variable.
+    SPOTIFY_CLIENT_ID: ""
+
+packages:
+  MapLibre:
+    url: https://github.com/maplibre/maplibre-gl-native-distribution
+    from: "6.0.0"
+
+targets:
+  Zenith:
+    type: application
+    platform: iOS
+    sources:
+      - path: Zenith
+      - path: Shared
+      # The demo drive's road tile, the same file the Android app bundles.
+      - path: ../core/src/main/resources/demo/roads_85_19.json
+        buildPhase: resources
+    dependencies:
+      - framework: ../core-ios/build/XCFrameworks/release/ZenithCore.xcframework
+        embed: false
+      - package: MapLibre
+      - target: ZenithLiveActivity
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.lightzirconite.zenith
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        OTHER_LDFLAGS: ["$(inherited)", "-lc++"]
+        # Shared/ is compiled into the widget extension too: app-only code behind this flag.
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) ZENITH_APP"
+        INFOPLIST_KEY_CFBundleDisplayName: Zenith
+    info:
+      path: Zenith/Info.plist
+      properties:
+        CFBundleDisplayName: Zenith
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSRequiresIPhoneOS: true
+        ITSAppUsesNonExemptEncryption: false
+        UIApplicationSupportsIndirectInputEvents: true
+        UIUserInterfaceStyle: Dark
+        UIStatusBarStyle: UIStatusBarStyleLightContent
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+          UIImageName: LaunchLogo
+          UIImageRespectsSafeAreaInsets: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UIBackgroundModes:
+          - location
+          - audio
+          - fetch
+        NSLocationWhenInUseUsageDescription: "Zenith suit ta vitesse et ta route pour t'annoncer les radars et les limitations."
+        NSLocationAlwaysAndWhenInUseUsageDescription: "Toujours : Zenith continue d'alerter écran éteint ou Waze devant, et démarre seul quand tu roules."
+        NSMotionUsageDescription: "Zenith reconnaît quand tu montes en voiture pour démarrer seul."
+        NSAppleMusicUsageDescription: "Zenith affiche le titre en cours d'Apple Music et le pilote depuis l'écran de conduite."
+        NSSupportsLiveActivities: true
+        NSSupportsLiveActivitiesFrequentUpdates: true
+        LSApplicationQueriesSchemes:
+          - waze
+          - comgooglemaps
+          - sidestore
+          - spotify
+          - music
+          - shortcuts
+        SpotifyClientID: $(SPOTIFY_CLIENT_ID)
+
+  ZenithLiveActivity:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ZenithWidget
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.lightzirconite.zenith.LiveActivity
+        SKIP_INSTALL: YES
+    info:
+      path: ZenithWidget/Info.plist
+      properties:
+        CFBundleDisplayName: Zenith
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+
+schemes:
+  Zenith:
+    build:
+      targets:
+        Zenith: all
+        ZenithLiveActivity: all
+    run:
+      config: Debug
+    archive:
+      config: Release

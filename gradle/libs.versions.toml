@@ -29,4 +29,6 @@ android-application = { id = "com.android.application", version.ref = "agp" }
 # Lint on core too (pure Kotlin, packaged into the app): the Android 10 API check covers it.
 android-lint = { id = "com.android.lint", version.ref = "agp" }
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+# iOS: core compiled to a framework for the Swift app (:core-ios, macOS hosts only).
+kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

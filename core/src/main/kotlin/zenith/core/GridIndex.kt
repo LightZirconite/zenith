@@ -13,7 +13,7 @@ data class BBox(val minLat: Double, val minLon: Double, val maxLat: Double, val 
         /** Box of roughly [radiusM] around [center]. */
         fun around(center: LatLon, radiusM: Double): BBox {
             val dLat = radiusM / 111_195.0
-            val dLon = dLat / kotlin.math.cos(Math.toRadians(center.lat)).coerceAtLeast(0.01)
+            val dLon = dLat / kotlin.math.cos(rad(center.lat)).coerceAtLeast(0.01)
             return BBox(center.lat - dLat, center.lon - dLon, center.lat + dLat, center.lon + dLon)
         }
     }

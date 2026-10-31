@@ -1,40 +1,10 @@
 package zenith.core
 
-import org.w3c.dom.Element
-import java.io.InputStream
-import java.io.Writer
-import java.time.Instant
-import javax.xml.parsers.DocumentBuilderFactory
-
-/** Reads and writes GPS traces as GPX 1.1 track points (speed and course optional). */
+/**
+ * Writes GPS traces as GPX 1.1 track points (speed and course optional). Reading and writing to a
+ * java.io stream are JVM extensions (GpxJvm.kt): iOS only writes, through these strings.
+ */
 object Gpx {
-
-    fun read(input: InputStream): List<GpsFix> {
-        val factory = DocumentBuilderFactory.newInstance().apply {
-            isNamespaceAware = true
-            setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
-        }
-        val doc = factory.newDocumentBuilder().parse(input)
-        val points = doc.getElementsByTagNameNS("*", "trkpt")
-        return (0 until points.length).mapNotNull { i ->
-            val e = points.item(i) as Element
-            val time = e.child("time")?.let { Instant.parse(it).toEpochMilli() } ?: return@mapNotNull null
-            GpsFix(
-                timeMs = time,
-                position = LatLon(e.getAttribute("lat").toDouble(), e.getAttribute("lon").toDouble()),
-                accuracyM = e.child("hdop")?.toDoubleOrNull()?.let { it * 5.0 },
-                speedMps = e.child("speed")?.toDoubleOrNull(),
-                bearingDeg = e.child("course")?.toDoubleOrNull(),
-            )
-        }.sortedBy { it.timeMs }
-    }
-
-    fun write(fixes: List<GpsFix>, out: Writer, name: String = "Zenith") {
-        out.write(header(name))
-        for (f in fixes) out.write(point(f))
-        out.write(FOOTER)
-        out.flush()
-    }
 
     /** Start of a file; points then [FOOTER] follow. Lets a recorder append instead of rewriting. */
     fun header(name: String = "Zenith"): String =
@@ -44,7 +14,7 @@ object Gpx {
 
     fun point(f: GpsFix): String = buildString {
         append("<trkpt lat=\"${f.position.lat}\" lon=\"${f.position.lon}\">")
-        append("<time>${Instant.ofEpochMilli(f.timeMs)}</time>")
+        append("<time>${isoInstant(f.timeMs)}</time>")
         f.accuracyM?.let { append("<hdop>${it / 5.0}</hdop>") }
         f.speedMps?.let { append("<speed>$it</speed>") }
         f.bearingDeg?.let { append("<course>$it</course>") }
@@ -53,10 +23,38 @@ object Gpx {
 
     const val FOOTER = "</trkseg></trk>\n</gpx>\n"
 
-    /** Text of the first descendant with [localName], searching extensions too. */
-    private fun Element.child(localName: String): String? {
-        val nodes = getElementsByTagNameNS("*", localName)
-        return if (nodes.length > 0) nodes.item(0).textContent.trim() else null
+    /**
+     * UTC time as java.time.Instant.toString writes it ("2026-10-31T08:05:09Z", milliseconds only
+     * when not zero): the same text on the JVM and on iOS.
+     */
+    fun isoInstant(epochMs: Long): String {
+        val days = floorDiv(epochMs, 86_400_000L)
+        val msOfDay = epochMs - days * 86_400_000L
+        // Civil date from days since 1970-01-01 (H. Hinnant's algorithm).
+        val z = days + 719_468
+        val era = floorDiv(z, 146_097)
+        val doe = z - era * 146_097
+        val yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365
+        val doy = doe - (365 * yoe + yoe / 4 - yoe / 100)
+        val mp = (5 * doy + 2) / 153
+        val day = doy - (153 * mp + 2) / 5 + 1
+        val month = if (mp < 10) mp + 3 else mp - 9
+        val year = yoe + era * 400 + if (month <= 2) 1 else 0
+        val s = msOfDay / 1000
+        val ms = msOfDay % 1000
+        return buildString {
+            append(year.toString().padStart(4, '0')).append('-').append(two(month)).append('-').append(two(day))
+            append('T').append(two(s / 3600)).append(':').append(two(s / 60 % 60)).append(':').append(two(s % 60))
+            if (ms != 0L) append('.').append(ms.toString().padStart(3, '0'))
+            append('Z')
+        }
+    }
+
+    private fun two(v: Long) = v.toString().padStart(2, '0')
+
+    private fun floorDiv(a: Long, b: Long): Long {
+        val q = a / b
+        return if ((a % b != 0L) && ((a < 0) != (b < 0))) q - 1 else q
     }
 
     private fun escape(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")

@@ -17,6 +17,14 @@ kotlin {
     }
 }
 
+// src/main: plain Kotlin, also compiled for iOS by :core-ios. src/jvm: what needs the JVM (java.io,
+// XML, java.text, locks): the replay and audit tools, GPX reading, the canvas cache, the demo resource.
+sourceSets {
+    main {
+        kotlin.srcDir("src/jvm/kotlin")
+    }
+}
+
 dependencies {
     api(libs.kotlinx.serialization.json)
     testImplementation(kotlin("test"))

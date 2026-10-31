@@ -73,7 +73,7 @@ jobs:
           if grep -qx radars.json <<< "$assets"; then gh release download data -p radars.json -O out/previous_radars.json; fi
           if grep -qx official.json <<< "$assets"; then gh release download data -p official.json -D out; fi
           pipeline/lufop_db.sh fetch out/lufop.json
-          python pipeline/build_radars.py merge out/osm_radars.json out/lufop.json out/radars.json out/official.json
+          python pipeline/build_radars.py merge out/osm_radars.json out/lufop.json out/radars.json out/official.json --france out/manifest.json --abroad out/radars_abroad.json
 
       - name: Publish
         env:
@@ -93,8 +93,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          python pipeline/build_radars.py check out/previous_radars.json out/radars.json
-          gh release upload data out/radars.json out/official.json --clobber
+          python pipeline/build_radars.py check out/previous_radars.json out/radars.json --france out/manifest.json
+          gh release upload data out/radars.json out/official.json $(ls out/radars_abroad.json 2>/dev/null) --clobber
 
       # Revives the radars chain (radars.yml starts itself again every few hours) if it ever stopped.
       - name: Radars chain alive

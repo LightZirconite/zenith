@@ -10,8 +10,13 @@
 
 Usage:
   build_radars.py osm <france.osm.pbf> <osm_radars.json>     weekly, from the OSM extract
-  build_radars.py merge <osm_radars.json> <lufop.json|-> <radars.json> [official.json]
-  build_radars.py check <previous radars.json|-> <radars.json>   fails if more than 10 % of radars vanished
+  build_radars.py merge <osm_radars.json> <lufop.json|-> <radars.json> [official.json] [--france manifest.json --abroad radars_abroad.json]
+  build_radars.py check <previous radars.json|-> <radars.json> [--france manifest.json]   fails if more than 10 % of radars vanished
+
+With --france (the road tiles of the data release, from the France extract), radars.json keeps France
+and its border (a radar in a French road tile or the next one) and the rest of the harvest (Lufop
+abroad, for holidays) goes to radars_abroad.json, which the apps fetch only when driving abroad; the
+check then compares the French part only.
 
 official.json caches the last good copy of both official sources: when one is down, the merge uses
 its cached copy instead of losing it (the file is rewritten with whatever was fetched fresh).
@@ -527,6 +532,37 @@ def absorb_twins(radars):
     return kept
 
 
+def france_tiles(path):
+    """(i, j) of the 0.5° French road tiles listed by the data release manifest; None when unreadable."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            names = json.load(f)["tiles"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    tiles = set()
+    for name in names:
+        m = re.fullmatch(r"roads_(-?\d+)_(-?\d+)\.json\.gz", name)
+        if m:
+            tiles.add((int(m.group(1)), int(m.group(2))))
+    return tiles or None
+
+
+def in_france(lat, lon, tiles):
+    """In a French road tile or one of its neighbours (border roads, both sides)."""
+    i, j = math.floor(lat * 2), math.floor(lon * 2)
+    return any((i + di, j + dj) in tiles for di in (-1, 0, 1) for dj in (-1, 0, 1))
+
+
+def flag(args, name):
+    """Value of --name in args (removed from them), or None."""
+    if name not in args:
+        return None
+    k = args.index(name)
+    value = args[k + 1] if k + 1 < len(args) else None
+    del args[k:k + 2]
+    return value
+
+
 def write_pack(radars, zones, gouv_url, out):
     doc = {
         "v": 1,
@@ -554,7 +590,7 @@ def write_pack(radars, zones, gouv_url, out):
     with_dir = sum(1 for r in doc["radars"] if "dir" in r)
     zone_km = sum(sum(distance(a, b) for a, b in zip(z["pts"], z["pts"][1:])) for z in zones) / 1000
     summary(
-        [f"### radars.json : {len(doc['radars'])} radars, {with_dir} avec sens, "
+        [f"### {os.path.basename(out)} : {len(doc['radars'])} radars, {with_dir} avec sens, "
          f"{sum(1 for r in doc['radars'] if r['type'] == 'SECTION_END' and 'len' in r)} fins de tronçon sans début avec longueur, "
          f"{len(zones)} itinéraires de contrôle ({zone_km:.0f} km)", "| source | radars |", "|---|---|"]
         + [f"| {k} | {v} |" for k, v in by_src.most_common()]
@@ -563,13 +599,20 @@ def write_pack(radars, zones, gouv_url, out):
     )
 
 
-def check(previous, current):
-    """Refuses a pack that lost more than MAX_LOSS of the previous one (broken source, bad merge)."""
+def check(previous, current, tiles=None):
+    """
+    Refuses a pack that lost more than MAX_LOSS of the previous one (broken source, bad merge).
+    With [tiles], both are compared on France only (the previous pack may still hold radars from
+    abroad, now published apart).
+    """
     new = json.load(open(current))["radars"]
     if previous == "-" or not os.path.exists(previous):
         summary([f"Contrôle : pas de version précédente, {len(new)} radars."])
         return
     old = json.load(open(previous))["radars"]
+    if tiles:
+        old = [r for r in old if in_france(r["lat"], r["lon"], tiles)]
+        new = [r for r in new if in_france(r["lat"], r["lon"], tiles)]
     # Compared after folding the old pack's duplicates the same way: removing duplicates is no loss.
     old = absorb_twins([{**r, "pos": (r["lat"], r["lon"]), "src": r.get("src", "?").split("+")} for r in old])
     summary([f"Contrôle : {len(old)} → {len(new)} radars (ancienne version sans ses doublons)."])
@@ -583,6 +626,11 @@ def check(previous, current):
 
 
 def main():
+    args = sys.argv[1:]
+    france_path = flag(args, "--france")
+    abroad_out = flag(args, "--abroad")
+    tiles = france_tiles(france_path) if france_path else None
+    sys.argv = [sys.argv[0]] + args
     mode = sys.argv[1]
     if mode == "osm":
         items, sections = osm_items(osm_elements(sys.argv[2]))
@@ -595,9 +643,14 @@ def main():
         sections = [{**x, "from": tuple(x["from"]), "to": tuple(x["to"])} for x in osm["sections"]]
         gouv, gouv_url, sr, zones = official_sources(sys.argv[5] if len(sys.argv) > 5 else None)
         radars = merge(merge_official(gouv, sr), items, sections, lufop_items(sys.argv[3]))
-        write_pack(radars, zones, gouv_url, sys.argv[4])
+        if tiles and abroad_out:
+            home = [r for r in radars if in_france(r["pos"][0], r["pos"][1], tiles)]
+            write_pack(home, zones, gouv_url, sys.argv[4])
+            write_pack([r for r in radars if not in_france(r["pos"][0], r["pos"][1], tiles)], [], gouv_url, abroad_out)
+        else:
+            write_pack(radars, zones, gouv_url, sys.argv[4])
     elif mode == "check":
-        check(sys.argv[2], sys.argv[3])
+        check(sys.argv[2], sys.argv[3], tiles)
     else:
         sys.exit(__doc__)
 

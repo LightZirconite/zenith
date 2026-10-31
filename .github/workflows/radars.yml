@@ -88,8 +88,8 @@ jobs:
       - name: Merge
         run: |
           if [ -f out/osm_radars.json ]; then
-            python pipeline/build_radars.py merge out/osm_radars.json out/lufop.json out/radars.json out/official.json
-            python pipeline/build_radars.py check out/previous_radars.json out/radars.json
+            python pipeline/build_radars.py merge out/osm_radars.json out/lufop.json out/radars.json out/official.json --france out/manifest.json --abroad out/radars_abroad.json
+            python pipeline/build_radars.py check out/previous_radars.json out/radars.json --france out/manifest.json
           else
             echo "::warning::osm_radars.json absent (workflow data pas encore passé) : radars.json non reconstruit"
           fi
@@ -98,7 +98,7 @@ jobs:
         if: hashFiles('out/radars.json') != ''
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload data out/radars.json out/official.json --clobber
+        run: gh release upload data out/radars.json out/official.json $(ls out/radars_abroad.json 2>/dev/null) --clobber
 
   # Outside the data-release group: its long pause must not hold back data.yml.
   next:

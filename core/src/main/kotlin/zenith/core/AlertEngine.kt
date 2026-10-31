@@ -198,8 +198,8 @@ class AlertEngine(
         // Standing (red light, jam): heading and road match are noise, so nothing moves on until the car does.
         val moving = motion == Motion.MOVING
         advanceSection(state, moving, events)
-        recentlyPassed.entries.removeIf { now - it.value > 5 * 60_000 }
-        sectionsHandled.entries.removeIf { now - it.value > 30 * 60_000 }
+        recentlyPassed.entries.removeAll { now - it.value > 5 * 60_000 }
+        sectionsHandled.entries.removeAll { now - it.value > 30 * 60_000 }
 
         val heading = state.headingDeg
         val triggerM = (v * settings.lookaheadS + v * v / (2 * settings.comfortDecelMps2))
@@ -367,7 +367,7 @@ class AlertEngine(
         if (d < 15) return true
         val angle = Geo.headingDiffDeg(heading, Geo.bearingDeg(p, target))
         // Near the radar, accept a wider angle as long as it stays close to the road axis.
-        return angle <= settings.aheadConeDeg || (angle < 90 && d * sin(Math.toRadians(angle)) < 25)
+        return angle <= settings.aheadConeDeg || (angle < 90 && d * sin(rad(angle)) < 25)
     }
 
     private fun radarLimit(r: Radar, roadLimit: Int?): Int? =

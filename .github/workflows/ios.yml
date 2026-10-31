@@ -1,0 +1,119 @@
+name: ios
+
+# iOS app on a macOS runner: core compiled by Kotlin/Native, Xcode project generated (XcodeGen),
+# unsigned IPA (SideStore signs it on the phone with a free Apple ID). On main: published on the
+# "ios" release (prerelease, never latest) with the SideStore source sidestore.json, which SideStore
+# and the app check for updates. On another branch: the IPA as an artifact (check before merging).
+on:
+  push:
+    paths:
+      - "ios/**"
+      - "core/src/main/**"
+      - "core-ios/**"
+      - "gradle/**"
+      - "*.gradle.kts"
+      - "gradle.properties"
+      - "scripts/sidestore_source.py"
+      - ".github/workflows/ios.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  ios:
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      BUILD: ${{ github.run_number }}
+      VERSION: 0.1.${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Kotlin/Native toolchain cache
+        uses: actions/cache@v5
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
+
+      - name: Core tests
+        run: ./gradlew :core:test
+      - name: Core framework (Kotlin/Native)
+        run: ./gradlew :core-ios:assembleZenithCoreReleaseXCFramework
+      - name: Core as Swift sees it
+        run: |
+          h=$(find core-ios/build/XCFrameworks/release -name ZenithCore.h | head -1)
+          awk '/^@interface ZenithCore(Bridge|Core[A-Z][A-Za-z]*|CanvasResult) /{on=1} on{print} /^@end/{on=0}' "$h" | grep -v "^ *$" | grep -vE "hash\(\)|description\(\)|isEqual" | head -400
+
+      - name: Xcode project
+        run: |
+          xcodebuild -version
+          brew install xcodegen
+          cd ios && xcodegen generate
+
+      - name: Build
+        working-directory: ios
+        env:
+          SPOTIFY_CLIENT_ID: ${{ vars.SPOTIFY_CLIENT_ID }}
+        run: |
+          set -o pipefail
+          xcodebuild -project Zenith.xcodeproj -scheme Zenith -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$BUILD" SPOTIFY_CLIENT_ID="$SPOTIFY_CLIENT_ID" \
+            build 2>&1 | tee xcodebuild.log | grep -E "error:|warning: unre|BUILD (SUCCEEDED|FAILED)|\*\* " || true
+          grep -q "BUILD SUCCEEDED" xcodebuild.log
+      - name: Build errors
+        if: failure()
+        working-directory: ios
+        run: grep -E "error:" xcodebuild.log | sed 's|.*/ios/||' | sort -u | head -200
+
+      - name: IPA
+        working-directory: ios
+        run: |
+          app=build/Build/Products/Release-iphoneos/Zenith.app
+          test -d "$app"
+          mkdir -p Payload
+          cp -R "$app" Payload/
+          zip -qry ../zenith.ipa Payload
+          ls -la ../zenith.ipa
+      - uses: actions/upload-artifact@v7
+        with:
+          name: zenith-ipa
+          path: zenith.ipa
+
+      - name: Publish (SideStore source)
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          repo="$GITHUB_REPOSITORY"
+          if ! gh release view ios >/dev/null 2>&1; then
+            gh release create ios --prerelease --latest=false --target "$GITHUB_SHA" \
+              --title "Zenith iOS" \
+              --notes "Application iOS : ajoute la source SideStore https://github.com/$repo/releases/download/ios/sidestore.json"
+          fi
+          gh release download ios -p sidestore.json -O previous.json 2>/dev/null || echo '{}' > previous.json
+          ipa="zenith-$BUILD.ipa"
+          cp zenith.ipa "$ipa"
+          gh release upload ios "$ipa" zenith.ipa --clobber
+          python3 scripts/sidestore_source.py previous.json sidestore.json \
+            --version "$VERSION" --build "$BUILD" \
+            --url "https://github.com/$repo/releases/download/ios/$ipa" \
+            --size "$(stat -f%z zenith.ipa)" \
+            --notes "$(git log -1 --pretty=%B)" \
+            --repo "$repo"
+          gh release upload ios sidestore.json --clobber
+          # Only the IPAs the source still lists stay on the release.
+          keep=$(python3 -c "import json;print(' '.join(v['downloadURL'].rsplit('/',1)[1] for v in json.load(open('sidestore.json'))['apps'][0]['versions']))")
+          for asset in $(gh release view ios --json assets -q '.assets[].name' | grep -E '^zenith-[0-9]+\.ipa$'); do
+            case " $keep " in *" $asset "*) ;; *) gh release delete-asset ios "$asset" -y ;; esac
+          done

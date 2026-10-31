@@ -30,12 +30,6 @@ object DemoDrive {
     private const val BRAKE_MPS2 = 2.0
     private const val DEFAULT_KMH = 70
 
-    /** Scenario from the tile bundled in core's resources. */
-    fun load(): DemoScenario {
-        val text = DemoDrive::class.java.getResource(TILE)?.readText() ?: error("demo tile $TILE missing")
-        return scenario(text)
-    }
-
     fun scenario(tileText: String): DemoScenario {
         val raw = RoadNetwork(RoadTiles.parse(tileText))
         val road = raw.segments.filter { it.name == ROAD }
