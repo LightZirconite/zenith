@@ -13,7 +13,7 @@ import zenith.core.Radar
 // distances, angles are never negative here); a missing object or text is nil in Swift.
 
 /** A radar. [kind]: the RadarType name ("FIXED", "SECTION_END"…). */
-class RadarView(
+class CoreRadar(
     val radarId: String,
     val lat: Double,
     val lon: Double,
@@ -26,7 +26,7 @@ class RadarView(
     val reportedAtMs: Long,
 ) {
     internal companion object {
-        fun of(r: Radar) = RadarView(
+        fun of(r: Radar) = CoreRadar(
             radarId = r.id,
             lat = r.position.lat,
             lon = r.position.lon,
@@ -42,17 +42,17 @@ class RadarView(
 }
 
 /** A radar being announced; [ageMs] -1 unless a dated mobile report. */
-class AlertView(val radar: RadarView, val distanceM: Double, val limitKmh: Int, val overLimit: Boolean, val ageMs: Long) {
+class CoreAlert(val radar: CoreRadar, val distanceM: Double, val limitKmh: Int, val overLimit: Boolean, val ageMs: Long) {
     internal companion object {
-        fun of(a: ActiveAlert) = AlertView(RadarView.of(a.radar), a.distanceM, a.limitKmh ?: -1, a.overLimit, a.ageMs ?: -1)
+        fun of(a: ActiveAlert) = CoreAlert(CoreRadar.of(a.radar), a.distanceM, a.limitKmh ?: -1, a.overLimit, a.ageMs ?: -1)
     }
 }
 
 /** The closest radar on the road ahead; [roadName] nil when guessed in a straight line. */
-class UpcomingView(val radar: RadarView, val distanceM: Double, val limitKmh: Int, val roadName: String?)
+class CoreUpcoming(val radar: CoreRadar, val distanceM: Double, val limitKmh: Int, val roadName: String?)
 
 /** Average-speed section under way. */
-class SectionView(
+class CoreSection(
     val limitKmh: Int,
     val averageKmh: Double,
     val remainingM: Double,
@@ -62,10 +62,10 @@ class SectionView(
 )
 
 /** A control itinerary: [points] flat [lat, lon, …]; [remainingM] -1 when not being driven. */
-class ZoneView(val zoneId: String, val points: List<Double>, val lengthM: Double, val remainingM: Double) {
+class CoreZone(val zoneId: String, val points: List<Double>, val lengthM: Double, val remainingM: Double) {
     internal companion object {
         fun of(z: ControlZone, remainingM: Double = -1.0) =
-            ZoneView(z.id, z.points.flatMap { listOf(it.lat, it.lon) }, z.lengthM, remainingM)
+            CoreZone(z.id, z.points.flatMap { listOf(it.lat, it.lon) }, z.lengthM, remainingM)
     }
 }
 
@@ -74,10 +74,10 @@ class ZoneView(val zoneId: String, val points: List<Double>, val lengthM: Double
  * limitChanged, zoneEntered, zoneLeft. [text]: what the voice says, nil for silent events.
  * [level]: overspeed level name (NONE, OVER, WARN).
  */
-class EventView(
+class CoreEvent(
     val kind: String,
     val timeMs: Long,
-    val radar: RadarView?,
+    val radar: CoreRadar?,
     val distanceM: Double,
     val limitKmh: Int,
     val speedKmh: Double,
@@ -91,7 +91,7 @@ class EventView(
     val text: String?,
 ) {
     internal companion object {
-        fun of(e: AlertEvent): EventView {
+        fun of(e: AlertEvent): CoreEvent {
             val text = runCatching { Announcer.text(e) }.getOrNull()
             fun v(
                 kind: String,
@@ -106,8 +106,8 @@ class EventView(
                 resumed: Boolean = false,
                 fromKmh: Int? = null,
                 toKmh: Int? = null,
-            ) = EventView(
-                kind, e.timeMs, radar?.let(RadarView::of), distanceM, limitKmh ?: -1, speedKmh, wouldFlash, points,
+            ) = CoreEvent(
+                kind, e.timeMs, radar?.let(CoreRadar::of), distanceM, limitKmh ?: -1, speedKmh, wouldFlash, points,
                 averageKmh, level.name, resumed, fromKmh ?: -1, toKmh ?: -1, text,
             )
             return when (e) {
@@ -129,7 +129,7 @@ class EventView(
  * Everything the screen needs after one fix. [ahead]: road ahead, flat [lat, lon, …].
  * [limitSource]: LimitSource name (EXPLICIT, IMPLICIT, INFERRED, AREA) or nil.
  */
-class SnapshotView(
+class CoreSnapshot(
     val timeMs: Long,
     val lat: Double,
     val lon: Double,
@@ -140,18 +140,18 @@ class SnapshotView(
     val roadClass: String?,
     val limitKmh: Int,
     val limitSource: String?,
-    val alerts: List<AlertView>,
-    val section: SectionView?,
-    val upcoming: UpcomingView?,
+    val alerts: List<CoreAlert>,
+    val section: CoreSection?,
+    val upcoming: CoreUpcoming?,
     val limitAheadKmh: Int,
     val limitAheadM: Double,
     val ahead: List<Double>,
-    val events: List<EventView>,
+    val events: List<CoreEvent>,
     val estimated: Boolean,
-    val zone: ZoneView?,
+    val zone: CoreZone?,
 ) {
     internal companion object {
-        fun of(s: DriveSnapshot) = SnapshotView(
+        fun of(s: DriveSnapshot) = CoreSnapshot(
             timeMs = s.timeMs,
             lat = s.position.lat,
             lon = s.position.lon,
@@ -162,15 +162,15 @@ class SnapshotView(
             roadClass = s.road?.segment?.roadClass,
             limitKmh = s.limitKmh ?: -1,
             limitSource = s.limitSource?.name,
-            alerts = s.alerts.map(AlertView::of),
-            section = s.section?.let { SectionView(it.limitKmh, it.averageKmh, it.remainingM, it.lengthM, it.targetKmh, it.lost) },
-            upcoming = s.upcoming?.let { UpcomingView(RadarView.of(it.radar), it.distanceM, it.limitKmh ?: -1, it.roadName) },
+            alerts = s.alerts.map(CoreAlert::of),
+            section = s.section?.let { CoreSection(it.limitKmh, it.averageKmh, it.remainingM, it.lengthM, it.targetKmh, it.lost) },
+            upcoming = s.upcoming?.let { CoreUpcoming(CoreRadar.of(it.radar), it.distanceM, it.limitKmh ?: -1, it.roadName) },
             limitAheadKmh = s.limitAhead?.limitKmh ?: -1,
             limitAheadM = s.limitAhead?.distanceM ?: -1.0,
             ahead = s.ahead.flatMap { listOf(it.lat, it.lon) },
-            events = s.events.map(EventView::of),
+            events = s.events.map(CoreEvent::of),
             estimated = s.estimated,
-            zone = s.zone?.let { ZoneView.of(it.zone, it.remainingM) },
+            zone = s.zone?.let { CoreZone.of(it.zone, it.remainingM) },
         )
     }
 }

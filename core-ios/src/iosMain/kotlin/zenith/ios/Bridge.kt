@@ -49,12 +49,12 @@ object Bridge {
     /** A live drive on the road network the app keeps loading around the car. */
     fun liveSession(network: () -> RoadNetwork?): DrivingSession = DrivingSession(network, emptyList())
 
-    fun process(session: DrivingSession, fix: GpsFix): SnapshotView? =
-        runCatching { session.process(fix)?.let(SnapshotView::of) }.getOrNull()
+    fun process(session: DrivingSession, fix: GpsFix): CoreSnapshot? =
+        runCatching { session.process(fix)?.let(CoreSnapshot::of) }.getOrNull()
 
     /** GPS lost (tunnel): the car moves on along the road; nil when there is nothing to follow. */
-    fun coast(session: DrivingSession, nowMs: Long): SnapshotView? =
-        runCatching { session.coast(nowMs)?.let(SnapshotView::of) }.getOrNull()
+    fun coast(session: DrivingSession, nowMs: Long): CoreSnapshot? =
+        runCatching { session.coast(nowMs)?.let(CoreSnapshot::of) }.getOrNull()
 
     fun setProfile(session: DrivingSession, probationary: Boolean, raining: Boolean) {
         session.profile = DriverProfile(probationary, raining)
@@ -84,16 +84,16 @@ object Bridge {
     fun radarIndex(data: RadarData): RadarIndex = RadarIndex(data.radars)
 
     /** Radars within [radiusM] of the car, for the map. */
-    fun nearbyRadars(index: RadarIndex, lat: Double, lon: Double, radiusM: Double): List<RadarView> =
-        runCatching { index.near(LatLon(lat, lon), radiusM).map(RadarView::of) }.getOrDefault(emptyList())
+    fun nearbyRadars(index: RadarIndex, lat: Double, lon: Double, radiusM: Double): List<CoreRadar> =
+        runCatching { index.near(LatLon(lat, lon), radiusM).map(CoreRadar::of) }.getOrDefault(emptyList())
 
     /** Control itineraries whose box meets the [marginM] box around the car, for the map. */
-    fun nearbyZones(data: RadarData, lat: Double, lon: Double, marginM: Double): List<ZoneView> = runCatching {
+    fun nearbyZones(data: RadarData, lat: Double, lon: Double, marginM: Double): List<CoreZone> = runCatching {
         val around = BBox.around(LatLon(lat, lon), marginM)
         data.zones.filter { z ->
             val b = BBox.of(z.points)
             b.minLat <= around.maxLat && b.maxLat >= around.minLat && b.minLon <= around.maxLon && b.maxLon >= around.minLon
-        }.map { ZoneView.of(it) }
+        }.map { CoreZone.of(it) }
     }.getOrDefault(emptyList())
 
     fun tile(text: String): List<RoadSegment>? = runCatching { RoadTiles.parse(text) }.getOrNull()
