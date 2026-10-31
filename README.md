@@ -31,10 +31,10 @@ Zenith ne vient pas de l'App Store : il s'installe avec [SideStore](https://side
 1. Installe SideStore en suivant [son guide](https://docs.sidestore.io) (une seule fois, avec un ordinateur).
 2. Dans SideStore → **Sources** → **+**, ajoute :
    `https://github.com/LightZirconite/zenith/releases/download/ios/sidestore.json`
-3. Ouvre la source et installe **Zenith**. SideStore demande s'il garde l'extension : **Keep** garde l'Activité en direct (écran verrouillé, Dynamic Island, bouton « Arrêter ») mais prend un App ID de plus ; **Remove** économise cet App ID, tout le reste marche (petite fenêtre comprise).
+3. Ouvre la source et installe **Zenith**. SideStore demande s'il garde l'extension : choisis **Keep**. Elle donne l'Activité en direct (écran verrouillé, Dynamic Island, bouton « Arrêter »), ne prend pas de place d'app active (depuis iOS 13.5, les extensions ne comptent pas dans les 3 apps), seulement un App ID de plus, une seule fois. **Remove** marche aussi (tout sauf l'Activité en direct), si tu es à court d'App ID.
 4. Au premier lancement, accepte les autorisations une par une (position « Toujours », notifications, mouvements, Apple Music).
 
-**Quota du compte gratuit** : Apple limite un identifiant gratuit à 10 App ID par 7 jours et 3 apps actives (SideStore compris). Zenith prend 1 App ID (2 avec l'extension) **une seule fois** : une mise à jour réutilise le même App ID (vérifié dans le code de SideStore), tu peux donc mettre à jour aussi souvent que tu veux.
+**Quota du compte gratuit** : Apple limite un identifiant gratuit à 10 App ID par 7 jours et 3 apps actives (SideStore compris). Zenith prend une place d'app active (extension comprise) et 2 App ID (1 sans l'extension) **une seule fois** : une mise à jour réutilise le même App ID (vérifié dans le code de SideStore), tu peux donc mettre à jour aussi souvent que tu veux.
 
 **Mises à jour** : chaque nouvelle version arrive dans la source. SideStore te prévient et Zenith affiche « Mise à jour disponible » : un appui sur **Installer** l'envoie à SideStore. iOS n'autorise pas une app à s'installer seule, il reste donc une confirmation dans SideStore. Ouvre SideStore de temps en temps : il renouvelle la signature (un identifiant Apple gratuit signe pour 7 jours).
 
