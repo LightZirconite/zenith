@@ -62,6 +62,8 @@ jobs:
           if grep -qx osm_radars.json <<< "$assets"; then gh release download data -p osm_radars.json -D out; fi
           if grep -qx radars.json <<< "$assets"; then gh release download data -p radars.json -O out/previous_radars.json; fi
           if grep -qx official.json <<< "$assets"; then gh release download data -p official.json -D out; fi
+          # The French road tiles: the Lufop grid keeps only the circles that touch France.
+          if grep -qx manifest.json <<< "$assets"; then gh release download data -p manifest.json -D out; fi
           pipeline/lufop_db.sh fetch out/lufop.json
           ls -la out
 
@@ -69,7 +71,7 @@ jobs:
       - name: Lufop harvest
         env:
           LUFOP_API_KEY: ${{ secrets.LUFOP_API_KEY }}
-        run: python pipeline/harvest_lufop.py out/lufop.json 150 ${{ github.event_name == 'workflow_dispatch' && !inputs.chained && 'all' || '' }}
+        run: python pipeline/harvest_lufop.py out/lufop.json 150 ${{ github.event_name == 'workflow_dispatch' && !inputs.chained && 'all' || '' }} --france out/manifest.json
 
       # Saved before anything else can fail: today's quota is spent, its results must not be lost.
       - name: Save Lufop base
