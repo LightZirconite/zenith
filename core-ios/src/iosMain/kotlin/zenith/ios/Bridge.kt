@@ -77,6 +77,9 @@ object Bridge {
 
     fun radarData(text: String): RadarData? = runCatching { RadarPack.parseAll(text) }.getOrNull()
 
+    /** France's radars and zones with the radars abroad (radars_abroad.json, no zones). */
+    fun withAbroad(home: RadarData, abroad: RadarData): RadarData = RadarData(home.radars + abroad.radars, home.zones)
+
     fun radarCount(data: RadarData): Int = data.radars.size
 
     fun zoneCount(data: RadarData): Int = data.zones.size

@@ -54,6 +54,8 @@ class DriveData(context: Context, private val scope: CoroutineScope) {
     private val dir = File(context.filesDir, "data").apply { mkdirs() }
     private val tileDir = File(dir, "tiles").apply { mkdirs() }
     private val radarFile = File(dir, "radars.json")
+    /** Radars abroad (Lufop harvest outside France), fetched only once the car drives abroad. */
+    private val abroadFile = File(dir, "radars_abroad.json")
     private val manifestFile = File(dir, "manifest.json")
     /** Content version of the cached tiles (manifest "schema"). */
     private val schemaFile = File(tileDir, "schema")
@@ -71,15 +73,26 @@ class DriveData(context: Context, private val scope: CoroutineScope) {
     var network: RoadNetwork? = null
         private set
 
+    /** Where the radars go: France's list, plus the radars abroad once the car is there. */
+    @Volatile
+    private var onRadars: ((RadarData) -> Unit)? = null
+    @Volatile
+    private var france: RadarData? = null
+    @Volatile
+    private var abroad: RadarData? = null
+    @Volatile
+    private var abroadAsked = false
+
     private val _status = MutableStateFlow(DataStatus())
     val status: StateFlow<DataStatus> = _status
 
     /** Loads cached radars and zones now, refreshes them from GitHub when older than [RADARS_MAX_AGE_MS]. */
     fun loadRadars(onLoaded: (RadarData) -> Unit) = scope.launch(Dispatchers.IO) {
-        if (radarFile.exists()) publishRadars(onLoaded)
+        onRadars = onLoaded
+        if (radarFile.exists()) publishRadars()
         if (!radarFile.exists() || age(radarFile) > RADARS_MAX_AGE_MS) {
             runCatching { download("radars.json", radarFile) }
-                .onSuccess { publishRadars(onLoaded) }
+                .onSuccess { publishRadars() }
                 // With a cached list the drive goes on with it: nothing to warn about.
                 .onFailure { if (radarFile.exists()) Log.w("Zenith", "data radars refresh", it) else fail("radars", it) }
         }
@@ -89,6 +102,7 @@ class DriveData(context: Context, private val scope: CoroutineScope) {
     fun ensureTiles(p: LatLon) {
         val wanted = RoadTiles.keysAround(p, 5_000.0)
         lastWanted = wanted
+        checkAbroad(RoadTiles.keyOf(p))
         val now = System.currentTimeMillis()
         val missing = wanted.filter { !tiles.containsKey(it) && it !in pending && now - (failedAtMs[it] ?: 0L) > RETRY_MS }
         if (missing.isEmpty()) {
@@ -102,6 +116,7 @@ class DriveData(context: Context, private val scope: CoroutineScope) {
             mutex.withLock {
                 _status.update { it.copy(loading = true) }
                 val available = availableTiles ?: loadManifest()
+                checkAbroad(RoadTiles.keyOf(p))
                 var failed: String? = null
                 for (key in missing) {
                     val file = File(tileDir, key.fileName)
@@ -162,12 +177,38 @@ class DriveData(context: Context, private val scope: CoroutineScope) {
         schemaFile.writeText(schema.toString())
     }
 
-    private fun publishRadars(onLoaded: (RadarData) -> Unit) {
+    private fun publishRadars() {
         val pack = runCatching { RadarPack.parseAll(radarFile.readText()) }.onFailure { fail("radars", it) }.getOrNull() ?: return
-        _status.update {
-            it.copy(radarCount = pack.radars.size, zoneCount = pack.zones.size, radarsUpdatedMs = radarFile.lastModified(), radarError = null)
+        france = pack
+        _status.update { it.copy(radarsUpdatedMs = radarFile.lastModified(), radarError = null) }
+        deliver()
+    }
+
+    /** France's radars, with those abroad once loaded, to the drive. */
+    private fun deliver() {
+        val home = france ?: return
+        val away = abroad
+        val pack = if (away == null) home else RadarData(home.radars + away.radars, home.zones)
+        _status.update { it.copy(radarCount = pack.radars.size, zoneCount = pack.zones.size) }
+        onRadars?.invoke(pack)
+    }
+
+    /**
+     * The car outside France (its tile is not among France's road tiles, manifest read): the radars
+     * abroad are fetched once per drive, refreshed after a week, the cached copy used offline.
+     */
+    private fun checkAbroad(here: RoadTiles.Key) {
+        val available = availableTiles ?: return
+        if (abroadAsked || here.fileName in available) return
+        abroadAsked = true
+        scope.launch(Dispatchers.IO) {
+            if (!abroadFile.exists() || age(abroadFile) > ABROAD_MAX_AGE_MS) {
+                runCatching { download("radars_abroad.json", abroadFile) }.onFailure { Log.w("Zenith", "data radars abroad", it) }
+            }
+            if (!abroadFile.exists()) return@launch
+            abroad = runCatching { RadarPack.parseAll(abroadFile.readText()) }.onFailure { Log.w("Zenith", "data radars abroad", it) }.getOrNull()
+            deliver()
         }
-        onLoaded(pack)
     }
 
     private fun fail(what: String, e: Throwable) {
@@ -199,5 +240,7 @@ class DriveData(context: Context, private val scope: CoroutineScope) {
         const val RETRY_MS = 60_000L
         /** radars.json is rebuilt six times a day (new official cameras, Lufop). */
         const val RADARS_MAX_AGE_MS = 4 * 3_600_000L
+        /** Radars abroad grow slowly (what the quota leaves after France). */
+        const val ABROAD_MAX_AGE_MS = 7 * DAY_MS
     }
 }

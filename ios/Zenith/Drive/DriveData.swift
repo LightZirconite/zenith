@@ -13,12 +13,16 @@ final class DriveData {
     private static let retry: TimeInterval = 60
     /** radars.json is rebuilt several times a day (new official cameras, Lufop). */
     private static let radarsMaxAge: TimeInterval = 4 * 3600
+    /** Radars abroad grow slowly (what the Lufop quota leaves after France). */
+    private static let abroadMaxAge: TimeInterval = 7 * 24 * 3600
 
     private let queue = DispatchQueue(label: "zenith-data")
     private let lock = NSLock()
     private let dir: URL
     private let tileDir: URL
     private let radarFile: URL
+    /** Radars abroad (Lufop harvest outside France), fetched only once the car drives abroad. */
+    private let abroadFile: URL
     private let manifestFile: URL
     private let schemaFile: URL
     private let http: URLSession
@@ -30,6 +34,10 @@ final class DriveData {
     private var lastWanted: [String] = []
     private var availableTiles: [String: Int64?]?
     private var status = DataStatus()
+    private var onRadars: ((RadarData) -> Void)?
+    private var france: RadarData?
+    private var abroad: RadarData?
+    private var abroadAsked = false
 
     private var _network: RoadNetwork?
     /** Current road network around the car (any thread). */
@@ -47,6 +55,7 @@ final class DriveData {
         dir = support.appendingPathComponent("data", isDirectory: true)
         tileDir = dir.appendingPathComponent("tiles", isDirectory: true)
         radarFile = dir.appendingPathComponent("radars.json")
+        abroadFile = dir.appendingPathComponent("radars_abroad.json")
         manifestFile = dir.appendingPathComponent("manifest.json")
         schemaFile = tileDir.appendingPathComponent("schema")
         try? FileManager.default.createDirectory(at: tileDir, withIntermediateDirectories: true)
@@ -60,11 +69,12 @@ final class DriveData {
     /** Loads cached radars and zones now, refreshes them from GitHub when older than 4 h. */
     func loadRadars(_ onLoaded: @escaping (RadarData) -> Void) {
         queue.async { [self] in
+            onRadars = onLoaded
             let exists = FileManager.default.fileExists(atPath: radarFile.path)
-            if exists { publishRadars(onLoaded) }
+            if exists { publishRadars() }
             if !exists || age(radarFile) > Self.radarsMaxAge {
                 if download("radars.json", to: radarFile) {
-                    publishRadars(onLoaded)
+                    publishRadars()
                 } else if !exists {
                     // With a cached list the drive goes on with it: nothing to warn about.
                     change { $0.radarError = "Données radars indisponibles" }
@@ -85,6 +95,8 @@ final class DriveData {
             }
             let names = wanted.map { Bridge.shared.tileFileName(i: $0.0, j: $0.1) }
             lastWanted = names
+            let here = Bridge.shared.tileFileName(i: Int32((lat * 2).rounded(.down)), j: Int32((lon * 2).rounded(.down)))
+            checkAbroad(here)
             let now = Date()
             let missing = zip(names, wanted).filter { name, _ in
                 tiles[name] == nil && !pending.contains(name) && now.timeIntervalSince(failedAt[name] ?? .distantPast) > Self.retry
@@ -96,6 +108,7 @@ final class DriveData {
             }
             change { $0.roadsReady = false; $0.loading = true }
             let available = availableTiles ?? loadManifest()
+            checkAbroad(here)
             var failed: String?
             for (name, _) in missing {
                 pending.insert(name)
@@ -178,21 +191,46 @@ final class DriveData {
         try? String(schema).write(to: schemaFile, atomically: true, encoding: .utf8)
     }
 
-    private func publishRadars(_ onLoaded: (RadarData) -> Void) {
+    private func publishRadars() {
         guard let text = try? String(contentsOf: radarFile, encoding: .utf8), let pack = Bridge.shared.radarData(text: text) else {
             change { $0.radarError = "Données radars indisponibles" }
             return
         }
         let modified = (try? FileManager.default.attributesOfItem(atPath: radarFile.path)[.modificationDate] as? Date) ?? nil
+        france = pack
+        change {
+            $0.radarsUpdated = modified
+            $0.radarError = nil
+        }
+        deliver()
+    }
+
+    /** France's radars, with those abroad once loaded, to the drive (data queue). */
+    private func deliver() {
+        guard let home = france else { return }
+        let pack = abroad.map { Bridge.shared.withAbroad(home: home, abroad: $0) } ?? home
         let radars = Int(Bridge.shared.radarCount(data: pack))
         let zones = Int(Bridge.shared.zoneCount(data: pack))
         change {
             $0.radarCount = radars
             $0.zoneCount = zones
-            $0.radarsUpdated = modified
-            $0.radarError = nil
         }
-        onLoaded(pack)
+        onRadars?(pack)
+    }
+
+    /**
+     * The car outside France (its tile is not among France's road tiles, manifest read): the radars
+     * abroad are fetched once per drive, refreshed after a week, the cached copy used offline.
+     */
+    private func checkAbroad(_ here: String) {
+        guard let available = availableTiles, !abroadAsked, available[here] == nil else { return }
+        abroadAsked = true
+        if !FileManager.default.fileExists(atPath: abroadFile.path) || age(abroadFile) > Self.abroadMaxAge {
+            _ = download("radars_abroad.json", to: abroadFile)
+        }
+        guard let text = try? String(contentsOf: abroadFile, encoding: .utf8), let pack = Bridge.shared.radarData(text: text) else { return }
+        abroad = pack
+        deliver()
     }
 
     private func change(_ edit: (inout DataStatus) -> Void) {
