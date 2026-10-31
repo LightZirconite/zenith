@@ -5,7 +5,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
-import java.util.Locale
+import kotlin.math.abs
+import kotlin.math.floor
 
 /** Weather now at a place: precipitation over the last 15 minutes and the WMO weather code. */
 data class WeatherNow(val precipitationMm: Double, val weatherCode: Int?)
@@ -16,12 +17,15 @@ object Weather {
     private val WET_CODES = setOf(51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 71, 73, 75, 77, 80, 81, 82, 85, 86, 95, 96, 99)
 
     /** Request for [p] rounded to 0.1° (~10 km): plenty for the weather, and little about where the car is. */
-    fun url(p: LatLon): String = String.format(
-        Locale.ROOT,
-        "https://api.open-meteo.com/v1/forecast?latitude=%.1f&longitude=%.1f&current=precipitation,weather_code",
-        p.lat,
-        p.lon,
-    )
+    fun url(p: LatLon): String =
+        "https://api.open-meteo.com/v1/forecast?latitude=${oneDecimal(p.lat)}&longitude=${oneDecimal(p.lon)}&current=precipitation,weather_code"
+
+    /** [x] with one decimal, half away from zero ("%.1f" without java.util.Formatter, absent on iOS). */
+    private fun oneDecimal(x: Double): String {
+        val tenths = floor(abs(x) * 10 + 0.5).toLong()
+        val sign = if (x < 0 || 1.0 / x < 0) "-" else ""
+        return "$sign${tenths / 10}.${tenths % 10}"
+    }
 
     /** The "current" block of an Open-Meteo answer; null when it is missing or unreadable. */
     fun parse(text: String): WeatherNow? = runCatching {

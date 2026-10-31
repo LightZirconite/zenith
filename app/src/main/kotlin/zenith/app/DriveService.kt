@@ -45,6 +45,7 @@ import zenith.core.RadarIndex
 import zenith.core.RainDetector
 import zenith.core.SpeedStabilizer
 import zenith.core.Weather
+import zenith.core.load
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors

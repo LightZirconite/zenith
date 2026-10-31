@@ -41,7 +41,7 @@ class DrivingSession(
     zones: List<ControlZone> = emptyList(),
 ) {
     /** Licence and weather rules; can change during a drive (rain starting). */
-    @Volatile
+    @kotlin.concurrent.Volatile
     var profile: DriverProfile = profile
 
     constructor(

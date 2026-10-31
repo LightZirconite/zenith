@@ -4,8 +4,8 @@ import kotlin.math.cos
 
 /** Planar x/y in meters (x east, y north) around [origin]. Accurate within a few km. */
 class LocalFrame(val origin: LatLon) {
-    private val mPerDegLat = Math.toRadians(1.0) * Geo.EARTH_RADIUS_M
-    private val mPerDegLon = mPerDegLat * cos(Math.toRadians(origin.lat))
+    private val mPerDegLat = rad(1.0) * Geo.EARTH_RADIUS_M
+    private val mPerDegLon = mPerDegLat * cos(rad(origin.lat))
 
     fun toXY(p: LatLon): Vec2 = Vec2((p.lon - origin.lon) * mPerDegLon, (p.lat - origin.lat) * mPerDegLat)
 
@@ -20,12 +20,12 @@ data class Vec2(val x: Double, val y: Double) {
     fun length() = kotlin.math.hypot(x, y)
 
     /** Compass heading of this vector, degrees in [0, 360). */
-    fun headingDeg() = Geo.normalizeDeg(Math.toDegrees(kotlin.math.atan2(x, y)))
+    fun headingDeg() = Geo.normalizeDeg(deg(kotlin.math.atan2(x, y)))
 
     companion object {
         /** Unit vector pointing to compass [headingDeg]. */
         fun fromHeading(headingDeg: Double): Vec2 {
-            val r = Math.toRadians(headingDeg)
+            val r = rad(headingDeg)
             return Vec2(kotlin.math.sin(r), cos(r))
         }
     }

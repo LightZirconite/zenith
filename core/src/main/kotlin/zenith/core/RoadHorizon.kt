@@ -1,7 +1,5 @@
 package zenith.core
 
-import java.util.PriorityQueue
-
 /** A radar attached to a directed road segment, [offsetM] meters after the start of travel on it. */
 data class RadarOnRoad(val radar: Radar, val segment: RoadSegment, val forward: Boolean, val offsetM: Double)
 
@@ -76,7 +74,7 @@ object RoadHorizon {
      */
     fun reachable(network: RoadNetwork, from: RoadCandidate, maxM: Double): Map<Pair<Long, Boolean>, HorizonStep> {
         val best = HashMap<Pair<Long, Boolean>, HorizonStep>()
-        val queue = PriorityQueue<HorizonStep>(compareBy { it.startM })
+        val queue = MinHeap<HorizonStep>(compareBy { it.startM })
         queue += HorizonStep(from.segment, from.forward, -from.offsetM)
         while (queue.isNotEmpty()) {
             val step = queue.poll()
