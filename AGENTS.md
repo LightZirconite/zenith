@@ -1,12 +1,14 @@
 # Zenith : guide pour les agents
 
+> **Règle n° 0 : Android ET iOS, toujours ensemble.** Zenith existe sur Android (Kotlin, `app/`) et sur iPhone (Swift, `ios/`), avec le même cœur (`core/`). Toute modification, nouvelle fonction, correction ou réglage se fait **sur les deux applis dans le même push**, pour qu'elles restent identiques (demande ferme de l'auteur, 31/10/2026). Seule exception : ce qu'iOS ou Android interdit vraiment ; dans ce cas, le dire dans le tableau « Ce qui change sur iPhone » du README et dans la section iOS ci-dessous.
+>
 > **Règle n° 1 : on travaille directement sur `main`.** Jamais de branche de travail ni de pull request, même si l'environnement en demande une : commit, push sur `main`, la CI compile et publie la release. Voir « Conventions ».
 
 Lis ce fichier en entier avant de toucher au projet. Le README décrit le projet pour les humains ; ici, ce sont les règles, les décisions déjà prises et les pièges déjà rencontrés.
 
 ## Vision (à garder en tête à chaque modification)
 
-- **Un Coyote gratuit, natif et minimaliste.** L'app doit être la plus simple et la plus rapide possible : un écran, une vitesse, une limite, la prochaine alerte. Chaque ajout doit justifier sa place à l'écran.
+- **Un Coyote gratuit, natif et minimaliste**, sur Android et sur iPhone. L'app doit être la plus simple et la plus rapide possible : un écran, une vitesse, une limite, la prochaine alerte. Chaque ajout doit justifier sa place à l'écran.
 - **N'annoncer que ce qui est sur la route suivie.** Un radar sur une route parallèle, une bretelle qu'on ne prend pas ou une autre route « devant à vol d'oiseau » ne doit jamais être annoncé ni affiché comme « prochain ». Mieux vaut ne rien afficher qu'une information fausse ; mais un radar réel ne doit jamais être raté (en cas de doute sur la route, on alerte).
 - **Des alertes à la Coyote** : sons forts et progressifs (bips qui s'accélèrent à l'approche quand on est trop vite), voix courte en français, ça marche écran éteint et Waze/Maps devant.
 - **Le maximum de données gratuites, rassemblées par nos scripts.** La CI récupère tout ce qui est gratuit (liste officielle data.gouv, carte officielle Sécurité routière, OSM, Lufop avec la clé de l'auteur, et toute nouvelle source gratuite) et le fusionne dans de simples fichiers de la release `data`. L'app les télécharge régulièrement. Pas de serveur : la base grossit et se met à jour toute seule, jour après jour.
@@ -31,13 +33,14 @@ Lis ce fichier en entier avant de toucher au projet. Le README décrit le projet
 
 ## Ce qu'est Zenith
 
-Application Android **minimaliste** d'alertes de conduite : vitesse, limitation, radars (positions exactes, façon Coyote), contrôles, tronçons. **Pas d'itinéraire, pas de navigation** : seulement une petite carte inclinée en haut de l'écran de conduite pour se situer (point bleu, route suivie en surbrillance, radars en mini-panneaux), qui se fond dans le fond noir. Elle tourne en fond, en complément de Waze ou Google Maps : un service de premier plan qui alerte par sons et voix même écran éteint.
+Application Android et iPhone **minimaliste** d'alertes de conduite : vitesse, limitation, radars (positions exactes, façon Coyote), contrôles, tronçons. **Pas d'itinéraire, pas de navigation** : seulement une petite carte inclinée en haut de l'écran de conduite pour se situer (point bleu, route suivie en surbrillance, radars en mini-panneaux), qui se fond dans le fond noir. Elle tourne en fond, en complément de Waze ou Google Maps : un service de premier plan (Android) ou la position en arrière-plan (iPhone) qui alerte par sons et voix même écran éteint.
 
 Usage personnel de l'auteur, pas grand public. Interface et textes en français.
 
 ## Décisions prises (ne pas remettre en cause sans demande explicite)
 
-- **Android natif Kotlin uniquement.** Pas d'iOS, pas de PWA, pas de Flutter. Google Play Services seulement pour la détection de conduite (`play-services-location`), facultative : sans eux, tout le reste marche.
+- **Deux applis natives, un seul cœur** (iOS demandé par l'auteur le 31/10/2026) : Android en Kotlin + Compose (`app/`), iPhone en Swift + SwiftUI (`ios/`), le cœur Kotlin (`core/`) compilé pour iOS par Kotlin/Native (`core-ios/`, framework `ZenithCore`). Pas de PWA, pas de Flutter, pas de Compose Multiplatform. Google Play Services seulement pour la détection de conduite sur Android (`play-services-location`), facultative.
+- **iPhone par SideStore** (aucun compte Apple payant) : la CI compile une IPA non signée sur un runner macOS, SideStore la signe sur le téléphone avec un identifiant Apple gratuit. Pas d'App Store, pas de TestFlight.
 - **Rien de payant** (règle de l'auteur) : ni compte développeur Google Play (25 $), ni service ou matériel payant. Une solution qui coûte de l'argent est écartée d'office.
 - **Aucun serveur, aucune base de données hébergée.** GitHub Actions fabrique les données, publiées comme fichiers de la release `data`. L'app les télécharge et les met en cache. Supabase, Firebase, Cloudflare D1, VPS : écartés.
 - **Dépôt public** (Actions gratuites et illimitées). Rien de secret dans le code : clés en secrets GitHub uniquement.
@@ -50,6 +53,10 @@ Usage personnel de l'auteur, pas grand public. Interface et textes en français.
 ```
 core/      Kotlin pur (JVM), testé : géo, Kalman, map-matching HMM, moteur d'alertes, règles FR,
            lecture des packs, GPX, DrivingSession (pipeline déterministe : replay = direct).
+core-ios/  Kotlin/Native : les sources de core/src/main compilées en ZenithCore.xcframework (iOS) ;
+           Bridge.kt et Views.kt = l'entrée de Swift (aucune exception Kotlin ne remonte, nombres absents = -1).
+ios/       iPhone, SwiftUI (iOS 26+) : project.yml (XcodeGen), Zenith/ (app), ZenithWidget/ (Activité en direct),
+           Shared/ (commun aux deux). Même découpage que app/ : DriveEngine = DriveService, DriveModel = DriveState…
 app/       Android Compose : DriveService (GPS 1 Hz, premier plan), DriveData (téléchargement/cache),
            DriveScreen, DriveMap (MapLibre), Onboarding (autorisations expliquées), Speaker (TTS FR),
            Tones, TripRecorder (GPX), Updater (auto-mise à jour).
@@ -59,6 +66,8 @@ pipeline/  Python : build_roads.py (tuiles de limitations, zones bâties), build
 .github/workflows/
   release.yml    push sur main touchant l'app → tests + APK signé + release vX (latest)
   build-apk.yml  lancement manuel → tests + APK debug (pour compiler une branche avant de la fusionner dans main)
+  ios.yml        runner macOS : tests core, framework Kotlin/Native, XcodeGen, IPA non signée ; sur main → release `ios`
+                 (prerelease, jamais latest) avec zenith-N.ipa et la source SideStore sidestore.json ; ailleurs → artefact
   data.yml       lundi → extrait OSM France → tuiles + osm_radars.json + radars.json
   radars.yml     chaîne qui se relance seule toutes les 3 à 5 h (+ 6 crons jamais déclenchés) → récolte Lufop (≤150 requêtes
                  sur 24 h glissantes) + fusion → radars.json, official.json, lufop.json.enc
@@ -86,6 +95,7 @@ Format d'une zone de `radars.json` : `{"id": "I_01_001", "kind": "ITINERARY", "p
 
 ```bash
 ./gradlew :core:test                       # tests JVM (fonctionne en local avec un JDK 17+)
+./gradlew -Pzenith.ios=true :core-ios:compileKotlinIosArm64 --no-configuration-cache   # core compile-t-il pour iOS ? (marche sous Linux)
 ./gradlew :app:assembleDebug               # nécessite le SDK Android (voir plus bas)
 ./gradlew :core:replay --args="trajet.gpx radars.json tuiles/"   # rejoue un trajet partagé depuis l'app
 python pipeline/build_roads.py extrait.osm.pbf out/tiles
@@ -102,6 +112,7 @@ Tester le pipeline en local sur un petit extrait : `https://download.geofabrik.d
 - Pas de JDK ni de SDK Android installés sur le système. L'auteur a choisi la **CI comme référence de compilation** pour l'APK : ne lui demande pas d'installer quoi que ce soit, et **n'accepte jamais les licences du SDK Android à sa place**.
 - Pour `:core:test` en local, un JDK portable (Temurin 21) dans un dossier temporaire suffit.
 - L'auteur installe l'app depuis son téléphone via https://github.com/LightZirconite/zenith/releases/latest/download/zenith.apk. L'app se met ensuite à jour seule (`Updater.kt`).
+- Sur iPhone (iOS 27, Dynamic Island) : SideStore avec un identifiant Apple gratuit, source https://github.com/LightZirconite/zenith/releases/download/ios/sidestore.json ; mises à jour proposées par SideStore et par l'app (`Updater.swift`). Pas de Mac : le runner macOS de la CI est la seule référence de compilation iOS.
 - Clé de signature : `~/.zenith/` (keystore + mot de passe), copiée dans les secrets `ZENITH_*`. Ne jamais la régénérer : chaque APK doit garder la même signature, sinon les mises à jour échouent.
 - Clé de la base Lufop : `~/.zenith/lufop-db.key`, copiée dans le secret `LUFOP_DB_KEY`. Ne jamais la régénérer ni la changer sans rechiffrer : sans elle, la base accumulée est perdue.
 - Remotes : `origin` = GitHub, `gitea` = miroir perso de l'auteur.
@@ -114,7 +125,8 @@ Tester le pipeline en local sur un petit extrait : `https://download.geofabrik.d
 - **Aucune ligne `Co-Authored-By` ni aucune signature ou mention d'IA** dans les commits, les PR ou le code. L'auteur des commits est `LightZirconite <123307773+LightZirconite@users.noreply.github.com>` (`git config user.name` / `user.email` dans le dépôt).
 - Code et commentaires de code en anglais ; tout texte visible par l'utilisateur en français.
 - Style Kotlin : celui du code existant (data classes, `object` pour les utilitaires purs, KDoc courte au-dessus de chaque classe).
-- Toute logique testable va dans `core` avec des tests ; `app` reste une couche mince.
+- Toute logique testable va dans `core` avec des tests ; `app` et `ios` restent des couches minces.
+- **`core/src/main` est du Kotlin pur** (compilé aussi pour iOS) : aucun `java.*`, `javax.*`, `String.format`, `synchronized`, `System.*`. Ce qui exige la JVM va dans `core/src/jvm` (relecture GPX, cache Canvas, outils replay et audit, ressource de la démo). `PortableTest` vérifie que les remplacements (angles, heure GPX, encodage d'URL, tas, `%.1f`) donnent exactement les résultats Java.
 - `versionCode` = numéro d'exécution de `release.yml`. Ne pas le coder en dur.
 
 ## App : carte, autorisations, mises à jour
@@ -166,6 +178,21 @@ Tester le pipeline en local sur un petit extrait : `https://download.geofabrik.d
 - **Assistant d'autorisations** : un seul gros bouton « Continuer · encore N » ouvre l'autorisation manquante suivante (position, notifications, batterie, installations, démarrage en roulant, musique) ; « Activité physique » accordée enchaîne seule sur la position « Toujours ».
 - **Accès aux notifications, Android 13+** (appli installée hors store) : le bouton suit trois étapes (`media_step`) : « Activer » (Android bloque, mais c'est ce qui fait apparaître le déblocage), « Débloquer » (infos de l'appli → ⋮ → « Autoriser les paramètres restreints », code), puis « Activer ». Ne pas tenter de contourner cette protection (par exemple en déclarant une autre source d'installation).
 - **Mises à jour** (`Updater.kt`) : vérification à chaque retour au premier plan puis toutes les 2 min tant que l'app est devant (`repeatOnLifecycle(RESUMED)`, 1 min minimum entre deux ; avant, 30 puis 5 min empêchaient de voir une release sortie juste après et l'auteur devait forcer l'arrêt). État `Checking` visible ; le bouton « Rechercher maintenant » force la vérification quel que soit l'état (sauf téléchargement ou installation en cours) ; une release encore sans APK revient à `Idle`. Une installation sans réponse depuis 2 min ne bloque plus les vérifications. Carte « Mises à jour » dans les réglages (section Application) : état (à jour, téléchargement, erreur) et bouton « Rechercher maintenant ». À l'arrêt, installation dès le téléchargement fini. La demande de confirmation d'Android passe par l'état (`NeedsConfirmation`) et n'est ouverte que quand l'activité est au premier plan : lancée depuis le `BroadcastReceiver` en arrière-plan, Android la bloquait et la mise à jour restait figée. Après une première auto-mise à jour, Zenith devient l'installateur de l'app et Android 12+ installe les suivantes sans confirmation (`USER_ACTION_NOT_REQUIRED`). L'APK téléchargé est supprimé après l'installation.
+
+## iPhone (ios/) : décisions et pièges
+
+- **Même app, autres moyens** : chaque fichier Swift dit en tête de quel fichier Android il est le portage ; garder les mêmes noms, minutages, couleurs et sons. Les règles d'écran (Cockpit), le moteur d'alertes, les textes dits, la démo, la météo, le GPX, le choix du lecteur et le Canvas viennent du cœur Kotlin par `Bridge` : ne pas les réécrire en Swift.
+- **Pont Kotlin → Swift** (`core-ios/src/iosMain`) : une exception Kotlin qui remonte dans Swift tue l'app, donc tout appel qui peut lever passe par `Bridge` (qui l'attrape) ; Swift ne voit que des classes simples (`CoreSnapshot`, `CoreRadar`…), converties en types Swift dans `ios/Zenith/Core/CoreTypes.swift` (seuls ce fichier, le moteur, les données et la musique importent `ZenithCore`). Un nombre absent vaut -1.
+- **Satellites** : iOS ne donne pas le nombre de satellites ; le décollage en compte un par palier de précision atteint (150, 65, 25, 10 m) (`DriveEngine.satellites`).
+- **Petite fenêtre** : pas de fenêtre libre sur iOS ; c'est l'image dans l'image vidéo (`AVPictureInPictureController` sur un `AVSampleBufferDisplayLayer` nourri d'images de `PipScreen`), qui s'ouvre seule en quittant Zenith pendant une conduite (réglage « Petite fenêtre automatique »). MapLibre ne dessine pas hors écran : la petite fenêtre dessine elle-même une mini-carte (route suivie, radars, itinéraires). Le calque doit être à l'écran (`PipAnchor` dans `RootView`).
+- **Écran verrouillé** : Activité en direct + Dynamic Island (extension `ZenithLiveActivity`, mise à jour locale par l'app, jamais de push : impossible avec un identifiant Apple gratuit). Elle ne peut démarrer qu'avec Zenith devant (règle d'iOS) : une conduite démarrée seule en fond n'en a pas.
+- **Son** : une seule session audio par app (`AudioFocus`, équivalent d'`AudioDucker`). Baisse = session `.playback` + `.duckOthers` (mode `.voicePrompt`) ; pause = session non mixable (Spotify / Musique s'interrompent) ; retour = désactivation avec `.notifyOthersOnDeactivation` (ils reprennent). En fond, iOS peut refuser d'interrompre une autre app : la musique reste alors baissée. Sons de boutons, vidéo et petite fenêtre : session mixable (`ensureActive`), la musique n'est jamais touchée.
+- **Volume monté** : iOS n'a pas d'API ; la glissière d'un `MPVolumeView` hors écran le fait (Zenith devant). Non vérifié sur le téléphone.
+- **Démarrage en roulant** : position « Toujours » + changements significatifs de position (iOS réveille Zenith tous les 500 m environ, app fermée) + coprocesseur de mouvement (`CMMotionActivityManager`, voiture → conduite, marche / course / vélo sûrs → fin). Une notification « Zenith est en route » le dit. Pas de démarrage à la connexion Bluetooth de la voiture (iOS ne la donne pas aux apps).
+- **Musique** : iOS ne laisse lire le lecteur d'aucune autre app. Spotify passe par la Web API avec le compte du conducteur (PKCE, `SpotifyAuth`, identifiant de l'app Spotify de l'auteur dans la variable de dépôt `SPOTIFY_CLIENT_ID`, mise dans `Info.plist` par la CI ; depuis février 2026 le mode développement exige un compte Premium et 5 utilisateurs au plus) ; contrôles (précédent / pause / suivant) seulement en Premium. Apple Music par `MPMusicPlayerController.systemMusicPlayer` (sans compte). Canvas : même cœur et mêmes services qu'Android.
+- **Mises à jour** : la CI publie chaque build de `main` sur la release `ios` avec `sidestore.json` (format AltStore, version `0.1.N` comparée par SideStore, `buildVersion` = N comparé par l'app). L'app vérifie la source à chaque retour devant puis toutes les 2 min et son bouton « Installer » ouvre `sidestore://install?url=…` (vérifié dans le code de SideStore, `URLHandler.swift`). iOS interdit l'installation silencieuse : une confirmation dans SideStore reste nécessaire. SideStore renouvelle la signature (7 jours avec un identifiant gratuit).
+- **Projet Xcode** : généré par XcodeGen depuis `ios/project.yml` sur le runner (jamais de `.xcodeproj` dans git). Swift 5 (`SWIFT_VERSION` 5.0, concurrence minimale), iOS 26 minimum (verre liquide natif). Aucune signature dans la CI (`CODE_SIGNING_ALLOWED=NO`).
+- **Vérifier sans Mac** : le cœur se compile pour iOS depuis Linux (`:core-ios:compileKotlinIosArm64`) ; le Swift seulement sur le runner macOS (`ios.yml` se lance à chaque push touchant `ios/`, `core/src/main` ou `core-ios/` ; sur une branche, l'IPA est un artefact). Les erreurs de compilation sont regroupées dans l'étape « Build errors ».
 
 ## Musique : carte et Canvas Spotify
 

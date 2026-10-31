@@ -12,7 +12,7 @@ enum Gunzip {
         var i = 10
         if flags & 0x04 != 0 { // FEXTRA
             guard i + 2 <= b.count else { return nil }
-            i += 2 + Int(b[i]) | (Int(b[i + 1]) << 8)
+            i += 2 + (Int(b[i]) | (Int(b[i + 1]) << 8))
         }
         if flags & 0x08 != 0 { // FNAME
             while i < b.count && b[i] != 0 { i += 1 }

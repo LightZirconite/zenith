@@ -261,7 +261,8 @@ final class DriveEngine: NSObject, CLLocationManagerDelegate {
         data?.ensureTiles(lat: loc.coordinate.latitude, lon: loc.coordinate.longitude)
         applyProfile()
         let wall = Date()
-        let charging = [.charging, .full].contains(UIDevice.current.batteryState)
+        let battery = UIDevice.current.batteryState
+        let charging = battery == .charging || battery == .full
         queuedLock.lock()
         queuedFixes += 1
         queuedLock.unlock()
