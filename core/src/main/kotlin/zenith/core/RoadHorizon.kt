@@ -1,7 +1,10 @@
 package zenith.core
 
-/** A radar attached to a directed road segment, [offsetM] meters after the start of travel on it. */
-data class RadarOnRoad(val radar: Radar, val segment: RoadSegment, val forward: Boolean, val offsetM: Double)
+/**
+ * A radar attached to a directed road segment, [offsetM] meters after the start of travel on it;
+ * [bearingDeg]: travel direction there.
+ */
+data class RadarOnRoad(val radar: Radar, val segment: RoadSegment, val forward: Boolean, val offsetM: Double, val bearingDeg: Double)
 
 /**
  * Attaches radars to the roads they stand on. Keeps every drivable direction close to the nearest
@@ -32,7 +35,7 @@ class RadarSnapper(
             // Far from every road: only the nearest one, both its directions when it has two.
             cands.filter { it.segment.id == nearest.segment.id }
         }
-        kept.map { RadarOnRoad(radar, it.segment, it.forward, it.offsetM) }
+        kept.map { RadarOnRoad(radar, it.segment, it.forward, it.offsetM, it.bearingDeg) }
     }
 }
 

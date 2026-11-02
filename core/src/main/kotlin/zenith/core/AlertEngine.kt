@@ -148,8 +148,10 @@ class AlertEngine(
         /** Snaps of [r]; empty when it stands on no known road. */
         fun snaps(r: Radar) = snapper.snap(r)
 
-        fun roadDistance(snaps: List<RadarOnRoad>): Double? =
-            snaps.mapNotNull { s -> reachable[s.segment.id to s.forward]?.let { RoadHorizon.distanceTo(listOf(it), s) } }.minOrNull()
+        /** Shortest distance by any road, with the snap it reaches. */
+        fun roadDistance(snaps: List<RadarOnRoad>): Pair<Double, RadarOnRoad>? =
+            snaps.mapNotNull { s -> reachable[s.segment.id to s.forward]?.let { RoadHorizon.distanceTo(listOf(it), s) }?.let { it to s } }
+                .minByOrNull { it.first }
 
         fun pathDistance(snaps: List<RadarOnRoad>): Pair<Double, RadarOnRoad>? =
             snaps.mapNotNull { s -> RoadHorizon.distanceTo(path, s)?.let { it to s } }.minByOrNull { it.first }
@@ -165,6 +167,8 @@ class AlertEngine(
      * back to them (U-turn at a roundabout onto the other carriageway of the same road).
      */
     private val drivenBy = HashMap<String, Long>()
+    /** Tracks given up (turned off before them): picked up again soon, they are shown, not spoken twice. */
+    private val dropped = HashMap<String, Long>()
     private var section: SectionTracker? = null
     private var sectionLimit = 0
     private var lastPosition: LatLon? = null
@@ -209,6 +213,7 @@ class AlertEngine(
         recentlyPassed.entries.removeAll { now - it.value > 5 * 60_000 }
         justPassed.entries.removeAll { now - it.value.second > JUST_PASSED_MS }
         drivenBy.entries.removeAll { now - it.value > 5 * 60_000 }
+        dropped.entries.removeAll { now - it.value > DROPPED_MS }
         if (moving) for (r in radars.near(state.position, DRIVEN_BY_M)) drivenBy[r.id] = now
         sectionsHandled.entries.removeAll { now - it.value > 30 * 60_000 }
 
@@ -225,11 +230,10 @@ class AlertEngine(
             val r = queue.removeFirst()
             if (r.type.mobile && r.reportedAtMs != null && now - r.reportedAtMs > settings.mobileMaxAgeMs) continue
             if (heading == null || r.id in recentlyPassed) continue
-            if (r.id in drivenBy && behind(state.position, heading, r.position)) continue
             val snaps = horizon?.snaps(r).orEmpty()
             val d: Double
             if (horizon != null && snaps.isNotEmpty()) {
-                val onPath = horizon.pathDistance(snaps)
+                val onPath = horizon.pathDistance(snaps)?.takeUnless { turnedRound(state.position, heading, r, it) }
                 if (onPath != null && (upcoming == null || onPath.first < upcoming.distanceM)) {
                     upcoming = UpcomingRadar(r, onPath.first, radarLimit(r, roadLimit), onPath.second.segment.name)
                 }
@@ -238,7 +242,9 @@ class AlertEngine(
                 if (onPath != null && r.type == RadarType.SECTION_END && r.sectionLengthM != null && oneWay) {
                     sectionWithoutStart(r, onPath.first, horizon.path, now, roadLimit, events)?.let(queue::addLast)
                 }
-                d = horizon.roadDistance(snaps) ?: continue
+                val byRoad = horizon.roadDistance(snaps) ?: continue
+                if (turnedRound(state.position, heading, r, byRoad)) continue
+                d = byRoad.first
                 // A side branch only counts ahead of the car: behind it, it could only be reached by
                 // turning back (roundabout, loop), and its camera measures the other way.
                 if (onPath == null && (d > settings.branchAlertM || behind(state.position, heading, r.position))) continue
@@ -259,7 +265,7 @@ class AlertEngine(
                 }
                 val twin = tracked.values.any { t -> !t.silent && sameCamera(t.radar, r) }
                 tracked[r.id] = Track(r, Geo.distanceM(state.position, r.position), v, silent = twin)
-                if (!twin) events += AlertEvent.Approach(now, r, d, radarLimit(r, roadLimit))
+                if (!twin && r.id !in dropped) events += AlertEvent.Approach(now, r, d, radarLimit(r, roadLimit))
             }
         }
 
@@ -274,7 +280,12 @@ class AlertEngine(
                 t.speedAtMinMps = v
             }
             val snaps = horizon?.snaps(r).orEmpty()
-            val roadD = if (horizon != null && snaps.isNotEmpty()) horizon.roadDistance(snaps) else null
+            // Reachable only by turning round (loop, roundabout behind it): it is behind, not ahead.
+            val roadD = if (horizon != null && snaps.isNotEmpty()) {
+                horizon.roadDistance(snaps)?.takeUnless { heading != null && turnedRound(state.position, heading, r, it) }?.first
+            } else {
+                null
+            }
             val ahead = if (horizon != null && snaps.isNotEmpty()) {
                 roadD != null
             } else {
@@ -299,6 +310,7 @@ class AlertEngine(
             if (!ahead && (straight > 150 || leaving)) {
                 // Turned off before reaching it.
                 iterator.remove()
+                dropped[r.id] = now
                 continue
             }
             val d = roadD ?: straight
@@ -371,6 +383,20 @@ class AlertEngine(
         // Long enough back under the limit: the next excess is a new one.
         if (underLimitSinceMs?.let { now - it >= settings.overspeedResetMs } == true) lastWarnMs = null
         overspeed = level
+    }
+
+    /**
+     * [r] is reached at [byRoad] only by turning round: its road there runs against the car's
+     * heading and the road to it is a long detour compared with the straight line (a level
+     * crossing's camera for the other direction, joined through the roundabout just after), or it
+     * is behind the car after the car drove right by it. A radar merely behind in a straight line
+     * stays: a winding road puts radars ahead by road behind the car's heading.
+     */
+    private fun turnedRound(p: LatLon, heading: Double, r: Radar, byRoad: Pair<Double, RadarOnRoad>): Boolean {
+        val straight = Geo.distanceM(p, r.position)
+        val against = Geo.headingDiffDeg(heading, byRoad.second.bearingDeg) > AGAINST_DEG
+        val detour = byRoad.first > maxOf(DETOUR_FACTOR * straight, straight + DETOUR_SLACK_M)
+        return (against && detour) || (r.id in drivenBy && behind(p, heading, r.position))
     }
 
     /**
@@ -480,6 +506,16 @@ class AlertEngine(
 
         /** A tracked radar whose road distance vanishes under this (or two fixes of travel) was reached. */
         const val REACHED_M = 30.0
+
+        /** A road running more than this against the car's heading is the way back. */
+        const val AGAINST_DEG = 120.0
+
+        /** Reached by road beyond this many times the straight line (and this many meters more): a detour. */
+        const val DETOUR_FACTOR = 2.5
+        const val DETOUR_SLACK_M = 150.0
+
+        /** A track given up and found again within this is not announced again. */
+        const val DROPPED_MS = 120_000L
 
         /** A radar this close to the car was driven by. */
         const val DRIVEN_BY_M = 40.0

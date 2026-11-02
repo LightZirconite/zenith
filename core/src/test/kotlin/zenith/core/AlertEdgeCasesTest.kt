@@ -122,6 +122,35 @@ class AlertEdgeCasesTest {
     }
 
     @Test
+    fun `camera of the other direction at a level crossing is never announced nor followed after it`() {
+        // Seen by the author: past the first camera, "radar à 350 m" for the one measuring the other
+        // way, then its distance grew up to 1 km: it stayed reachable by turning round at a loop ahead.
+        val network = RoadNetwork(listOf(
+            Sim.seg(1, 1, 2, 0.0 to -1_500.0, 0.0 to 1_000.0, limit = 50),
+            Sim.seg(2, 2, 3, 0.0 to 1_000.0, 0.0 to 1_080.0, limit = 50),
+            // Roundabout just after the crossing, where a car can turn round.
+            Sim.seg(3, 3, 5, 0.0 to 1_080.0, 30.0 to 1_110.0, 0.0 to 1_140.0, oneway = true, limit = 50),
+            Sim.seg(4, 5, 3, 0.0 to 1_140.0, -30.0 to 1_110.0, 0.0 to 1_080.0, oneway = true, limit = 50),
+            Sim.seg(6, 5, 6, 0.0 to 1_140.0, 0.0 to 1_800.0, limit = 50),
+            // And a loop further on: the other camera stays reachable, further and further by road.
+            Sim.seg(7, 6, 7, 0.0 to 1_800.0, 40.0 to 1_860.0, 0.0 to 1_920.0, limit = 50),
+            Sim.seg(8, 7, 6, 0.0 to 1_920.0, -40.0 to 1_860.0, 0.0 to 1_800.0, limit = 50),
+        ))
+        val mine = Radar("mine", Sim.ll(3.0, 990.0), RadarType.LEVEL_CROSSING, directionDeg = 0.0)
+        val other = Radar("other", Sim.ll(-3.0, 1_030.0), RadarType.LEVEL_CROSSING, directionDeg = 180.0)
+        for (seed in seeds) {
+            val path = listOf(0.0 to 0.0, 0.0 to 1_080.0, 30.0 to 1_110.0, 0.0 to 1_140.0, 0.0 to 1_700.0)
+            val fixes = Sim.drive(path, 50 / 3.6, noiseM = 4.0, seed = seed)
+            val snaps = replay(network, listOf(mine, other), fixes)
+            val ids = snaps.events().filterIsInstance<AlertEvent.Approach>().map { it.radar.id }
+            assertEquals(listOf("mine"), ids, "seed $seed")
+            val after = snaps.filter { Sim.frame.toXY(it.position).y > 1_060 }
+            assertTrue(after.all { it.alerts.isEmpty() }, "seed $seed: ${after.flatMap { it.alerts }.map { it.radar.id to it.distanceM.toInt() }.take(5)}")
+            assertTrue(after.none { it.upcoming?.radar?.id == "other" }, "seed $seed")
+        }
+    }
+
+    @Test
     fun `a late fix during a section is ignored instead of failing`() {
         val tracker = SectionTracker(1_000.0, 90, 0)
         tracker.advance(100.0, 4_000)
