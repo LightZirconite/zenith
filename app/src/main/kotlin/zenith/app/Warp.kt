@@ -765,13 +765,24 @@ class WarpSound(context: Context) {
             }
         }
 
-        /** A lock: a soft sine with a slow fade and a quiet octave for air; no bell, no click. */
-        fun lockWave(hz: Float, chord: Boolean): ShortArray = pcm(1.1f) { t, _ ->
-            val w = TWO_PI * t
-            val env = smooth(t / 0.04f) * exp(-t / if (chord) 0.4f else 0.24f)
-            var v = sin(w * hz) + 0.2f * sin(w * hz * 2f)
-            if (chord) v += 0.7f * sin(w * hz * 1.2599f) + 0.55f * sin(w * hz * 1.4983f)
-            0.3f * env * v * (1f - smooth((t - 0.9f) / 0.2f))
+        /**
+         * A lock: a soft "tac", a short rounded triangle tone falling from the octave onto [hz] in
+         * 50 ms, quick attack, gone in about 140 ms, its edge filtered off; no bell, no click. The
+         * last one ([chord]) rings a little longer.
+         */
+        fun lockWave(hz: Float, chord: Boolean): ShortArray {
+            var phase = 0f
+            var low = 0f
+            val smoothing = 1f - exp(-TWO_PI * 2_400f / RATE)
+            val decay = if (chord) 0.07f else 0.045f
+            return pcm(if (chord) 0.5f else 0.3f) { t, _ ->
+                phase += TWO_PI * hz * (1f + exp(-t / 0.018f)) / RATE
+                val turn = (phase / TWO_PI) % 1f
+                val triangle = 4f * kotlin.math.abs(turn - 0.5f) - 1f
+                low += smoothing * (triangle - low)
+                val env = smooth(t / 0.006f) * exp(-t / decay)
+                0.5f * env * low
+            }
         }
     }
 }

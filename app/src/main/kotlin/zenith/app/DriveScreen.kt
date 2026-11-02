@@ -19,12 +19,12 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
@@ -58,6 +58,7 @@ import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -65,6 +66,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -98,17 +100,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import zenith.core.ActiveAlert
 import zenith.core.AlertEvent
 import zenith.core.Cockpit
+import zenith.core.Daylight
 import zenith.core.ControlZone
 import zenith.core.DriveSnapshot
 import zenith.core.LatLon
 import zenith.core.LimitSource
 import zenith.core.Radar
-import zenith.core.RadarType
-import zenith.core.SectionStatus
-import zenith.core.UpcomingRadar
+import zenith.core.TripStats
+import zenith.core.TripSummary
 import kotlin.math.roundToInt
 
 private val Bg = Color(0xFF000000)
@@ -429,6 +430,7 @@ fun DriveScreen(
     // Each radar (or section) passed: a band of light sweeps down the screen, as under a gantry.
     var passes by remember { mutableIntStateOf(0) }
     var passFlash by remember { mutableStateOf(false) }
+    var passedAtMs by remember { mutableLongStateOf(0L) }
     LaunchedEffect(snapshot) {
         val flash = snapshot?.events?.firstNotNullOfOrNull { event ->
             when (event) {
@@ -438,6 +440,7 @@ fun DriveScreen(
             }
         } ?: return@LaunchedEffect
         passFlash = flash
+        passedAtMs = System.currentTimeMillis()
         passes++
     }
     val pass = remember { Animatable(1f) }
@@ -447,6 +450,16 @@ fun DriveScreen(
             pass.animateTo(1f, tween(1_200, easing = LinearOutSlowInEasing))
         }
     }
+    // At night the map and the Canvas dim a little more ([Daylight]), checked every minute.
+    var night by remember { mutableStateOf(false) }
+    LaunchedEffect(running) {
+        while (running) {
+            DriveState.snapshot.value?.position?.let { night = Daylight.isNight(it, System.currentTimeMillis()) }
+            delay(60_000)
+        }
+    }
+    val nightDim by animateFloatAsState(if (night) Daylight.NIGHT_DIM else 1f, tween(2_000), label = "night")
+    val lastTrip by DriveState.lastTrip.collectAsState()
     Box(Modifier.fillMaxSize().background(Bg)) {
         AnimatedVisibility(
             visible = !flightOver,
@@ -494,9 +507,9 @@ fun DriveScreen(
                         // Landscape: the right part only (the 9:16 video less cropped), a little wider
                         // in music mode; its fade is the map's in reverse, so the two always add up.
                         modifier = if (landscape) {
-                            Modifier.align(Alignment.CenterEnd).fillMaxHeight().fillMaxWidth(LAND_CANVAS_WIDTH + (LAND_CANVAS_WIDE - LAND_CANVAS_WIDTH) * focus)
+                            Modifier.align(Alignment.CenterEnd).fillMaxHeight().fillMaxWidth(LAND_CANVAS_WIDTH + (LAND_CANVAS_WIDE - LAND_CANVAS_WIDTH) * focus).alpha(nightDim)
                         } else {
-                            Modifier.fillMaxSize()
+                            Modifier.fillMaxSize().alpha(nightDim)
                         },
                         fromRight = landscape,
                     )
@@ -508,14 +521,14 @@ fun DriveScreen(
                     snapshot,
                     radars,
                     zones,
-                    when {
+                    Modifier.alpha(nightDim).then(when {
                         // Landscape: the whole height on the left, melting away under the right column.
                         landscape -> Modifier.fillMaxHeight().fillMaxWidth(LAND_MAP_WIDTH)
                             .horizontalFade(blendStops(LandMapAlone, blendStops(LandMapOverCanvas, LandMapInMusicMode, focus), withMusic))
                         withMusic > 0f -> Modifier.fillMaxWidth().fillMaxHeight(MAP_HEIGHT)
                             .verticalFade(blendStops(MapWhole, blendStops(MapOverCanvas, MapInMusicMode, focus), withMusic))
                         else -> Modifier.fillMaxWidth().fillMaxHeight(MAP_HEIGHT)
-                    },
+                    }),
                     // The car where it always was on screen, the map now taller; in landscape a
                     // little low, to see far ahead in the short height.
                     carAt = if (landscape) 0.62 else 0.28 / MAP_HEIGHT,
@@ -625,18 +638,37 @@ fun DriveScreen(
                 }
             }
         }
-        val navShortcuts: @Composable ColumnScope.() -> Unit = {
-            AnimatedVisibility(
-                visible = running && landed && navApps.isNotEmpty() && !cruising,
-                enter = fadeIn(tween(400, delayMillis = 350)) + slideInVertically(spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow)) { it / 2 },
-                exit = DriveOut,
-            ) {
-                NavApps(navApps, onOpenNavApp)
-            }
-        }
         val buttons: @Composable ColumnScope.() -> Unit = {
             if (!landscape) {
-                StartStop(running, onStart, onStop, compact = running && cruising)
+                // One row, one height, words only: the first app, Stop, the second app. On the road
+                // the apps fold away and Stop steps back; at home, Start alone across.
+                val shortcuts = running && landed && navApps.isNotEmpty() && !cruising
+                val rowHeight by animateDpAsState(
+                    when {
+                        !running -> 58.dp
+                        cruising -> 44.dp
+                        else -> 52.dp
+                    },
+                    spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessLow),
+                    label = "buttonRow",
+                )
+                Row(Modifier.fillMaxWidth().height(rowHeight), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    navApps.getOrNull(0)?.let { app ->
+                        AnimatedVisibility(
+                            visible = shortcuts,
+                            enter = fadeIn(tween(400, delayMillis = 350)) + expandHorizontally(spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)),
+                            exit = fadeOut(tween(200)) + shrinkHorizontally(tween(350)),
+                        ) { NavAppButton(app, onOpenNavApp, Modifier.width(96.dp).fillMaxHeight()) }
+                    }
+                    StartStop(running, onStart, onStop, compact = running && cruising, modifier = Modifier.weight(1f).fillMaxHeight(), fixedHeight = true)
+                    navApps.getOrNull(1)?.let { app ->
+                        AnimatedVisibility(
+                            visible = shortcuts,
+                            enter = fadeIn(tween(400, delayMillis = 450)) + expandHorizontally(spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow), expandFrom = Alignment.Start),
+                            exit = fadeOut(tween(200)) + shrinkHorizontally(tween(350), shrinkTowards = Alignment.Start),
+                        ) { NavAppButton(app, onOpenNavApp, Modifier.width(96.dp).fillMaxHeight()) }
+                    }
+                }
             } else {
                 // Landscape: the shortcuts and Stop on one line, the same height, side by side.
                 val shortcuts = running && landed && navApps.isNotEmpty() && !cruising
@@ -652,26 +684,14 @@ fun DriveScreen(
                     StartStop(running, onStart, onStop, compact = running && cruising, modifier = Modifier.weight(1f).fillMaxHeight())
                 }
             }
+            // The map's credits, required, in one short line (the full ones are in the settings).
             AnimatedVisibility(visible = !running, enter = if (comingHome) BottomInLate else BottomIn, exit = BottomOut) {
                 Text(
-                    "Réglages",
-                    color = Color.White,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    "© OpenStreetMap · OpenFreeMap",
+                    color = Dim.copy(alpha = 0.75f),
+                    fontSize = 11.sp,
                     textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
-                        .tap(shape = RoundedCornerShape(18.dp), sound = UiSound.Kind.OPEN, lift = 1.03f, onClick = onOpenSettings)
-                        .glass(RoundedCornerShape(18.dp))
-                        .padding(vertical = 14.dp),
-                )
-            }
-            AnimatedVisibility(visible = !running, enter = if (comingHome) BottomInLate else BottomIn, exit = BottomOut) {
-                Text(
-                    "Cartes © OpenFreeMap © OpenStreetMap · radars data.gouv.fr, OpenStreetMap, Lufop",
-                    color = Dim.copy(alpha = 0.6f),
-                    fontSize = 10.sp,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                    modifier = Modifier.fillMaxWidth().padding(top = 14.dp),
                 )
             }
         }
@@ -684,7 +704,8 @@ fun DriveScreen(
                 .padding(horizontal = 20.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            StatusRow(running && landed, gps, data, demo, snapshot)
+            // At home the settings button sits at the top right: the chips leave it room.
+            Box(Modifier.padding(end = if (running) 0.dp else 56.dp)) { StatusRow(running && landed, gps, data, demo, snapshot) }
             UpdateBanner(update, canInstall, onInstallUpdate)
             CrashBanner(visible = !running && crashReport != null, onShareCrash)
             if (!landscape) {
@@ -693,10 +714,9 @@ fun DriveScreen(
                     verticalArrangement = Arrangement.Center,
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) { homeView() }
-                AlertArea(snapshot.takeIf { running && landed })
                 Spacer(Modifier.height(12.dp))
+                TripCard(lastTrip.takeIf { !running }, comingHome)
                 musicCard()
-                navShortcuts()
                 buttons()
             } else {
                 // Landscape: the map (or home) on the left with the alerts under it, the speed and
@@ -708,7 +728,6 @@ fun DriveScreen(
                             verticalArrangement = Arrangement.Center,
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) { homeView() }
-                        AlertArea(snapshot.takeIf { running && landed })
                     }
                     Spacer(Modifier.width(20.dp))
                     Column(
@@ -732,10 +751,29 @@ fun DriveScreen(
                             }
                         }
                         Spacer(Modifier.height(12.dp))
+                        TripCard(lastTrip.takeIf { !running }, comingHome)
                         musicCard()
                         buttons()
                     }
                 }
+            }
+        }
+        // Radars, sections and passes: the island out of the camera, over everything.
+        if (running && landed) AlertIsland(snapshot, passedAtMs, passFlash, landscape, Modifier.fillMaxSize())
+        // Home: the settings, a round glass button at the top right.
+        AnimatedVisibility(
+            visible = !running,
+            modifier = Modifier.align(Alignment.TopEnd)
+                .windowInsetsPadding(WindowInsets.safeDrawing.union(WindowInsets.statusBarsIgnoringVisibility))
+                .padding(top = 8.dp, end = 20.dp),
+            enter = if (comingHome) BottomInLate else BottomIn,
+            exit = fadeOut(tween(200)) + scaleOut(tween(250), targetScale = 0.8f),
+        ) {
+            Box(
+                Modifier.size(44.dp).tap(shape = CircleShape, sound = UiSound.Kind.OPEN, lift = 1.12f, onClick = onOpenSettings).glass(CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Glyphs.gear, contentDescription = "Réglages", tint = Color.White, modifier = Modifier.size(22.dp))
             }
         }
     }
@@ -861,21 +899,75 @@ private fun Idle(data: DataStatus, onDemo: () -> Unit) {
         )
     }
     Text("Zenith", color = Color.White, fontSize = 44.sp, fontWeight = FontWeight.Bold)
-    Spacer(Modifier.height(8.dp))
+    Spacer(Modifier.height(12.dp))
+    // One quiet line: how many radars, and how fresh the base is (the dot says it at a glance).
     // The radars in memory count up as the screen opens, like a dashboard waking up.
     val counted = remember { Animatable(0f) }
     LaunchedEffect(data.radarCount) { counted.animateTo(data.radarCount.toFloat(), tween(1_400, easing = FastOutSlowInEasing)) }
     val radars = counted.value.roundToInt()
-    Text(
-        when {
-            data.radarCount == 0 -> "Radars et limitations chargés au démarrage"
-            data.zoneCount == 0 -> "${thousands(radars)} radars en mémoire"
-            else -> "${thousands(radars)} radars · ${thousands(data.zoneCount)} itinéraires de contrôle"
-        },
-        color = Dim,
-        fontSize = 16.sp,
-        textAlign = TextAlign.Center,
-    )
+    val updated = data.radarsUpdatedMs
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        if (data.radarCount > 0 && updated != null) {
+            val fresh = System.currentTimeMillis() - updated < 24 * 3_600_000L
+            Box(Modifier.size(7.dp).background(if (fresh) Green else Orange, CircleShape))
+            Spacer(Modifier.width(8.dp))
+        }
+        Text(
+            when {
+                data.radarCount == 0 -> "Radars et limitations chargés au démarrage"
+                updated == null -> "${thousands(radars)} radars"
+                else -> "${thousands(radars)} radars · à jour ${freshness(updated)}"
+            },
+            color = Dim,
+            fontSize = 15.sp,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+/** "à 15:35" today, "hier à 15:35", else "le 31/10". */
+private fun freshness(ms: Long): String {
+    val then = java.util.Calendar.getInstance().apply { timeInMillis = ms }
+    val now = java.util.Calendar.getInstance()
+    val days = (now.get(java.util.Calendar.YEAR) - then.get(java.util.Calendar.YEAR)) * 366 +
+        now.get(java.util.Calendar.DAY_OF_YEAR) - then.get(java.util.Calendar.DAY_OF_YEAR)
+    val time = "%02d:%02d".format(then.get(java.util.Calendar.HOUR_OF_DAY), then.get(java.util.Calendar.MINUTE))
+    return when (days) {
+        0 -> "à $time"
+        1 -> "hier à $time"
+        else -> "le %02d/%02d".format(then.get(java.util.Calendar.DAY_OF_MONTH), then.get(java.util.Calendar.MONTH) + 1)
+    }
+}
+
+/** Back home after a drive: what it was, in a few numbers; fades by itself or at a touch. */
+@Composable
+private fun TripCard(summary: TripSummary?, comingHome: Boolean) {
+    // Kept while it leaves, so it does not empty before fading.
+    var shown by remember { mutableStateOf<TripSummary?>(null) }
+    if (summary != null) shown = summary
+    LaunchedEffect(summary) {
+        if (summary == null) return@LaunchedEffect
+        delay(TripStats.SHOWN_MS + if (comingHome) HOMECOMING_MS.toLong() else 0L)
+        DriveState.clearLastTrip()
+    }
+    AnimatedVisibility(
+        visible = summary != null,
+        enter = fadeIn(tween(500, delayMillis = if (comingHome) 1_300 else 300)) +
+            scaleIn(spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessLow), initialScale = 0.9f),
+        exit = fadeOut(tween(300)) + scaleOut(tween(300), targetScale = 0.95f),
+    ) {
+        val trip = shown ?: return@AnimatedVisibility
+        Column(
+            Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                .tap(shape = RoundedCornerShape(20.dp), lift = 0.98f) { DriveState.clearLastTrip() }
+                .glass(RoundedCornerShape(20.dp)).padding(horizontal = 18.dp, vertical = 14.dp),
+        ) {
+            Text("Trajet terminé", color = Dim, fontSize = 13.sp)
+            Spacer(Modifier.height(2.dp))
+            Text(trip.headline(), color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+            Text(trip.details(), color = Dim, fontSize = 14.sp)
+        }
+    }
 }
 
 /** Shortcuts to the navigation apps installed: Zenith keeps alerting from behind them. */
@@ -889,16 +981,19 @@ private fun NavApps(
 ) {
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         for (app in apps) {
-            Text(
-                "Ouvrir ${app.label}",
-                color = Color.White,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.weight(1f).then(if (fillHeight) Modifier.fillMaxHeight() else Modifier).tap(shape = RoundedCornerShape(14.dp), sound = UiSound.Kind.OPEN) { onOpen(app) }
-                    .glass(RoundedCornerShape(14.dp)).wrapContentHeight().padding(vertical = 12.dp),
-            )
+            NavAppButton(app, onOpen, Modifier.weight(1f).then(if (fillHeight) Modifier.fillMaxHeight() else Modifier.height(52.dp)))
         }
+    }
+}
+
+/** One navigation app: its name only, centred, the same glass and height as Stop beside it. */
+@Composable
+private fun NavAppButton(app: NavApp, onOpen: (NavApp) -> Unit, modifier: Modifier) {
+    Box(
+        modifier.tap(shape = RoundedCornerShape(18.dp), sound = UiSound.Kind.OPEN) { onOpen(app) }.glass(RoundedCornerShape(18.dp)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(app.label, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
     }
 }
 
@@ -916,40 +1011,40 @@ private fun Dashboard(s: DriveSnapshot?, modifier: Modifier = Modifier, compact:
     val searchAlpha by searching.animateFloat(0.35f, 1f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "searchAlpha")
     // Dark halo so the digits stay readable over the map.
     val halo = TextStyle(shadow = Shadow(Color.Black, blurRadius = 28f))
+    // The ring: 260 upright, smaller on a phone lying across.
+    val ring = if (compact) 190.dp else 260.dp
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(s?.road?.segment?.name ?: " ", color = Dim, fontSize = if (compact) 15.sp else 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, style = halo)
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+        Text(s?.road?.segment?.name ?: " ", color = Dim, fontSize = if (compact) 14.sp else 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, style = halo)
+        Spacer(Modifier.height(4.dp))
+        SpeedRing(
+            speed,
+            limit,
+            color,
+            ring,
+            sign = { LimitSign(limit ?: 0, uncertain = s?.limitSource.isGuess(), size = ring * (60f / 260f)) },
+        ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
                     if (speed == null) "--" else animatedSpeed.toString(),
                     color = color,
-                    // Landscape: smaller, to fit the short height beside the map.
-                    fontSize = if (compact) 96.sp else 150.sp,
+                    fontSize = (ring.value * 108f / 260f).sp,
                     fontWeight = FontWeight.Bold,
                     // Fixed-width digits, set tight: the number does not jump as it changes.
                     letterSpacing = (-4).sp,
                     style = halo.copy(fontFeatureSettings = "tnum"),
                     modifier = Modifier.alpha(if (speed == null) searchAlpha else 1f),
                 )
-                Text("km/h", color = Dim, fontSize = if (compact) 16.sp else 20.sp)
-            }
-            AnimatedVisibility(visible = limit != null, enter = fadeIn(), exit = fadeOut()) {
-                Row {
-                    Spacer(Modifier.width(if (compact) 14.dp else 20.dp))
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        LimitSign(limit ?: 0, uncertain = s?.limitSource.isGuess(), size = if (compact) 80.dp else 104.dp)
-                        val ahead = s?.limitAhead
-                        Text(
-                            ahead?.let { "${it.limitKmh} dans ${distanceText(it.distanceM)}" } ?: " ",
-                            color = Dim,
-                            fontSize = 15.sp,
-                            style = halo,
-                            modifier = Modifier.padding(top = 8.dp),
-                        )
-                    }
-                }
+                Text("km/h", color = Dim, fontSize = if (compact) 13.sp else 15.sp)
             }
         }
+        val ahead = s?.limitAhead
+        Text(
+            ahead?.let { "${it.limitKmh} dans ${distanceText(it.distanceM)}" } ?: " ",
+            color = Dim,
+            fontSize = 15.sp,
+            style = halo,
+            modifier = Modifier.padding(top = 4.dp),
+        )
     }
 }
 
@@ -989,113 +1084,17 @@ internal fun LimitSign(limitKmh: Int, uncertain: Boolean, size: Dp = 104.dp) {
     }
 }
 
-/** Section under way, then the radar alert or, without one, the next radar on the road. */
-@Composable
-private fun AlertArea(s: DriveSnapshot?) {
-    s?.section?.let { SectionCard(it) }
-    val alert = s?.alerts?.firstOrNull()
-    AnimatedVisibility(
-        visible = alert != null,
-        enter = slideInVertically(spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow)) { it / 2 } +
-            fadeIn(tween(250)) + scaleIn(spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow), initialScale = 0.92f),
-        exit = slideOutVertically(tween(300)) { it / 3 } + fadeOut(tween(250)) + scaleOut(tween(300), targetScale = 0.95f),
-    ) {
-        alert?.let { AlertCard(it) }
-    }
-    AnimatedVisibility(
-        visible = alert == null && s?.upcoming != null,
-        enter = fadeIn(tween(400)) + expandVertically(spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow)),
-        exit = fadeOut(tween(250)) + shrinkVertically(tween(300)),
-    ) {
-        s?.upcoming?.let { UpcomingStrip(it) }
-    }
-}
-
-@Composable
-private fun AlertCard(a: ActiveAlert) {
-    // Distance at first sight of this radar, to draw the countdown bar.
-    var start by remember(a.radar.id) { mutableFloatStateOf(a.distanceM.toFloat()) }
-    if (a.distanceM > start) start = a.distanceM.toFloat()
-    val progress by animateFloatAsState(1f - (a.distanceM.toFloat() / start).coerceIn(0f, 1f), label = "progress")
-    val pulse = rememberInfiniteTransition(label = "pulse")
-    val alpha by pulse.animateFloat(1f, 0.55f, infiniteRepeatable(tween(450), RepeatMode.Reverse), label = "alpha")
-    val bg by animateColorAsState(if (a.overLimit) Red else Glass, tween(300), label = "alertBg")
-
-    Column(Modifier.fillMaxWidth().glass(RoundedCornerShape(22.dp), bg).sheen().alpha(if (a.overLimit) alpha else 1f)) {
-        Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
-            RadarBadge(a.radar.type, a.limitKmh, 54.dp)
-            Spacer(Modifier.width(16.dp))
-            Column(Modifier.weight(1f)) {
-                Text(a.radar.type.label, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                val details = listOfNotNull(
-                    if (a.radar.directionDeg == null) "sens non vérifié" else null,
-                    a.ageMs?.let { "signalé il y a ${(it / 60_000).coerceAtLeast(1)} min" },
-                )
-                if (details.isNotEmpty()) Text(details.joinToString(" · "), color = Color.White.copy(alpha = 0.75f), fontSize = 14.sp)
-            }
-            Text(distanceText(a.distanceM), color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
-        }
-        Box(Modifier.fillMaxWidth().height(6.dp).background(Color.White.copy(alpha = 0.15f))) {
-            Box(Modifier.fillMaxHeight().fillMaxWidth(progress).background(Color.White))
-        }
-    }
-}
-
-@Composable
-private fun UpcomingStrip(u: UpcomingRadar) {
-    Row(
-        Modifier.fillMaxWidth().glass(RoundedCornerShape(16.dp)).padding(horizontal = 18.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        RadarBadge(u.radar.type, u.limitKmh)
-        Spacer(Modifier.width(14.dp))
-        Column(Modifier.weight(1f)) {
-            Text(u.radar.type.label, color = Color.White, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            u.roadName?.let { Text("sur $it", color = Dim, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
-        }
-        Text(distanceText(u.distanceM), color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-    }
-}
-
-@Composable
-private fun SectionCard(s: SectionStatus) {
-    // One number to read (the average, next to the limit sign), one sentence saying what to do.
-    val slowDown = s.lost || s.targetKmh < s.limitKmh
-    val progress by animateFloatAsState((1 - s.remainingM / s.lengthM).toFloat().coerceIn(0f, 1f), label = "section")
-    val bg by animateColorAsState(if (slowDown) Red else Glass, tween(400), label = "sectionBg")
-    Column(Modifier.fillMaxWidth().padding(bottom = 12.dp).glass(RoundedCornerShape(22.dp), bg).sheen()) {
-        Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-            RadarBadge(RadarType.SECTION_START, s.limitKmh, 54.dp)
-            Spacer(Modifier.width(16.dp))
-            Column(Modifier.weight(1f)) {
-                Text("Ta moyenne sur le tronçon", color = Color.White.copy(alpha = 0.75f), fontSize = 14.sp)
-                Text("${s.averageKmh.roundToInt()} km/h", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
-            }
-            Column(horizontalAlignment = Alignment.End) {
-                Text("encore", color = Color.White.copy(alpha = 0.75f), fontSize = 14.sp)
-                Text(distanceText(s.remainingM), color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-            }
-        }
-        Text(
-            when {
-                s.lost -> "Moyenne trop haute : elle finira au-dessus de ${s.limitKmh}"
-                slowDown -> "Pour finir sous ${s.limitKmh} : pas plus de ${s.targetKmh} jusqu'au bout"
-                else -> "Moyenne bonne : roule jusqu'à ${s.limitKmh}, pas plus"
-            },
-            color = Color.White,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 14.dp),
-        )
-        Box(Modifier.fillMaxWidth().height(6.dp).background(Color.White.copy(alpha = 0.15f))) {
-            Box(Modifier.fillMaxHeight().fillMaxWidth(progress).background(Color.White))
-        }
-    }
-}
-
 /** Start, then Stop; [compact] on the road: lower and quieter, still there. */
 @Composable
-private fun StartStop(running: Boolean, onStart: () -> Unit, onStop: () -> Unit, compact: Boolean = false, modifier: Modifier = Modifier.fillMaxWidth()) {
+private fun StartStop(
+    running: Boolean,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+    compact: Boolean = false,
+    modifier: Modifier = Modifier.fillMaxWidth(),
+    /** In a row of fixed height: the word centred in it, no padding of its own. */
+    fixedHeight: Boolean = false,
+) {
     val bg by animateColorAsState(if (running) Glass else Color.White, label = "buttonBg")
     val height by animateDpAsState(if (compact) 9.dp else 18.dp, spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessLow), label = "buttonHeight")
     val quiet by animateFloatAsState(if (compact) 0.7f else 1f, tween(500), label = "buttonQuiet")
@@ -1126,7 +1125,7 @@ private fun StartStop(running: Boolean, onStart: () -> Unit, onStop: () -> Unit,
                 onClick = if (running) onStop else onStart,
             )
             .glass(RoundedCornerShape(18.dp), bg)
-            .padding(vertical = height)
+            .then(if (fixedHeight) Modifier else Modifier.padding(vertical = height))
             .alpha(quiet),
     ) {
         // The word rolls over, like a switch flipping.

@@ -6,7 +6,10 @@ import kotlinx.coroutines.flow.update
 import zenith.core.Cockpit
 import zenith.core.ControlZone
 import zenith.core.DriveSnapshot
+import zenith.core.AlertEvent
 import zenith.core.Radar
+import zenith.core.TripStats
+import zenith.core.TripSummary
 
 /** What started the running drive; a drive started by the car ends with the car. */
 enum class DriveOrigin {
@@ -35,8 +38,11 @@ object DriveState {
     private val _origin = MutableStateFlow(DriveOrigin.HAND)
     private val _musicChoice = MutableStateFlow<Boolean?>(null)
     private val _liveSpeed = MutableStateFlow<Int?>(null)
+    private val _lastTrip = MutableStateFlow<TripSummary?>(null)
     @Volatile
     private var musicChoiceAtMs = 0L
+    @Volatile
+    private var trip = TripStats()
 
     val running: StateFlow<Boolean> = _running
     val snapshot: StateFlow<DriveSnapshot?> = _snapshot
@@ -68,6 +74,13 @@ object DriveState {
      */
     val musicChoice: StateFlow<Boolean?> = _musicChoice
 
+    /** The drive that just ended, in a few numbers, for the home screen; null once seen or too short. */
+    val lastTrip: StateFlow<TripSummary?> = _lastTrip
+
+    fun clearLastTrip() {
+        _lastTrip.value = null
+    }
+
     fun chooseMusic(big: Boolean) {
         musicChoiceAtMs = System.currentTimeMillis()
         _musicChoice.value = big
@@ -80,11 +93,14 @@ object DriveState {
         _origin.value = origin
         _musicChoice.value = null
         _liveSpeed.value = null
+        trip = TripStats()
+        _lastTrip.value = null
         _running.value = true
     }
 
     internal fun update(snapshot: DriveSnapshot) {
         _snapshot.value = snapshot
+        trip.add(snapshot.timeMs, snapshot.position, snapshot.speedKmh, snapshot.events.count { it is AlertEvent.Passed })
         _musicChoice.update { Cockpit.keepChoice(it, snapshot.speedKmh, System.currentTimeMillis() - musicChoiceAtMs) }
         _gps.update { it.copy(accuracyM = snapshot.gpsAccuracyM, lastFixMs = System.currentTimeMillis()) }
     }
@@ -105,6 +121,7 @@ object DriveState {
     }
 
     internal fun stopped() {
+        if (_running.value) _lastTrip.value = trip.summary()
         _running.value = false
         _snapshot.value = null
         _liveSpeed.value = null

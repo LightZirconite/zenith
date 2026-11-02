@@ -9,6 +9,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.scaleIn
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
@@ -32,6 +33,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -73,7 +76,14 @@ fun SettingsScreen(
         // Each group arrives in turn, top to bottom.
         var order = 0
         Spacer(Modifier.height(4.dp))
-        Section("Alertes", order++) {
+        val data by DriveState.data.collectAsState()
+        StatusCard(data, update, Modifier.cascade(order++))
+        Section(
+            "Alertes",
+            order++,
+            footer = "Les bips et la voix baissent la musique en douceur, sans jamais la couper net. Pluie : la météo vient " +
+                "d'Open-Meteo (gratuit) ; seule une position arrondie à ~10 km est envoyée.",
+        ) {
             val noFrench by Speaker.frenchMissing.collectAsState()
             ToggleRow(
                 "Annonces vocales",
@@ -81,50 +91,44 @@ fun SettingsScreen(
                     "Pas de voix française sur cet appareil : installe « Services vocaux Google » (ou une voix française) " +
                         "dans les réglages de synthèse vocale. En attendant, seuls les bips sonnent."
                 } else {
-                    "Désactivé : seulement les bips, sans voix."
+                    "Sinon, seulement les bips"
                 },
                 settings.voice,
-            ) { on ->
-                onChange { it.copy(voice = on) }
+                icon = Glyphs.voice,
+                tint = Color(0xFF5E5CE6),
+            ) { on -> onChange { it.copy(voice = on) } }
+            Divider()
+            ToggleRow("Volume monté en conduite", "À 60 % au départ, rendu à l'arrêt", settings.raiseVolume, icon = Glyphs.volume, tint = Color(0xFFFF9F0A)) { on ->
+                onChange { it.copy(raiseVolume = on) }
             }
             Divider()
-            ToggleRow(
-                "Volume monté en conduite",
-                "Au départ, le volume des médias monte à 60 % s'il est plus bas, pour bien entendre les alertes et la voix. " +
-                    "À l'arrêt, il revient où il était, sauf si tu l'as changé entre-temps.",
-                settings.raiseVolume,
-            ) { on -> onChange { it.copy(raiseVolume = on) } }
+            ToggleRow("Musique en pause pendant la voix", "Désactivé conseillé : elle baisse seulement", settings.pauseMusic, icon = Glyphs.pause, tint = Color(0xFFFF375F)) { on ->
+                onChange { it.copy(pauseMusic = on) }
+            }
             Divider()
-            ToggleRow(
-                "Musique en pause pendant la voix",
-                "Désactivé (conseillé) : pendant une annonce, Spotify, YouTube ou la radio baissent en douceur puis remontent " +
-                    "de même. Activé : la musique baisse puis s'arrête le temps de l'annonce. Les bips, eux, ne font que la baisser.",
-                settings.pauseMusic,
-            ) { on -> onChange { it.copy(pauseMusic = on) } }
+            ToggleRow("Jeune permis", "110 · 100 · 80 au lieu de 130 · 110 · 90", settings.probationary, icon = Glyphs.learner, tint = Color(0xFF30B0C7)) { on ->
+                onChange { it.copy(probationary = on) }
+            }
             Divider()
-            ToggleRow(
-                "Jeune permis",
-                "Limites probatoires : 110 sur autoroute, 100 sur voie rapide, 80 sur route à 90.",
-                settings.probationary,
-            ) { on -> onChange { it.copy(probationary = on) } }
-            Divider()
-            ToggleRow(
-                "Pluie automatique",
-                "Pendant la conduite, la météo (Open-Meteo, gratuit) dit s'il pleut et les limites baissent seules : 110 sur " +
-                    "autoroute, 100 sur voie rapide, 80 sur route. Rien à toucher. Seule une position arrondie à ~10 km est envoyée.",
-                settings.autoRain,
-            ) { on -> onChange { it.copy(autoRain = on) } }
+            ToggleRow("Pluie automatique", "Limites de pluie, sans rien toucher", settings.autoRain, icon = Glyphs.rain, tint = Color(0xFF0A84FF)) { on ->
+                onChange { it.copy(autoRain = on) }
+            }
         }
-        Section("En voiture", order++) {
+        Section(
+            "En voiture",
+            order++,
+            footer = "Pas toi au volant ? Touche « Arrêter » : Zenith ne redémarre plus seul avant la fin du trajet " +
+                "(désactiver le démarrage automatique est déconseillé). Démarrage en roulant : il faut « Activité physique », " +
+                "puis la position « Toujours autoriser », sinon Android coupe le GPS d'une conduite démarrée seule. " +
+                "L'arrêt automatique ne joue jamais sur autoroute ni dans un bouchon ; une conduite lancée par une voiture " +
+                "s'arrête avec elle.",
+        ) {
             ToggleRow(
                 "Démarrage automatique",
-                if (settings.autoStart) {
-                    "Zenith peut démarrer seul : quand tu roules en voiture ou quand l'une de tes voitures se connecte. " +
-                        "Pas toi au volant ? Touche « Arrêter » : il ne redémarre plus seul avant la fin du trajet. Désactiver est déconseillé."
-                } else {
-                    "Désactivé : Zenith ne démarre jamais seul, seulement quand tu touches « Démarrer »."
-                },
+                if (settings.autoStart) "En roulant ou quand ta voiture se connecte" else "Seulement quand tu touches « Démarrer »",
                 settings.autoStart,
+                icon = Glyphs.auto,
+                tint = Color(0xFF32D74B),
             ) { on -> onChange { it.copy(autoStart = on) } }
             if (settings.autoStart) {
                 Divider()
@@ -133,27 +137,25 @@ fun SettingsScreen(
                 CarRows(settings.cars, onPairCar, onUnpairCar)
             }
             Divider()
-            ToggleRow(
-                "Arrêt automatique",
-                "Pour la batterie : Zenith s'arrête seul quand la voiture est garée depuis 10 minutes, quand tu repars à pied " +
-                    "ou à l'intérieur sans GPS. Jamais sur autoroute ni pendant un bouchon. Une conduite lancée par l'une des " +
-                    "voitures choisies au-dessus s'arrête, elle, avec la voiture.",
-                settings.autoStop,
-            ) { on -> onChange { it.copy(autoStop = on) } }
+            ToggleRow("Arrêt automatique", "Garé 10 min, à pied ou sans GPS", settings.autoStop, icon = Glyphs.park, tint = Color(0xFF8E8E93)) { on ->
+                onChange { it.copy(autoStop = on) }
+            }
         }
-        Section("Musique et petite fenêtre", order++) {
+        Section(
+            "Musique et petite fenêtre",
+            order++,
+            footer = "Musique : Android appelle cela « accès aux notifications » ; Zenith n'y lit que le lecteur. Option grisée : " +
+                "Infos de l'appli Zenith → ⋮ → Autoriser les paramètres restreints. Avec Spotify, le compte suffit aussi (Spotify " +
+                "n'accepte que les comptes ajoutés par l'auteur, 5 au plus). Canvas : services gratuits non officiels (Spicy Lyrics, " +
+                "AuraMusic), environ 3 Mo par titre gardés en cache, sinon la pochette floutée. Un double appui sur la petite " +
+                "fenêtre l'agrandit un moment.",
+        ) {
             InfoRow(
                 "Musique",
-                if (mediaAllowed) {
-                    "Le titre en cours (Spotify, YouTube, Deezer…), sa progression et ses commandes s'affichent sous les alertes " +
-                        "pendant la conduite. Une touche sur le titre ouvre le lecteur."
-                } else {
-                    "Conseillé : titre en cours, Canvas et commandes de ton lecteur (Deezer, YouTube Music, Apple Music…) sous les " +
-                        "alertes. Sans compte ni clé. Android appelle cela « accès aux notifications » : Zenith n'y lit que le lecteur " +
-                        "de musique. Si l'option est grisée : Infos de l'appli Zenith → ⋮ → Autoriser les paramètres restreints. " +
-                        "Avec Spotify, le compte ci-dessous suffit aussi."
-                },
+                if (mediaAllowed) "Titre, Canvas et commandes de ton lecteur" else "Conseillé : Deezer, YouTube Music, Apple Music…",
                 done = mediaAllowed,
+                icon = Glyphs.music,
+                tint = Color(0xFFFF2D55),
             )
             if (!mediaAllowed) {
                 Divider()
@@ -166,50 +168,39 @@ fun SettingsScreen(
             Divider()
             SpotifyRows(spotify, mediaAllowed, onSpotifyConnect, onSpotifyDisconnect)
             Divider()
-            ToggleRow(
-                "Canvas",
-                "La courte vidéo en boucle des titres (celle de Spotify), derrière la carte Musique et dans la petite fenêtre, " +
-                    "quel que soit ton lecteur : Spotify, Deezer, YouTube Music, Apple Music… (pas pour une vidéo YouTube). " +
-                    "Services gratuits non officiels (Spicy Lyrics, AuraMusic) : peut cesser de marcher, et tous les titres " +
-                    "n'en ont pas. Environ 3 Mo par titre, gardés en cache. Sinon, la pochette floutée.",
-                settings.spotifyCanvas,
-            ) { on -> onChange { it.copy(spotifyCanvas = on) } }
+            ToggleRow("Canvas", "La vidéo en boucle des titres, derrière la carte", settings.spotifyCanvas, icon = Glyphs.canvas, tint = Color(0xFFBF5AF2)) { on ->
+                onChange { it.copy(spotifyCanvas = on) }
+            }
             Divider()
-            ToggleRow(
-                "Petite fenêtre carrée",
-                "Désactivé : en quittant Zenith pendant la conduite, un bandeau compact en largeur, qui laisse voir Waze ou " +
-                    "Maps. Activé : une fenêtre carrée, plus grande. Un double appui sur la fenêtre l'agrandit aussi un moment.",
-                settings.pipLarge,
-            ) { on -> onChange { it.copy(pipLarge = on) } }
+            ToggleRow("Petite fenêtre carrée", "Sinon un bandeau compact, qui laisse voir Waze", settings.pipLarge, icon = Glyphs.pip, tint = Color(0xFFFF9F0A)) { on ->
+                onChange { it.copy(pipLarge = on) }
+            }
         }
         Section("Application", order++) {
-            ToggleRow(
-                "Sons de l'interface",
-                "Petits sons doux sous le doigt, sur chaque bouton, au volume des médias. Les alertes de conduite ne sont pas concernées.",
-                settings.uiSounds,
-            ) { on -> onChange { it.copy(uiSounds = on) } }
+            ToggleRow("Sons de l'interface", "Un son doux sous le doigt, au volume des médias", settings.uiSounds, icon = Glyphs.sound, tint = Color(0xFFAF52DE)) { on ->
+                onChange { it.copy(uiSounds = on) }
+            }
             Divider()
             InfoRow(
                 "Mises à jour",
                 when (update) {
-                    is UpdateState.UpToDate -> "À jour : version ${update.version}."
+                    is UpdateState.UpToDate -> "À jour : version ${update.version}"
                     UpdateState.Checking -> "Recherche d'une nouvelle version…"
                     is UpdateState.Downloading -> "Téléchargement de la version ${update.version}… ${(update.progress * 100).roundToInt()} %"
-                    is UpdateState.Ready -> "Version ${update.version} téléchargée, elle s'installe."
+                    is UpdateState.Ready -> "Version ${update.version} téléchargée, elle s'installe"
                     is UpdateState.Installing, is UpdateState.NeedsConfirmation -> "Installation en cours…"
                     is UpdateState.Failed -> update.message
-                    UpdateState.Idle -> "Version $version. Zenith regarde seul s'il y a du nouveau à chaque retour dans l'app, puis toutes les 2 minutes."
+                    UpdateState.Idle -> "Version $version, vérifiée à chaque ouverture"
                 },
                 done = update is UpdateState.UpToDate,
+                icon = Glyphs.update,
+                tint = Color(0xFF0A84FF),
             )
             Divider()
             ActionRow("Rechercher maintenant", onClick = onCheckUpdate)
             if (onShareTrip != null) {
                 Divider()
-                InfoRow(
-                    "Dernier trajet",
-                    "Fichier GPX de ton dernier trajet, pour signaler une alerte manquée ou fausse : il se rejoue tel quel.",
-                )
+                InfoRow("Dernier trajet", "Fichier GPX, pour signaler une alerte manquée", icon = Glyphs.trip, tint = Color(0xFF8E8E93))
                 Divider()
                 ActionRow("Partager le trajet", sound = UiSound.Kind.OPEN, onClick = onShareTrip)
             }
@@ -227,6 +218,53 @@ fun SettingsScreen(
     }
 }
 
+private val Months = listOf(
+    "janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre",
+)
+
+/** At the top: Zenith, how many radars and from when, and whether the app is up to date. */
+@Composable
+private fun StatusCard(data: DataStatus, update: UpdateState, modifier: Modifier) {
+    val base = data.radarsUpdatedMs?.let { ms ->
+        val c = java.util.Calendar.getInstance().apply { timeInMillis = ms }
+        "base du ${c.get(java.util.Calendar.DAY_OF_MONTH)} ${Months[c.get(java.util.Calendar.MONTH)]}, " +
+            "%02d:%02d".format(c.get(java.util.Calendar.HOUR_OF_DAY), c.get(java.util.Calendar.MINUTE))
+    }
+    val line = when {
+        data.radarCount == 0 -> "Radars chargés au démarrage"
+        base == null -> "${"%,d".format(data.radarCount).replace(',', ' ')} radars"
+        else -> "${"%,d".format(data.radarCount).replace(',', ' ')} radars · $base"
+    }
+    val pill = when (update) {
+        is UpdateState.UpToDate -> "À jour" to Green
+        is UpdateState.Downloading, is UpdateState.Ready, is UpdateState.Installing, is UpdateState.NeedsConfirmation -> "Mise à jour" to Accent
+        else -> null
+    }
+    Row(
+        modifier.padding(top = 14.dp).fillMaxWidth().glass(RoundedCornerShape(24.dp), GroupSurface).padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Image(painterResource(R.drawable.ic_logo_foreground), contentDescription = null, modifier = Modifier.size(54.dp))
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            Text("Zenith", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+            Text(line, color = Secondary, fontSize = 13.sp, maxLines = 2)
+        }
+        pill?.let { (text, color) ->
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text,
+                color = color,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier.background(color.copy(alpha = 0.16f), RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 5.dp),
+            )
+        }
+    }
+}
+
 /** The way back the iOS way: a round glass button with a chevron. */
 @Composable
 private fun BackButton(onBack: () -> Unit) {
@@ -238,9 +276,9 @@ private fun BackButton(onBack: () -> Unit) {
     }
 }
 
-/** A gray heading over its group, then the group, arriving in turn ([index]). */
+/** A gray heading over its group, then the group, then its [footer] in gray, arriving in turn ([index]). */
 @Composable
-private fun Section(title: String, index: Int, content: @Composable ColumnScope.() -> Unit) {
+private fun Section(title: String, index: Int, footer: String? = null, content: @Composable ColumnScope.() -> Unit) {
     Column(Modifier.cascade(index)) {
         Text(
             title.uppercase(),
@@ -255,28 +293,50 @@ private fun Section(title: String, index: Int, content: @Composable ColumnScope.
                 .animateContentSize(spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow)),
             content = content,
         )
+        footer?.let {
+            Text(it, color = Dim, fontSize = 13.sp, lineHeight = 18.sp, modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 8.dp))
+        }
     }
 }
 
 /** The hairline between two rows of a group, inset like iOS. */
 @Composable
 private fun Divider() {
-    Box(Modifier.padding(start = 18.dp).fillMaxWidth().height(0.5.dp).background(Hairline))
+    Box(Modifier.padding(start = RowTextStart).fillMaxWidth().height(0.5.dp).background(Hairline))
 }
 
-/** A setting: its name, what it does, and the switch; the whole row toggles it. */
+/** Where a row's words start: after its coloured tile. Hairlines and actions line up there. */
+private val RowTextStart = 60.dp
+
+/** A row's coloured tile, or the room for one. */
 @Composable
-private fun ToggleRow(title: String, text: String, on: Boolean, enabled: Boolean = true, onToggle: (Boolean) -> Unit) {
+private fun RowIcon(icon: ImageVector?, tint: Color) {
+    if (icon != null) GlyphTile(icon, tint) else Spacer(Modifier.size(30.dp))
+    Spacer(Modifier.width(12.dp))
+}
+
+/** A setting: its tile, its name, what it does in a line, and the switch; the whole row toggles it. */
+@Composable
+private fun ToggleRow(
+    title: String,
+    text: String,
+    on: Boolean,
+    enabled: Boolean = true,
+    icon: ImageVector? = null,
+    tint: Color = Accent,
+    onToggle: (Boolean) -> Unit,
+) {
     val press = remember { MutableInteractionSource() }
     Row(
         Modifier.fillMaxWidth()
             .tap(enabled = enabled, sound = if (on) UiSound.Kind.OFF else UiSound.Kind.ON, lift = 1f, interaction = press) { onToggle(!on) }
-            .padding(horizontal = 18.dp, vertical = 13.dp),
+            .padding(horizontal = 18.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        RowIcon(icon, tint)
         Column(Modifier.weight(1f)) {
             Text(title, color = Color.White, fontSize = 17.sp)
-            Spacer(Modifier.height(3.dp))
+            Spacer(Modifier.height(2.dp))
             Text(text, color = Secondary, fontSize = 13.sp, lineHeight = 17.sp)
         }
         Spacer(Modifier.width(14.dp))
@@ -286,17 +346,20 @@ private fun ToggleRow(title: String, text: String, on: Boolean, enabled: Boolean
 
 /** A row that only says something; [done] puts a green check next to its name. */
 @Composable
-private fun InfoRow(title: String, text: String, done: Boolean = false) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 13.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(title, color = Color.White, fontSize = 17.sp, modifier = Modifier.weight(1f, fill = false))
-            if (done) {
-                Spacer(Modifier.width(8.dp))
-                Text("✓", color = Green, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+private fun InfoRow(title: String, text: String, done: Boolean = false, icon: ImageVector? = null, tint: Color = Accent) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+        RowIcon(icon, tint)
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, color = Color.White, fontSize = 17.sp, modifier = Modifier.weight(1f, fill = false))
+                if (done) {
+                    Spacer(Modifier.width(8.dp))
+                    Text("✓", color = Green, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                }
             }
+            Spacer(Modifier.height(2.dp))
+            Text(text, color = Secondary, fontSize = 13.sp, lineHeight = 17.sp)
         }
-        Spacer(Modifier.height(3.dp))
-        Text(text, color = Secondary, fontSize = 13.sp, lineHeight = 17.sp)
     }
 }
 
@@ -307,7 +370,7 @@ private fun ActionRow(label: String, color: Color = Accent, sound: UiSound.Kind 
         label,
         color = color,
         fontSize = 17.sp,
-        modifier = Modifier.fillMaxWidth().tap(sound = sound, lift = 1f, onClick = onClick).padding(horizontal = 18.dp, vertical = 13.dp),
+        modifier = Modifier.fillMaxWidth().tap(sound = sound, lift = 1f, onClick = onClick).padding(start = RowTextStart, end = 18.dp, top = 13.dp, bottom = 13.dp),
     )
 }
 
@@ -318,14 +381,15 @@ private fun ActionRow(label: String, color: Color = Accent, sound: UiSound.Kind 
 @Composable
 private fun CarRows(cars: List<Car>, onAdd: () -> Unit, onRemove: (Car) -> Unit) {
     InfoRow(
-        "Démarrage automatique en voiture",
+        "Démarrage en voiture",
         when {
-            !CarLink.supported -> "Nécessite Android 13 ou plus récent."
-            cars.isEmpty() -> "Choisis le Bluetooth de ta voiture : Zenith démarrera seul en montant, et s'arrêtera en " +
-                "descendant. Plusieurs voitures possibles."
-            cars.size == 1 -> "Zenith démarre quand « ${cars[0].name} » se connecte et s'arrête à la déconnexion."
-            else -> "Zenith démarre dès que l'une de tes ${cars.size} voitures se connecte, et s'arrête à sa déconnexion."
+            !CarLink.supported -> "Nécessite Android 13 ou plus récent"
+            cars.isEmpty() -> "Choisis le Bluetooth de ta voiture"
+            cars.size == 1 -> "Démarre et s'arrête avec « ${cars[0].name} »"
+            else -> "Démarre et s'arrête avec tes ${cars.size} voitures"
         },
+        icon = Glyphs.link,
+        tint = Color(0xFF64D2FF),
     )
     if (!CarLink.supported) return
     for (car in cars) {
@@ -346,7 +410,7 @@ private fun CarRow(car: Car, onRemove: (Car) -> Unit) {
     ) {
         Column {
             Divider()
-            Row(Modifier.fillMaxWidth().padding(start = 18.dp, end = 8.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().padding(start = RowTextStart, end = 8.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(8.dp).background(Green, CircleShape))
                 Spacer(Modifier.width(12.dp))
                 Text(car.name, color = Color.White, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
@@ -373,16 +437,17 @@ private fun SpotifyRows(account: SpotifyAccount, mediaAllowed: Boolean, onConnec
     InfoRow(
         "Compte Spotify",
         when {
-            !account.configured -> "Identifiant Spotify absent de cette version."
-            account.connected -> "Connecté : ${account.userName ?: "ton compte"}. " + when {
-                account.premium == false -> "Sans Premium, Spotify ne laisse pas piloter la lecture : précédent, pause et suivant restent grisés."
-                mediaAllowed -> "L'accès aux notifications est là aussi : la carte suit d'abord l'appli Spotify elle-même."
-                else -> "Titre, pochette, Canvas, cœur et commandes (avec Premium) pendant la conduite, sans l'accès aux notifications."
+            !account.configured -> "Identifiant Spotify absent de cette version"
+            account.connected -> "Connecté : ${account.userName ?: "ton compte"}" + when {
+                account.premium == false -> " · sans Premium, commandes grisées"
+                mediaAllowed -> " · l'appli Spotify passe d'abord"
+                else -> ""
             }
-            else -> "Sans l'accès aux notifications : connecte ton compte, la carte Musique le lit directement (titre, pochette, " +
-                "Canvas, cœur ; commandes avec Premium). Spotify n'accepte que les comptes ajoutés par l'auteur (5 au plus)."
+            else -> "Sans l'accès aux notifications, la carte le lit"
         },
         done = account.connected,
+        icon = Glyphs.music,
+        tint = Color(0xFF30D158),
     )
     if (!account.configured) return
     Divider()
@@ -411,16 +476,15 @@ private fun MotionRows(
     ToggleRow(
         "Démarrage en roulant",
         when {
-            !available -> "Nécessite les services Google Play."
-            missing != null ->
-                "Zenith démarre seul dès que le téléphone sent que tu roules en voiture, même fermé (services Google, " +
-                    "presque sans batterie). Il faut « Activité physique », puis la position « Toujours autoriser » : " +
-                    "sans elle, Android coupe le GPS d'une conduite démarrée seule."
-            settings.motionStart -> "Zenith démarre seul quand tu roules en voiture, même fermé, et s'arrête une fois garé."
-            else -> "Désactivé : Zenith ne démarre seul qu'avec le Bluetooth de tes voitures."
+            !available -> "Nécessite les services Google Play"
+            missing != null -> "Il manque une autorisation"
+            settings.motionStart -> "Même fermé, presque sans batterie"
+            else -> "Seulement avec le Bluetooth de tes voitures"
         },
         settings.motionStart,
         enabled = available,
+        icon = Glyphs.car,
+        tint = Color(0xFF34C759),
     ) { on -> onChange { it.copy(motionStart = on) } }
     if (missing != null) {
         Divider()

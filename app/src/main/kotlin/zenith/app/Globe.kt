@@ -26,6 +26,13 @@ private val Land = Color(0xFFD2EAFF)
 private val CityLight = Color(0xFFFFB35C)
 private val Locked = Color(0xFF30D158)
 private val Seeking = Color(0xFFE6F0FF)
+private val LinkBlue = Color(0xFF3D8BFF)
+private val LinkPale = Color(0xFFCFE3FF)
+private val Panel = Color(0xFF1B4E8F)
+private val PanelEdge = Color(0xFF9CC2F0)
+
+/** A link draws itself from its satellite down to the position in this long (seconds). */
+private const val LINK_DRAW_S = 0.45f
 
 /** France until the first position: the globe turns home to the viewer as the satellites lock, and the beacon lights up there. */
 private const val HOME_LAT = 46.5
@@ -43,9 +50,9 @@ private const val LZ = 0.63f
 /**
  * The Earth at the heart of the tunnel, drawn frame by frame: land as a field of dots on a dark
  * ocean lit from the upper left, a halo of atmosphere, city lights on the night side, and the
- * satellites in view on three tilted orbits, each with a short trail. As they lock, the globe slows
- * and turns home (the driver's position once known, France before) to the viewer; a beacon lights up
- * there and every locked satellite beams down to it, a pulse of data running along each beam.
+ * satellites in view travelling three tilted orbits (no lines drawn), each a small satellite. As they
+ * lock, the globe slows and turns home (the driver's position once known, France before) to the
+ * viewer; a beacon lights up there and every locked satellite glows blue, its link curving down to it.
  * Aimed, it settles on home like a camera, by the shortest way: the dive lands on the driver.
  */
 internal class Globe {
@@ -66,6 +73,9 @@ internal class Globe {
     private var tilt = 0.35f
     private var spinSpeed = SPIN
     private var tiltSpeed = 0f
+
+    /** When each satellite locked (the time [draw] got), -1 while it has not: its link draws from then. */
+    private val lockedAt = FloatArray(12) { -1f }
 
     init {
         val x = ArrayList<Float>()
@@ -185,17 +195,6 @@ internal class Globe {
                 canvas.nativeCanvas.drawPoints(shades[s], 0, shadeCount[s] * 2, paint)
             }
         }
-        // Light catching the rim on the sun's side.
-        drawCircle(
-            Brush.linearGradient(
-                listOf(Color.White.copy(alpha = 0.55f * alpha), Atmosphere.copy(alpha = 0.18f * alpha), Color.Transparent),
-                start = Offset(cx - r, cy - r),
-                end = Offset(cx + 0.6f * r, cy + 0.6f * r),
-            ),
-            radius = r,
-            center = center,
-            style = Stroke(1.3f * density),
-        )
         beacon?.let { b ->
             val color = if (lock >= 0.999f) Locked else Seeking
             val strength = alpha * (0.3f + 0.7f * lock)
@@ -247,23 +246,14 @@ internal class Globe {
         }
     }
 
-    /** Orbit lines and satellites behind the globe ([back]) or in front of it, with their beams. */
+    /**
+     * The satellites behind the globe ([back]) or in front of it. No orbit lines: each one travels its
+     * orbit as a small satellite; once locked it glows blue and a link curves down to the position,
+     * drawing itself from the satellite in [LINK_DRAW_S].
+     */
     private fun DrawScope.satellites(back: Boolean, cx: Float, cy: Float, r: Float, alpha: Float, t: Float, visible: Int, used: Int, beacon: Offset?) {
-        val center = Offset(cx, cy)
-        for (k in 0 until 3) {
-            val a = ORBIT_RADIUS[k] * r
-            val b = a * sin(ORBIT_INCLINATION[k])
-            rotate(Math.toDegrees(ORBIT_NODE[k].toDouble()).toFloat(), center) {
-                drawArc(
-                    Color.White.copy(alpha = 0.1f * alpha),
-                    startAngle = if (back) 180f else 0f,
-                    sweepAngle = 180f,
-                    useCenter = false,
-                    topLeft = Offset(cx - a, cy - b),
-                    size = Size(2 * a, 2 * b),
-                    style = Stroke(density),
-                )
-            }
+        for (i in 0 until 12) {
+            if (i >= used) lockedAt[i] = -1f else if (lockedAt[i] < 0f) lockedAt[i] = t
         }
         for (i in 0 until visible.coerceAtMost(12)) {
             val k = i % 3
@@ -273,33 +263,62 @@ internal class Globe {
             val p = orbitPoint(k, u, cx, cy, r)
             if (!front && hypot(p.x - cx, p.y - cy) < r) continue
             val locked = i < used
-            val color = if (locked) Locked else Seeking
-            val a = alpha * if (front) 1f else 0.45f
-            var previous = p
-            for (s in 1..7) {
-                val us = u - s * 0.05f
-                val q = orbitPoint(k, us, cx, cy, r)
-                val hidden = sin(us) <= 0f && hypot(q.x - cx, q.y - cy) < r
-                if (!hidden) {
-                    drawLine(color.copy(alpha = a * 0.45f * (1f - s / 8f)), previous, q, strokeWidth = (1.8f - s * 0.18f) * density, cap = StrokeCap.Round)
-                }
-                previous = q
-            }
-            drawCircle(Brush.radialGradient(listOf(color.copy(alpha = 0.45f * a), Color.Transparent), center = p, radius = 10 * density), radius = 10 * density, center = p)
-            val blink = if (locked) 1f else 0.65f + 0.35f * sin(t * 4f + i)
-            drawCircle(color.copy(alpha = a * blink), radius = 2.3f * density, center = p)
-            if (locked && beacon != null) {
-                drawLine(
-                    Brush.linearGradient(listOf(Locked.copy(alpha = 0.5f * a), Locked.copy(alpha = 0.08f * a)), start = p, end = beacon),
-                    p,
-                    beacon,
-                    strokeWidth = 1.2f * density,
+            val a = alpha * (if (front) 1f else 0.6f) * (if (locked) 1f else 0.45f)
+            if (locked && beacon != null) link(p, beacon, Offset(cx, cy), ((t - lockedAt[i]) / LINK_DRAW_S).coerceIn(0f, 1f), alpha)
+            if (locked) {
+                drawCircle(
+                    Brush.radialGradient(listOf(LinkBlue.copy(alpha = 0.32f * a), Color.Transparent), center = p, radius = 17 * density),
+                    radius = 17 * density,
+                    center = p,
                 )
-                val f = (t * 0.8f + i * 0.37f) % 1f
-                val q = Offset(p.x + (beacon.x - p.x) * f, p.y + (beacon.y - p.y) * f)
-                drawCircle(Color.White.copy(alpha = a * 0.9f * (1f - f * f)), radius = 1.8f * density, center = q)
             }
+            // Along the orbit, the panels across it.
+            val ahead = orbitPoint(k, u + 0.02f, cx, cy, r)
+            val angle = Math.toDegrees(kotlin.math.atan2((ahead.y - p.y).toDouble(), (ahead.x - p.x).toDouble())).toFloat()
+            satellite(p, angle, density * (if (front) 1f else 0.75f), a)
         }
+    }
+
+    /** A small satellite at [c]: white body, two blue solar panels on a boom, an antenna. */
+    private fun DrawScope.satellite(c: Offset, angleDeg: Float, s: Float, a: Float) {
+        rotate(angleDeg, c) {
+            for (side in listOf(-1f, 1f)) {
+                val left = if (side < 0) c.x - 15 * s else c.x + 5 * s
+                drawRoundRect(Panel.copy(alpha = a), Offset(left, c.y - 4 * s), Size(10 * s, 8 * s), androidx.compose.ui.geometry.CornerRadius(s))
+                drawRoundRect(PanelEdge.copy(alpha = a), Offset(left, c.y - 4 * s), Size(10 * s, 8 * s), androidx.compose.ui.geometry.CornerRadius(s), style = Stroke(s))
+                drawLine(PanelEdge.copy(alpha = a), Offset(left + 5 * s, c.y - 4 * s), Offset(left + 5 * s, c.y + 4 * s), strokeWidth = 0.7f * s)
+            }
+            drawLine(Seeking.copy(alpha = a), Offset(c.x - 5 * s, c.y), Offset(c.x + 5 * s, c.y), strokeWidth = 1.4f * s)
+            drawRoundRect(Seeking.copy(alpha = a), Offset(c.x - 3.5f * s, c.y - 5 * s), Size(7 * s, 10 * s), androidx.compose.ui.geometry.CornerRadius(1.6f * s))
+            drawLine(Seeking.copy(alpha = a), Offset(c.x, c.y + 5 * s), Offset(c.x, c.y + 8.5f * s), strokeWidth = 1.2f * s, cap = StrokeCap.Round)
+        }
+    }
+
+    /**
+     * The link from a satellite [p] to the position [b]: a curve bowing away from the globe's
+     * centre, pale at the position, with a soft blue glow under it; drawn up to [drawn] (0 to 1).
+     */
+    private fun DrawScope.link(p: Offset, b: Offset, center: Offset, drawn: Float, alpha: Float) {
+        if (drawn <= 0f) return
+        val mid = Offset((p.x + b.x) / 2, (p.y + b.y) / 2)
+        val away = Offset(mid.x - center.x, mid.y - center.y)
+        val len = hypot(away.x, away.y).coerceAtLeast(1f)
+        val bow = 0.3f * hypot(b.x - p.x, b.y - p.y)
+        val ctrl = Offset(mid.x + away.x / len * bow, mid.y + away.y / len * bow)
+        val path = androidx.compose.ui.graphics.Path()
+        path.moveTo(p.x, p.y)
+        val steps = 24
+        for (n in 1..(steps * drawn).toInt().coerceAtLeast(1)) {
+            val f = n / steps.toFloat()
+            val g = 1 - f
+            path.lineTo(g * g * p.x + 2 * g * f * ctrl.x + f * f * b.x, g * g * p.y + 2 * g * f * ctrl.y + f * f * b.y)
+        }
+        drawPath(path, LinkBlue.copy(alpha = 0.2f * alpha), style = Stroke(6 * density, cap = StrokeCap.Round))
+        drawPath(
+            path,
+            Brush.linearGradient(listOf(LinkBlue.copy(alpha = 0.15f * alpha), LinkPale.copy(alpha = alpha)), start = p, end = b),
+            style = Stroke(1.8f * density, cap = StrokeCap.Round),
+        )
     }
 
     private fun orbitPoint(k: Int, u: Float, cx: Float, cy: Float, r: Float): Offset {
