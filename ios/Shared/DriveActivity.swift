@@ -19,9 +19,10 @@ struct DriveActivityAttributes: ActivityAttributes {
         var radar: String?
         /** Its kind's colour, 0xRRGGBB. */
         var radarColor: UInt32?
-        var radarLimitKmh: Int?
-        /** "1,2 km", rounded to 100 m. */
+        /** "380 m" (to 50 m) or "1,2 km". */
         var radarDistance: String?
+        /** Countdown to the radar announced, 0 at first sight to 1 on it; 0 before it is announced. */
+        var radarProgress: Double?
         /** "Tronçon : moyenne 67, limite 70 · encore 0,8 km". */
         var section: String?
         /** "Itinéraire de contrôle · 12 km". */

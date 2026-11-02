@@ -3,7 +3,7 @@ import Foundation
 
 /**
  * The flight's sounds, synthesized like the alert tones (no assets): the engines spooling up at
- * Start, a low hum looping while the GPS searches, a soft note at each satellite locked, then the
+ * Start, a low hum looping while the GPS searches, a soft "tac" at each satellite locked, then the
  * arrival: a deep tone swelling at the lock-on, the rush of the jump ending in a round deep boom
  * and a warm chord as the map appears. At the end of a drive, the way back: a soft breath falling
  * away and the chord of home.
@@ -61,9 +61,7 @@ final class WarpSound {
             let built = Waves(
                 engage: Synth.wav(WarpSound.engageWave()),
                 hum: Synth.wav(WarpSound.humWave()),
-                locks: WarpSound.lockNotes.enumerated().map { i, hz in
-                    Synth.wav(WarpSound.lockWave(hz, chord: i == WarpSound.lockNotes.count - 1))
-                },
+                locks: WarpSound.lockNotes.map { Synth.wav(WarpSound.lockWave($0)) },
                 arrive: Synth.wav(WarpSound.arriveWave()),
                 homecoming: Synth.wav(WarpSound.homecomingWave())
             )
@@ -78,7 +76,7 @@ final class WarpSound {
     /** "Démarrer": the engines. */
     func engage() { replay(engagePlayer) }
 
-    /** Satellite [n] (1 to 4) locked: a soft round note, a step higher each time, the fourth a chord. */
+    /** Satellite [n] (1 to 4) locked: a soft "tac", a step higher each time. */
     func lock(_ n: Int) {
         guard lockPlayers.indices.contains(n - 1) else { return }
         replay(lockPlayers[n - 1])
@@ -302,8 +300,8 @@ final class WarpSound {
     private static let homecomingSeconds = Double(HOMECOMING_MS) / 1_000 + 0.8
     private static let homecomingHoldMs = 500
 
-    /** E major, rising: E4, G#4, B4, then E5 with its chord. */
-    private static let lockNotes: [Double] = [329.63, 415.3, 493.88, 659.25]
+    /** E major, rising: E4, G#4, B4, E5. */
+    private static let lockNotes: [Double] = [330, 415, 494, 659]
 
     private static func smooth(_ x: Double) -> Double {
         let k = min(max(x, 0), 1)
@@ -414,15 +412,32 @@ final class WarpSound {
         }
     }
 
-    /** A lock: a soft sine with a slow fade and a quiet octave for air; no bell, no click. */
-    private static func lockWave(_ hz: Double, chord: Bool) -> [Float] {
-        pcm(1.1) { t, _ in
-            let w = twoPi * t
-            let env = smooth(t / 0.04) * exp(-t / (chord ? 0.4 : 0.24))
-            var v = sin(w * hz) + 0.2 * sin(w * hz * 2)
-            if chord { v += 0.7 * sin(w * hz * 1.2599) + 0.55 * sin(w * hz * 1.4983) }
-            return 0.3 * env * v * (1 - smooth((t - 0.9) / 0.2))
+    /**
+     * A lock: a soft "tac", a triangle wave gliding down from twice [hz] to [hz] in 50 ms, a 6 ms
+     * attack and an exponential fall to silence by 140 ms, through a low-pass near 2.4 kHz: round,
+     * short, no bell, no click.
+     */
+    private static func lockWave(_ hz: Double) -> [Float] {
+        let length = 0.16
+        let count = Int(length * rate)
+        // One-pole low-pass at 2.4 kHz.
+        let smoothing = 1 - exp(-twoPi * 2_400 / rate)
+        var phase = 0.0
+        var low = 0.0
+        var out = [Float](repeating: 0, count: count)
+        for i in 0..<count {
+            let t = Double(i) / rate
+            let glide = min(t / 0.05, 1)
+            phase += hz * pow(2, 1 - glide) / rate
+            let cycle = phase - floor(phase)
+            let triangle = 4 * abs(cycle - 0.5) - 1
+            // Up in 6 ms, then down by 60 dB at 140 ms; the last 20 ms fade what little is left.
+            let env = t < 0.006 ? t / 0.006 : exp(-6.9 * (t - 0.006) / 0.134)
+            let tail = t > 0.14 ? max(0, 1 - (t - 0.14) / 0.02) : 1
+            low += (triangle - low) * smoothing
+            out[i] = Float(0.34 * env * tail * low)
         }
+        return out
     }
 }
 

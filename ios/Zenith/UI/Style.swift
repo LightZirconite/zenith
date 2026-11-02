@@ -438,6 +438,34 @@ extension LargeTitlePage where Leading == EmptyView {
     }
 }
 
+/** Zenith's logo: speedometer arc with the needle in the red zone (the app icon's drawing). Home and settings. */
+struct ZenithLogo: View {
+    private static let red = Color(.sRGB, red: 0xFF / 255, green: 0x45 / 255, blue: 0x3A / 255, opacity: 1)
+
+    var body: some View {
+        Canvas { context, size in
+            // The icon's 108-unit canvas, drawing scaled to 0.86 around (54, 48) and moved down 3.
+            let unit = size.width / 108
+            let k = 0.86 * unit
+            func at(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+                CGPoint(x: ((x - 54) * 0.86 + 54) * unit, y: ((y - 48) * 0.86 + 51) * unit)
+            }
+            let hub = at(54, 54)
+            var dial = Path()
+            dial.addRelativeArc(center: hub, radius: 24 * k, startAngle: .degrees(150), delta: .degrees(240))
+            context.stroke(dial, with: .color(.white), style: StrokeStyle(lineWidth: 5.5 * k, lineCap: .round))
+            var zone = Path()
+            zone.addRelativeArc(center: hub, radius: 24 * k, startAngle: .degrees(-60), delta: .degrees(90))
+            context.stroke(zone, with: .color(ZenithLogo.red), style: StrokeStyle(lineWidth: 5.5 * k, lineCap: .round))
+            var needle = Path()
+            needle.move(to: hub)
+            needle.addLine(to: at(62.5, 40.9))
+            context.stroke(needle, with: .color(ZenithLogo.red), style: StrokeStyle(lineWidth: 5 * k, lineCap: .round))
+            context.fill(Path(ellipseIn: CGRect(x: hub.x - 4.5 * k, y: hub.y - 4.5 * k, width: 9 * k, height: 9 * k)), with: .color(.white))
+        }
+    }
+}
+
 /** A chevron pointing back (‹), drawn: no symbol font needed. Sized by its frame. */
 struct Chevron: View {
     let color: Color

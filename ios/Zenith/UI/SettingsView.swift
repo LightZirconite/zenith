@@ -11,6 +11,8 @@ private enum SettingsPalette {
     static let green = Color(.sRGB, red: 0x30 / 255, green: 0xD1 / 255, blue: 0x58 / 255, opacity: 1)
     static let dim = Color(.sRGB, red: 0x8E / 255, green: 0x8E / 255, blue: 0x93 / 255, opacity: 1)
     static let secondary = Color(.sRGB, red: 0xAE / 255, green: 0xAE / 255, blue: 0xB2 / 255, opacity: 1)
+    /** iOS's secondary label: footers and the status card. */
+    static let label = Color(.sRGB, red: 0xEB / 255, green: 0xEB / 255, blue: 0xF5 / 255, opacity: 0.6)
 }
 
 /**
@@ -25,6 +27,7 @@ struct SettingsView: View {
     @State private var permissions = Permissions.shared
     @State private var updater = Updater.shared
     @State private var spotify = SpotifyAuth.shared
+    @State private var model = DriveModel.shared
     @State private var trip: URL?
 
     init(onBack: @escaping () -> Void) {
@@ -33,12 +36,13 @@ struct SettingsView: View {
 
     var body: some View {
         LargeTitlePage(title: "Réglages", leading: { SettingsBackButton(action: onBack) }) {
-            alerts.cascade(0)
-            car.cascade(1)
-            music.cascade(2)
-            smallWindow.cascade(3)
-            application.cascade(4)
-            footer.cascade(5)
+            status.cascade(0)
+            alerts.cascade(1)
+            car.cascade(2)
+            music.cascade(3)
+            smallWindow.cascade(4)
+            application.cascade(5)
+            footer.cascade(6)
         }
         // Rows coming and going (a permission granted, an account connected): the groups resize on a spring.
         .animation(.spring(response: 0.31, dampingFraction: 0.85), value: layout)
@@ -47,48 +51,83 @@ struct SettingsView: View {
 
     // MARK: - Groups
 
+    /** Zenith at a glance: the radars in memory, how fresh, and whether this version is the latest. */
+    private var status: some View {
+        HStack(spacing: 14) {
+            // The icon's drawing leaves a margin for the masks: drawn larger so the dial fills its place.
+            ZenithLogo()
+                .frame(width: 72, height: 72)
+                .frame(width: 46, height: 46)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: "Zenith")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white)
+                Text(verbatim: baseText)
+                    .font(.system(size: 13))
+                    .foregroundStyle(SettingsPalette.label)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if let pill = updatePill {
+                Text(verbatim: pill.text)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(pill.color)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(pill.color.opacity(0.14)))
+                    .transition(.scale(scale: 0.6).combined(with: .opacity))
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .glass(RoundedRectangle(cornerRadius: 22, style: .continuous), color: Color.white.opacity(0.06))
+        .padding(.top, 18)
+        .animation(.spring(response: 0.31, dampingFraction: 0.7), value: updatePill?.text)
+    }
+
     private var alerts: some View {
-        SettingsGroup("Alertes") {
-            SettingsToggleRow(title: "Annonces vocales", text: voiceText, on: settings.voice) { settings.voice = $0 }
+        SettingsGroup("Alertes", footer: alertsFooter) {
+            SettingsToggleRow(icon: .voice, title: "Annonces vocales", text: voiceText, on: settings.voice) { settings.voice = $0 }
             SettingsSeparator()
             SettingsToggleRow(
+                icon: .volume,
                 title: "Volume monté en conduite",
-                text: "Au départ, le volume monte à 60 % s'il est plus bas, pour bien entendre les alertes et la voix. " +
-                    "À l'arrêt, il revient où il était, sauf si tu l'as changé entre-temps.",
+                text: "À 60 % au départ, rendu à l'arrêt",
                 on: settings.raiseVolume
             ) { settings.raiseVolume = $0 }
             SettingsSeparator()
             SettingsToggleRow(
+                icon: .pause,
                 title: "Musique en pause pendant la voix",
-                text: "Désactivé (conseillé) : pendant une annonce, Spotify, Apple Music ou la radio baissent en douceur puis " +
-                    "remontent de même. Activé : la musique baisse puis s'arrête le temps de l'annonce. Les bips, eux, ne font que la baisser.",
+                text: "Désactivé conseillé",
                 on: settings.pauseMusic
             ) { settings.pauseMusic = $0 }
             SettingsSeparator()
             SettingsToggleRow(
+                icon: .learner,
                 title: "Jeune permis",
-                text: "Limites probatoires : 110 sur autoroute, 100 sur voie rapide, 80 sur route à 90.",
+                text: "110 · 100 · 80",
                 on: settings.probationary
             ) { settings.probationary = $0 }
             SettingsSeparator()
             SettingsToggleRow(
+                icon: .rain,
                 title: "Pluie automatique",
-                text: "Pendant la conduite, la météo (Open-Meteo, gratuit) dit s'il pleut et les limites baissent seules : 110 sur " +
-                    "autoroute, 100 sur voie rapide, 80 sur route. Rien à toucher. Seule une position arrondie à ~10 km est envoyée.",
+                text: "Limites de pluie, sans rien toucher",
                 on: settings.autoRain
             ) { settings.autoRain = $0 }
         }
     }
 
     private var car: some View {
-        SettingsGroup("En voiture") {
+        SettingsGroup("En voiture", footer: carFooter) {
             SettingsToggleRow(
+                icon: .autoStart,
                 title: "Démarrage automatique",
-                text: settings.autoStart
-                    ? "Zenith peut démarrer seul : quand tu roules en voiture ou quand la voiture se connecte (Raccourcis). " +
-                        "Pas toi au volant ? Touche « Arrêter » : il ne redémarre plus seul avant la fin du trajet. Désactiver est déconseillé."
-                    : "Désactivé : Zenith ne démarre jamais seul, seulement quand tu touches « Démarrer ». " +
-                        "Les automatisations Raccourcis restent, mais ne démarrent plus rien.",
+                text: settings.autoStart ? "En roulant ou par Raccourcis" : "Seulement avec « Démarrer »",
                 on: settings.autoStart
             ) { on in
                 settings.autoStart = on
@@ -100,10 +139,9 @@ struct SettingsView: View {
             }
             SettingsSeparator()
             SettingsToggleRow(
+                icon: .autoStop,
                 title: "Arrêt automatique",
-                text: "Pour la batterie : Zenith s'arrête seul quand la voiture est garée depuis 10 minutes, quand tu repars à pied " +
-                    "ou à l'intérieur sans GPS. Jamais sur autoroute ni pendant un bouchon. Une conduite lancée par la voiture " +
-                    "(Raccourcis) s'arrête, elle, avec la voiture.",
+                text: "Garé 10 min, ou à pied",
                 on: settings.autoStop
             ) { settings.autoStop = $0 }
         }
@@ -111,7 +149,7 @@ struct SettingsView: View {
 
     /** Rows of the automatic start, shown while its master switch is on. */
     @ViewBuilder private var autoStartRows: some View {
-        SettingsToggleRow(title: "Démarrage en roulant", text: motionText, on: settings.motionStart, enabled: motionAvailable) { on in
+        SettingsToggleRow(icon: .moving, title: "Démarrage en roulant", text: motionText, on: settings.motionStart, enabled: motionAvailable) { on in
             settings.motionStart = on
             MotionStarter.shared.sync()
         }
@@ -120,14 +158,7 @@ struct SettingsView: View {
             SettingsActionRow(label: missing, sound: .open, action: askMotionPermission)
         }
         SettingsSeparator()
-        SettingsInfoRow(
-            title: "Démarrage automatique en voiture",
-            text: "iOS ne prévient pas les applis quand la voiture se connecte : une automatisation Raccourcis s'en charge, " +
-                "à créer une fois par voiture.\n" +
-                "Raccourcis → Automatisation → + → « CarPlay » (ou « Bluetooth » → ta voiture) → « Est connecté » → " +
-                "action Zenith « Voiture connectée » → « Exécuter immédiatement ».\n" +
-                "Pareil avec « Est déconnecté » → « Voiture déconnectée » : seule une conduite lancée par la voiture s'arrête."
-        )
+        SettingsInfoRow(icon: .shortcuts, title: "Voiture connectée", text: "Automatisation Raccourcis, une par voiture")
         SettingsSeparator()
         SettingsActionRow(label: "Ouvrir Raccourcis", sound: .open) {
             if let url = URL(string: "shortcuts://") { openURL(url) }
@@ -135,8 +166,8 @@ struct SettingsView: View {
     }
 
     private var music: some View {
-        SettingsGroup("Musique") {
-            SettingsInfoRow(title: "Spotify", text: spotifyText, done: spotify.connected)
+        SettingsGroup("Musique", footer: musicFooter) {
+            SettingsInfoRow(icon: .spotify, title: "Compte Spotify", text: spotifyText, done: spotify.connected)
             if spotify.configured {
                 SettingsSeparator()
                 if spotify.connected {
@@ -147,10 +178,9 @@ struct SettingsView: View {
             }
             SettingsSeparator()
             SettingsInfoRow(
+                icon: .appleMusic,
                 title: "Apple Music",
-                text: permissions.appleMusic
-                    ? "Le titre en cours d'Apple Music, sa progression et ses commandes s'affichent sous les alertes pendant la conduite."
-                    : "Titre en cours et commandes d'Apple Music sous les alertes, sans compte. iOS appelle cela « Médias et Apple Music ».",
+                text: permissions.appleMusic ? "Titre et commandes en conduite" : "Accès « Médias et Apple Music »",
                 done: permissions.appleMusic
             )
             if !permissions.appleMusic {
@@ -159,42 +189,38 @@ struct SettingsView: View {
             }
             SettingsSeparator()
             SettingsToggleRow(
+                icon: .canvas,
                 title: "Canvas",
-                text: "La courte vidéo en boucle des titres (celle de Spotify), derrière la carte Musique et dans la petite fenêtre, " +
-                    "pour Spotify comme pour Apple Music. Services gratuits non officiels : peut cesser de marcher, et tous les " +
-                    "titres n'en ont pas. Environ 3 Mo par titre, gardés en cache. Sinon, la pochette floutée.",
+                text: "Vidéo en boucle derrière la carte",
                 on: settings.spotifyCanvas
             ) { settings.spotifyCanvas = $0 }
         }
     }
 
     private var smallWindow: some View {
-        SettingsGroup("Petite fenêtre et écran verrouillé") {
+        SettingsGroup("Petite fenêtre et écran verrouillé", footer: smallWindowFooter) {
             SettingsToggleRow(
+                icon: .pip,
                 title: "Petite fenêtre automatique",
-                text: "En quittant Zenith pendant la conduite (Waze, Maps…), la petite fenêtre s'ouvre seule par-dessus. " +
-                    "Désactivé : seulement avec son bouton sur l'écran de conduite.",
+                text: "En quittant Zenith pendant la conduite",
                 on: settings.autoPip
             ) { settings.autoPip = $0 }
             SettingsSeparator()
             SettingsToggleRow(
+                icon: .pipLarge,
                 title: "Petite fenêtre carrée",
-                text: "Désactivé : un bandeau compact en largeur, qui laisse voir Waze ou Maps. Activé : une fenêtre carrée, " +
-                    "plus grande. Un pincement sur la fenêtre la redimensionne aussi.",
+                text: settings.pipLarge ? "Carrée, plus grande" : "Bandeau compact en largeur",
                 on: settings.pipLarge
             ) { settings.pipLarge = $0 }
             SettingsSeparator()
             if !LiveActivityManager.installed {
                 // SideStore's "Remove extension" at the install takes the Live Activity away with it.
-                SettingsInfoRow(
-                    title: "Activité en direct",
-                    text: "Indisponible : l'extension a été retirée à l'installation. Pour l'écran verrouillé et la Dynamic Island, " +
-                        "réinstalle Zenith depuis SideStore en choisissant « Keep extension » (un App ID de plus, une seule fois)."
-                )
+                SettingsInfoRow(icon: .liveActivity, title: "Activité en direct", text: "Indisponible : extension retirée")
             } else {
                 SettingsToggleRow(
+                    icon: .liveActivity,
                     title: "Activité en direct",
-                    text: "Vitesse, limite et prochain radar sur l'écran verrouillé et dans la Dynamic Island pendant la conduite.",
+                    text: "Écran verrouillé et Dynamic Island",
                     on: settings.liveActivity
                 ) { on in
                     settings.liveActivity = on
@@ -208,15 +234,15 @@ struct SettingsView: View {
     }
 
     private var application: some View {
-        SettingsGroup("Application") {
+        SettingsGroup("Application", footer: applicationFooter) {
             SettingsToggleRow(
+                icon: .uiSounds,
                 title: "Sons de l'interface",
-                text: "Petits sons doux sous le doigt, sur chaque bouton. Les alertes de conduite ne sont pas concernées, " +
-                    "les vibrations restent.",
+                text: "Un son doux sur chaque bouton",
                 on: settings.uiSounds
             ) { settings.uiSounds = $0 }
             SettingsSeparator()
-            SettingsInfoRow(title: "Mises à jour", text: updateText, done: updater.state == .upToDate)
+            SettingsInfoRow(icon: .updates, title: "Mises à jour", text: updateText, done: updater.state == .upToDate)
             SettingsSeparator()
             SettingsActionRow(label: "Rechercher maintenant") { updater.check() }
             if updateAvailable {
@@ -227,10 +253,7 @@ struct SettingsView: View {
             SettingsActionRow(label: "Ajouter la source à SideStore", sound: .open) { updater.addSource() }
             if let trip {
                 SettingsSeparator()
-                SettingsInfoRow(
-                    title: "Dernier trajet",
-                    text: "Fichier GPX de ton dernier trajet, pour signaler une alerte manquée ou fausse : il se rejoue tel quel."
-                )
+                SettingsInfoRow(icon: .trip, title: "Dernier trajet", text: "Fichier GPX, il se rejoue tel quel")
                 SettingsSeparator()
                 SettingsShareRow(label: "Partager le trajet", file: trip)
             }
@@ -250,6 +273,82 @@ struct SettingsView: View {
             .padding(.bottom, 12)
     }
 
+    // MARK: - Footers: what the rows no longer say
+
+    private var alertsFooter: String {
+        var parts: [String] = []
+        if VoiceStatus.shared.frenchMissing {
+            parts.append("Pas de voix française sur cet iPhone : télécharge-en une dans Réglages › Accessibilité › " +
+                "Contenu énoncé › Voix › Français. En attendant, seuls les bips sonnent.")
+        }
+        parts.append("Pendant une annonce, la musique baisse en douceur puis remonte de même ; en pause pendant la voix, " +
+            "elle baisse puis s'arrête le temps de l'annonce. Les bips ne font que la baisser, jamais de coupure nette.")
+        parts.append("Jeune permis et pluie : 110 sur autoroute, 100 sur voie rapide, 80 sur route. La météo (Open-Meteo, " +
+            "gratuit) ne reçoit qu'une position arrondie à ~10 km.")
+        return parts.joined(separator: "\n\n")
+    }
+
+    private var carFooter: String {
+        guard settings.autoStart else {
+            return "Zenith ne démarre jamais seul, seulement quand tu touches « Démarrer ». Les automatisations Raccourcis " +
+                "restent, mais ne démarrent plus rien. Arrêt automatique : jamais sur autoroute ni dans un bouchon."
+        }
+        var parts = ["Tu n'es pas au volant ? Touche « Arrêter » : Zenith ne redémarre plus seul avant la fin du trajet. " +
+            "Désactiver le démarrage automatique est déconseillé."]
+        if motionMissing != nil {
+            parts.append("Démarrage en roulant : sans la position « Toujours » et « Mouvements et forme », iOS ne réveille pas Zenith.")
+        } else if settings.motionStart {
+            parts.append("En roulant, Zenith démarre seul même fermé, presque sans batterie ; une notification le dit, touche-la " +
+                "pour ouvrir la petite fenêtre.")
+        }
+        parts.append("Voiture connectée : iOS ne prévient pas les applis, une automatisation Raccourcis s'en charge. " +
+            "Automatisation → + → « CarPlay » (ou « Bluetooth » → ta voiture) → « Est connecté » → action Zenith " +
+            "« Voiture connectée » → « Exécuter immédiatement ». Pareil avec « Est déconnecté » → « Voiture déconnectée » : " +
+            "seule une conduite lancée par la voiture s'arrête.")
+        parts.append("Arrêt automatique : garé depuis 10 minutes, reparti à pied ou à l'intérieur sans GPS ; jamais sur autoroute " +
+            "ni dans un bouchon. Une conduite lancée par la voiture s'arrête avec elle.")
+        return parts.joined(separator: "\n\n")
+    }
+
+    private var musicFooter: String {
+        var parts: [String] = []
+        if !spotify.configured {
+            parts.append("L'identifiant de l'appli Spotify manque dans cette version : la connexion n'est pas possible.")
+        } else if spotify.connected && spotify.premium == false {
+            parts.append("Compte gratuit : Spotify réserve les commandes (pause, suivant) à Premium.")
+        } else if !spotify.connected {
+            parts.append("Spotify : titre en cours, pochette et Canvas pendant la conduite, les commandes avec Premium. " +
+                "La connexion se fait sur la page de Spotify.")
+        }
+        parts.append("Canvas : la courte vidéo en boucle des titres, derrière la carte Musique et dans la petite fenêtre, pour " +
+            "Spotify comme pour Apple Music. Services gratuits non officiels, tous les titres n'en ont pas ; environ 3 Mo par " +
+            "titre, gardés en cache. Sinon, la pochette floutée.")
+        return parts.joined(separator: "\n\n")
+    }
+
+    private var smallWindowFooter: String {
+        var parts = ["Petite fenêtre automatique désactivée : seulement avec un raccourci Waze ou Maps de l'écran de conduite. " +
+            "Un pincement sur la petite fenêtre la redimensionne aussi."]
+        if !LiveActivityManager.installed {
+            parts.append("Activité en direct : l'extension a été retirée à l'installation. Pour l'écran verrouillé et la Dynamic " +
+                "Island, réinstalle Zenith depuis SideStore en choisissant « Keep extension » (un App ID de plus, une seule fois).")
+        }
+        return parts.joined(separator: "\n\n")
+    }
+
+    private var applicationFooter: String {
+        var parts = ["Les alertes de conduite ne dépendent pas des sons de l'interface, les vibrations restent.",
+                     "Zenith regarde seul s'il y a du nouveau à chaque retour dans l'app, puis toutes les 2 minutes ; SideStore l'installe."]
+        if case .available(_, let notes) = updater.state {
+            let what = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !what.isEmpty { parts.append(what) }
+        }
+        if trip != nil {
+            parts.append("Dernier trajet : partage-le pour signaler une alerte manquée ou fausse.")
+        }
+        return parts.joined(separator: "\n\n")
+    }
+
     // MARK: - What the rows say
 
     /** What can make rows come or go: the groups animate their size when it changes. */
@@ -261,10 +360,7 @@ struct SettingsView: View {
     }
 
     private var voiceText: String {
-        VoiceStatus.shared.frenchMissing
-            ? "Pas de voix française sur cet iPhone : télécharge-en une dans Réglages › Accessibilité › Contenu énoncé › " +
-                "Voix › Français. En attendant, seuls les bips sonnent."
-            : "Désactivé : seulement les bips, sans voix."
+        VoiceStatus.shared.frenchMissing ? "Pas de voix française : seuls les bips" : "Sinon, seulement les bips"
     }
 
     private var motionAvailable: Bool { CMMotionActivityManager.isActivityAvailable() }
@@ -278,16 +374,10 @@ struct SettingsView: View {
     }
 
     private var motionText: String {
-        if !motionAvailable { return "Nécessite un iPhone qui reconnaît les déplacements (coprocesseur de mouvement)." }
-        if motionMissing != nil {
-            return "Zenith démarre seul dès que l'iPhone sent que tu roules en voiture, même fermé, presque sans batterie. " +
-                "Il faut la position « Toujours » et « Mouvements et forme » : sans elles, iOS ne réveille pas Zenith."
-        }
-        if settings.motionStart {
-            return "Zenith démarre seul quand tu roules en voiture, même fermé, et s'arrête une fois garé. Une notification " +
-                "le dit : touche-la pour ouvrir la petite fenêtre."
-        }
-        return "Désactivé : Zenith ne démarre seul qu'avec ta voiture, par Raccourcis (ci-dessous)."
+        if !motionAvailable { return "Pas de coprocesseur de mouvement" }
+        if motionMissing != nil { return "Position « Toujours » requise" }
+        if settings.motionStart { return "Démarre seul, s'arrête une fois garé" }
+        return "Seulement par Raccourcis"
     }
 
     private func askMotionPermission() {
@@ -302,18 +392,9 @@ struct SettingsView: View {
     }
 
     private var spotifyText: String {
-        if !spotify.configured {
-            return "L'identifiant de l'appli Spotify manque dans cette version : la connexion n'est pas possible."
-        }
-        if spotify.connected {
-            let who = spotify.userName ?? "ton compte"
-            let free = spotify.premium == false
-                ? " Compte gratuit : Spotify réserve les commandes (pause, suivant) à Premium."
-                : ""
-            return "Connecté : \(who). Titre en cours, pochette et Canvas pendant la conduite." + free
-        }
-        return "Connecte ton compte pour le titre en cours, sa pochette et son Canvas pendant la conduite, et les commandes " +
-            "avec Premium. La connexion se fait sur la page de Spotify."
+        if !spotify.configured { return "Identifiant absent de cette version" }
+        if spotify.connected { return "Connecté : \(spotify.userName ?? "ton compte")" }
+        return "Titre, pochette et Canvas en conduite"
     }
 
     private var updateAvailable: Bool {
@@ -324,19 +405,36 @@ struct SettingsView: View {
     private var updateText: String {
         let current = updater.currentVersion
         switch updater.state {
-        case .idle:
-            return "Version \(current). Zenith regarde seul s'il y a du nouveau à chaque retour dans l'app, puis toutes " +
-                "les 2 minutes ; SideStore l'installe."
-        case .checking:
-            return "Recherche d'une nouvelle version…"
-        case .upToDate:
-            return "À jour : version \(current)."
-        case .available(let version, let notes):
-            let what = notes.trimmingCharacters(in: .whitespacesAndNewlines)
-            let base = "Version \(version) disponible : SideStore la signe et l'installe par-dessus celle-ci."
-            return what.isEmpty ? base : base + "\n" + what
-        case .failed(let message):
-            return "\(message). Version \(current)."
+        case .idle: return "Version \(current)"
+        case .checking: return "Recherche d'une nouvelle version…"
+        case .upToDate: return "À jour : version \(current)"
+        case .available(let version, _): return "Version \(version) disponible"
+        case .failed(let message): return message
+        }
+    }
+
+    /** "9 318 radars · base du 2 novembre, 15:35". */
+    private var baseText: String {
+        let data = model.data
+        guard data.radarCount > 0 else { return "Radars chargés au démarrage" }
+        let radars = "\(DriveScreen.Words.thousands(data.radarCount)) radars"
+        guard let updated = data.radarsUpdated else { return radars }
+        return "\(radars) · base du \(Self.baseDate.string(from: updated))"
+    }
+
+    private static let baseDate: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "fr_FR")
+        f.dateFormat = "d MMMM, HH:mm"
+        return f
+    }()
+
+    /** The pill of the status card: up to date, or an update waiting. */
+    private var updatePill: (text: String, color: Color)? {
+        switch updater.state {
+        case .upToDate: return ("À jour", SettingsPalette.green)
+        case .available: return ("Mise à jour", SettingsPalette.accent)
+        default: return nil
         }
     }
 }
@@ -358,13 +456,62 @@ private struct SettingsBackButton: View {
     }
 }
 
+/** The coloured square of a row, the iOS way: a white glyph on the setting's colour. */
+private struct SettingsIcon {
+    let symbol: String
+    let rgb: UInt32
+
+    var color: Color {
+        Color(.sRGB, red: Double((rgb >> 16) & 0xFF) / 255, green: Double((rgb >> 8) & 0xFF) / 255, blue: Double(rgb & 0xFF) / 255, opacity: 1)
+    }
+
+    static let voice = SettingsIcon(symbol: "mic.fill", rgb: 0x5E5CE6)
+    static let volume = SettingsIcon(symbol: "speaker.wave.2.fill", rgb: 0xFF9F0A)
+    static let pause = SettingsIcon(symbol: "pause.fill", rgb: 0xFF375F)
+    static let learner = SettingsIcon(symbol: "graduationcap.fill", rgb: 0x30B0C7)
+    static let rain = SettingsIcon(symbol: "cloud.rain.fill", rgb: 0x0A84FF)
+    static let autoStart = SettingsIcon(symbol: "power", rgb: 0x32D74B)
+    static let moving = SettingsIcon(symbol: "car.fill", rgb: 0x34C759)
+    static let autoStop = SettingsIcon(symbol: "parkingsign", rgb: 0x8E8E93)
+    static let shortcuts = SettingsIcon(symbol: "link", rgb: 0x64D2FF)
+    static let spotify = SettingsIcon(symbol: "music.note", rgb: 0x30D158)
+    static let appleMusic = SettingsIcon(symbol: "music.note.list", rgb: 0xFF375F)
+    static let canvas = SettingsIcon(symbol: "play.rectangle.fill", rgb: 0xBF5AF2)
+    static let pip = SettingsIcon(symbol: "pip.fill", rgb: 0xFF9F0A)
+    static let pipLarge = SettingsIcon(symbol: "square.fill.on.square.fill", rgb: 0x5E5CE6)
+    static let liveActivity = SettingsIcon(symbol: "lock.fill", rgb: 0x64D2FF)
+    static let uiSounds = SettingsIcon(symbol: "hand.tap.fill", rgb: 0x30B0C7)
+    static let updates = SettingsIcon(symbol: "arrow.triangle.2.circlepath", rgb: 0x0A84FF)
+    static let trip = SettingsIcon(symbol: "point.topleft.down.curvedto.point.bottomright.up", rgb: 0x8E8E93)
+}
+
+/** The 30 pt rounded square of a row. */
+private struct SettingsIconView: View {
+    let icon: SettingsIcon
+
+    var body: some View {
+        Image(systemName: icon.symbol)
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(Color.white)
+            .frame(width: 30, height: 30)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(icon.color))
+            .accessibilityHidden(true)
+    }
+}
+
+/** Where a row's words start, after its icon: actions and hairlines line up with the titles. */
+private let SettingsTextInset: CGFloat = 14 + 30 + 12
+
 /** A gray heading in capitals over its group, then the group in one block of glass. */
 private struct SettingsGroup<Rows: View>: View {
     let title: String
+    /** The longer explanations, in grey under the group. */
+    let footer: String
     let rows: Rows
 
-    init(_ title: String, @ViewBuilder rows: () -> Rows) {
+    init(_ title: String, footer: String = "", @ViewBuilder rows: () -> Rows) {
         self.title = title
+        self.footer = footer
         self.rows = rows()
     }
 
@@ -380,6 +527,15 @@ private struct SettingsGroup<Rows: View>: View {
             VStack(alignment: .leading, spacing: 0) { rows }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .glass(RoundedRectangle(cornerRadius: 24, style: .continuous), color: SettingsPalette.group)
+            if !footer.isEmpty {
+                Text(verbatim: footer)
+                    .font(.system(size: 13))
+                    .lineSpacing(2)
+                    .foregroundStyle(SettingsPalette.label)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 18)
+                    .padding(.top, 8)
+            }
         }
     }
 }
@@ -390,12 +546,13 @@ private struct SettingsSeparator: View {
         Rectangle()
             .fill(SettingsPalette.hairline)
             .frame(height: 0.5)
-            .padding(.leading, 18)
+            .padding(.leading, SettingsTextInset)
     }
 }
 
-/** A setting: its name, what it does, and the switch; the whole row toggles it. */
+/** A setting: its icon, its name, what it does in a line, and the switch; the whole row toggles it. */
 private struct SettingsToggleRow: View {
+    let icon: SettingsIcon
     let title: String
     let text: String
     let on: Bool
@@ -403,22 +560,27 @@ private struct SettingsToggleRow: View {
     let onToggle: (Bool) -> Void
 
     var body: some View {
-        HStack(spacing: 14) {
-            VStack(alignment: .leading, spacing: 3) {
+        HStack(spacing: 12) {
+            SettingsIconView(icon: icon)
+                .opacity(enabled ? 1 : 0.5)
+            VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 17))
+                    .font(.system(size: 16, weight: .medium))
                     .foregroundStyle(.white)
+                    .fixedSize(horizontal: false, vertical: true)
                 Text(text)
                     .font(.system(size: 13))
-                    .lineSpacing(2)
-                    .foregroundStyle(SettingsPalette.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .foregroundStyle(SettingsPalette.label)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             PressedSwitch(on: on && enabled)
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 13)
+        .padding(.leading, 14)
+        .padding(.trailing, 16)
+        .padding(.vertical, 10)
+        .frame(minHeight: 56)
         .tap(enabled: enabled, sound: on ? .off : .on, lift: 1) {
             withAnimation(.spring(response: 0.31, dampingFraction: 0.85)) { onToggle(!on) }
         }
@@ -434,38 +596,44 @@ private struct PressedSwitch: View {
     var body: some View { GlassSwitch(on: on, pressed: pressed) }
 }
 
-/** A row that only says something; [done] puts a green check next to its name. */
+/** A row that only says something; [done] puts a green check at its right. */
 private struct SettingsInfoRow: View {
+    let icon: SettingsIcon
     let title: String
     let text: String
     var done = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 8) {
+        HStack(spacing: 12) {
+            SettingsIconView(icon: icon)
+            VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 17))
+                    .font(.system(size: 16, weight: .medium))
                     .foregroundStyle(.white)
-                if done {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(SettingsPalette.green)
-                        .transition(.scale(scale: 0.3).combined(with: .opacity))
-                }
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(text)
+                    .font(.system(size: 13))
+                    .foregroundStyle(SettingsPalette.label)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
             }
-            Text(text)
-                .font(.system(size: 13))
-                .lineSpacing(2)
-                .foregroundStyle(SettingsPalette.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if done {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(SettingsPalette.green)
+                    .transition(.scale(scale: 0.3).combined(with: .opacity))
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 18)
-        .padding(.vertical, 13)
+        .padding(.leading, 14)
+        .padding(.trailing, 16)
+        .padding(.vertical, 10)
+        .frame(minHeight: 56)
+        .accessibilityElement(children: .combine)
     }
 }
 
-/** An action, the iOS way: colored words across the row. */
+/** An action, the iOS way: colored words across the row, lined up with the titles above. */
 private struct SettingsActionRow: View {
     let label: String
     var color: Color = SettingsPalette.accent
@@ -474,10 +642,11 @@ private struct SettingsActionRow: View {
 
     var body: some View {
         Text(label)
-            .font(.system(size: 17))
+            .font(.system(size: 16))
             .foregroundStyle(color)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 18)
+            .padding(.leading, SettingsTextInset)
+            .padding(.trailing, 16)
             .padding(.vertical, 13)
             .tap(sound: sound, lift: 1, action: action)
     }
@@ -491,10 +660,11 @@ private struct SettingsShareRow: View {
     var body: some View {
         ShareLink(item: file) {
             Text(label)
-                .font(.system(size: 17))
+                .font(.system(size: 16))
                 .foregroundStyle(SettingsPalette.accent)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 18)
+                .padding(.leading, SettingsTextInset)
+                .padding(.trailing, 16)
                 .padding(.vertical, 13)
                 .contentShape(Rectangle())
         }

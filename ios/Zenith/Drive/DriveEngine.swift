@@ -35,6 +35,8 @@ final class DriveEngine: NSObject, CLLocationManagerDelegate {
     private var generation = 0
     private var vehicleLeftAt: Date?
     private var appliedProfile: (Bool, Bool)?
+    /** The drive added up (distance, time, top speed, radars passed), for its summary back home. */
+    private var trip: TripStats?
 
     // Drive queue.
     private var session: DrivingSession?
@@ -77,6 +79,7 @@ final class DriveEngine: NSObject, CLLocationManagerDelegate {
         lastDangerBeepMs = 0
         appliedProfile = nil
         liveSpeed = Bridge.shared.speedStabilizer()
+        trip = Bridge.shared.tripStats()
         model.started(origin)
         tones = TonePlayer()
         speaker = Speaker()
@@ -142,7 +145,12 @@ final class DriveEngine: NSObject, CLLocationManagerDelegate {
         // The next drive starts from the weather again, not from this drive's rain.
         if !demo { settings.raining = false }
         UIApplication.shared.isIdleTimerDisabled = false
-        model.stopped()
+        // The summary of the drive, read before it goes: home shows it a moment (nil when too short).
+        let recap: TripRecap? = trip.flatMap { t in
+            Bridge.shared.tripHeadline(trip: t).map { TripRecap(headline: $0, details: Bridge.shared.tripDetails(trip: t) ?? "", at: Date()) }
+        }
+        trip = nil
+        model.stopped(trip: recap)
     }
 
     /**
@@ -384,6 +392,13 @@ final class DriveEngine: NSObject, CLLocationManagerDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self, self.generation == gen, self.running else { return }
             self.model.update(s)
+            if let trip = self.trip {
+                let passed = s.events.filter { $0.kind == .passed }.count
+                Bridge.shared.tripAdd(
+                    trip: trip, timeMs: s.timeMs, lat: s.position.lat, lon: s.position.lon,
+                    speedKmh: Int32(s.speedKmh ?? -1), radarsPassed: Int32(passed)
+                )
+            }
             if let n = nearby {
                 self.model.setNearby(radars: n.0, zones: n.1)
                 self.model.setRoads(n.2)

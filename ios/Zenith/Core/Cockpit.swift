@@ -41,6 +41,52 @@ enum Cockpit {
         Bridge.shared.tapGain(volume: Int32((volume * 16).rounded()), max: 16)
     }
 
+    // MARK: Alert island, speed ring, night (core/Island.kt, core/Daylight.kt)
+
+    /** What the alert island shows; [passedAgoMs] -1 when no radar was passed. */
+    static func islandMode(alert: Bool, overLimit: Bool, section: Bool, passedAgoMs: Int64) -> IslandMode {
+        IslandMode(rawValue: Int(Bridge.shared.islandState(alert: alert, overLimit: overLimit, section: section, passedAgoMs: passedAgoMs))) ?? .idle
+    }
+
+    /** How long the small "Radar passé" stays. */
+    static let islandPassedMs: Int64 = Bridge.shared.islandPassedMs()
+
+    /** The approach's progress, 0 at first sight of the radar ([startM]) to 1 on it. */
+    static func islandProgress(distanceM: Double, startM: Double) -> Double {
+        Double(Bridge.shared.islandProgress(distanceM: distanceM, startM: startM))
+    }
+
+    /** "18 km/h au-dessus" under "Ralentis"; nil when not above the limit. */
+    static func islandOverText(speedKmh: Int?, limitKmh: Int?) -> String? {
+        Bridge.shared.islandOverText(speedKmh: Int32(speedKmh ?? -1), limitKmh: Int32(limitKmh ?? -1))
+    }
+
+    /** Share of the speed ring filled, 0 to 1. */
+    static func gaugeFill(speedKmh: Int?, limitKmh: Int?) -> Double {
+        Double(Bridge.shared.gaugeFill(speedKmh: Int32(speedKmh ?? -1), limitKmh: Int32(limitKmh ?? -1)))
+    }
+
+    /** Where the limit's tick sits on the ring, 0 to 1; nil without a limit. */
+    static func gaugeTick(limitKmh: Int?) -> Double? {
+        let tick = Bridge.shared.gaugeTick(limitKmh: Int32(limitKmh ?? -1))
+        return tick < 0 ? nil : Double(tick)
+    }
+
+    /** The ring's arc in degrees, and its start clockwise from 3 o'clock (bottom left). */
+    static let gaugeSweepDeg = Double(Bridge.shared.gaugeSweepDeg())
+    static let gaugeStartDeg = Double(Bridge.shared.gaugeStartDeg())
+
+    /** Night at [position] now: the map and the Canvas dim a little. */
+    static func isNight(_ position: GeoPoint, at date: Date = Date()) -> Bool {
+        Bridge.shared.isNight(lat: position.lat, lon: position.lon, timeMs: Int64(date.timeIntervalSince1970 * 1000))
+    }
+
+    /** Opacity of the map and the Canvas at night. */
+    static let nightDim = Double(Bridge.shared.nightDim())
+
+    /** How long the trip summary stays at home. */
+    static let tripShownMs: Int64 = Bridge.shared.tripShownMs()
+
     private static func code(_ choice: Bool?) -> Int32 {
         switch choice {
         case .some(true): return 1
@@ -48,4 +94,13 @@ enum Cockpit {
         case .none: return -1
         }
     }
+}
+
+/** What the alert island shows, most urgent first (core Island.State, same order). */
+enum IslandMode: Int {
+    case idle = 0
+    case approach = 1
+    case slowDown = 2
+    case section = 3
+    case passed = 4
 }

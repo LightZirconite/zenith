@@ -385,9 +385,9 @@ private struct FlightEasing {
 
 /** The flight's colors. */
 private enum FlightPalette {
-    static let blue = rgb(0x0A84FF)
-    static let green = rgb(0x30D158)
-    static let red = rgb(0xFF3B30)
+    static let blue = rgb(0x3D8BFF)
+    static let green = rgb(0x32D74B)
+    static let red = rgb(0xFF453A)
     static let starBlue = rgb(0x9CC8FF)
     static let starRed = rgb(0xFF6B5E)
     static let nebula = rgb(0x8E5CFF)
@@ -649,39 +649,36 @@ private struct FlightLockLight: View {
     }
 }
 
-/** Over the limit near a radar: the edges of the whole screen pulse red, the middle stays clear. */
+/**
+ * Over the limit near a radar: a thin red rim around the whole screen and a soft red glow inside
+ * it, pulsing; the middle stays clear.
+ */
 struct DangerGlow: View {
     let on: Bool
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: nil, paused: !on)) { timeline in
-            let beat = DangerGlow.beat(timeline.date.timeIntervalSinceReferenceDate)
-            Canvas { ctx, size in
-                let edge = Gradient(stops: [
-                    .init(color: .clear, location: 0.55),
-                    .init(color: FlightPalette.red.opacity(0.55 * beat), location: 1),
-                ])
-                ctx.fill(
-                    Path(CGRect(origin: .zero, size: size)),
-                    with: .radialGradient(
-                        edge,
-                        center: CGPoint(x: size.width / 2, y: size.height / 2),
-                        startRadius: 0,
-                        endRadius: max(size.width, size.height) * 0.75
-                    )
-                )
+        ZStack {
+            if on {
+                ZStack {
+                    // The glow inside the edges, about 56 pt deep.
+                    Rectangle()
+                        .strokeBorder(FlightPalette.red.opacity(0.38), lineWidth: 40)
+                        .blur(radius: 22)
+                    Rectangle()
+                        .strokeBorder(FlightPalette.red.opacity(0.6), lineWidth: 1.5)
+                }
+                .clipped()
+                // From 0.45 up to 1 and back, 450 ms each way.
+                .phaseAnimator([0.45, 1.0]) { content, beat in
+                    content.opacity(beat)
+                } animation: { _ in
+                    .timingCurve(0.4, 0, 0.2, 1, duration: 0.45)
+                }
+                .transition(.opacity)
             }
         }
-        .opacity(on ? 1 : 0)
         .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.4), value: on)
         .allowsHitTesting(false)
-    }
-
-    /** From 0.45 up to 1 and back, 450 ms each way. */
-    private static func beat(_ seconds: Double) -> Double {
-        let x = seconds.truncatingRemainder(dividingBy: 0.9)
-        let k = x < 0.45 ? x / 0.45 : (0.9 - x) / 0.45
-        return 0.45 + 0.55 * FlightEasing.fastOutSlowIn(k)
     }
 }
 

@@ -210,11 +210,7 @@ final class DriveData {
         guard let home = france else { return }
         let pack = abroad.map { Bridge.shared.withAbroad(home: home, abroad: $0) } ?? home
         let radars = Int(Bridge.shared.radarCount(data: pack))
-        let zones = Int(Bridge.shared.zoneCount(data: pack))
-        change {
-            $0.radarCount = radars
-            $0.zoneCount = zones
-        }
+        change { $0.radarCount = radars }
         onRadars?(pack)
     }
 

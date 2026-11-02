@@ -142,6 +142,12 @@ final class LiveActivityManager {
         let upcoming = s?.upcoming
         let radar = alert?.radar ?? upcoming?.radar
         let distance = alert?.distanceM ?? upcoming?.distanceM
+        // The countdown in steps of 5 %: the bar moves, the updates stay few; 0 before the announcement.
+        var progress: Double?
+        if radar != nil {
+            progress = 0
+            if let alert { progress = (DriveModel.shared.progress(alert) * 20).rounded() / 20 }
+        }
         return State(
             speedKmh: DriveModel.shared.shownSpeed ?? s?.speedKmh,
             limitKmh: s?.limitKmh,
@@ -149,8 +155,8 @@ final class LiveActivityManager {
             danger: alert?.overLimit == true,
             radar: radar?.label,
             radarColor: radar.map { rgb(radarColor($0.kind)) },
-            radarLimitKmh: alert.map { $0.limitKmh } ?? upcoming?.limitKmh,
-            radarDistance: distance.map { "\(km($0)) km" },
+            radarDistance: distance.map(short),
+            radarProgress: progress,
             section: s?.section.map { "Tronçon : moyenne \(Int($0.averageKmh)), limite \($0.limitKmh) · encore \(km($0.remainingM)) km" },
             zone: s?.zone.map { "Itinéraire de contrôle · \(max(1, Int(($0.remainingM ?? $0.lengthM) / 1_000))) km" },
             road: s?.roadName,
@@ -158,7 +164,13 @@ final class LiveActivityManager {
         )
     }
 
-    /** Tenths of a kilometre, French decimal comma: changes rarely, so few updates. */
+    /** "350 m" (to 50 m) under a kilometre, "1,2 km" beyond: changes rarely, so few updates. */
+    private static func short(_ m: Double) -> String {
+        if m < 1_000 { return "\(Int((m / 50).rounded()) * 50) m" }
+        return "\(km(m)) km"
+    }
+
+    /** Tenths of a kilometre, French decimal comma. */
     private static func km(_ m: Double) -> String {
         String(format: "%.1f", m / 1_000).replacingOccurrences(of: ".", with: ",")
     }

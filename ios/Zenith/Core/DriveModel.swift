@@ -34,7 +34,6 @@ struct GpsInfo: Equatable {
 /** What the data layer has loaded. */
 struct DataStatus: Equatable {
     var radarCount = 0
-    var zoneCount = 0
     var radarsUpdated: Date?
     var tilesLoaded = 0
     var loading = false
@@ -44,6 +43,20 @@ struct DataStatus: Equatable {
     var tileError: String?
 
     var error: String? { tileError ?? radarError }
+}
+
+/** A finished drive in two lines, shown for a moment back home ("23 km · 32 min"). */
+struct TripRecap: Equatable {
+    let headline: String
+    /** "4 radars passés · 92 km/h au plus". */
+    let details: String
+    let at: Date
+}
+
+/** A radar announced and its distance when first seen: the countdown of the island and the Live Activity. */
+struct FirstSight: Equatable {
+    let id: String
+    var distanceM: Double
 }
 
 /**
@@ -74,9 +87,19 @@ final class DriveModel {
      */
     private(set) var musicChoice: Bool?
     @ObservationIgnored private var musicChoiceAt = Date.distantPast
+    /** The radar being announced, as first seen. */
+    private(set) var firstSight: FirstSight?
+    /** The last drive, kept after it stopped (nil when too short to tell). */
+    private(set) var lastTrip: TripRecap?
 
     /** Speed shown in big: the live one, else the snapshot's (demo, tunnel). */
     var shownSpeed: Int? { liveSpeed ?? snapshot?.speedKmh }
+
+    /** Countdown of [alert], 0 at first sight to 1 on the radar. */
+    func progress(_ alert: AlertInfo) -> Double {
+        let start = firstSight?.id == alert.radar.id ? max(firstSight?.distanceM ?? 0, alert.distanceM) : alert.distanceM
+        return Cockpit.islandProgress(distanceM: alert.distanceM, startM: start)
+    }
 
     func chooseMusic(_ big: Bool) {
         musicChoiceAt = Date()
@@ -92,11 +115,23 @@ final class DriveModel {
         self.origin = origin
         musicChoice = nil
         liveSpeed = nil
+        firstSight = nil
+        lastTrip = nil
         running = true
     }
 
     func update(_ s: Snapshot) {
         snapshot = s
+        if let alert = s.alerts.first {
+            if var seen = firstSight, seen.id == alert.radar.id {
+                if alert.distanceM > seen.distanceM {
+                    seen.distanceM = alert.distanceM
+                    firstSight = seen
+                }
+            } else {
+                firstSight = FirstSight(id: alert.radar.id, distanceM: alert.distanceM)
+            }
+        }
         let age = Int64(Date().timeIntervalSince(musicChoiceAt) * 1000)
         musicChoice = Cockpit.keepChoice(musicChoice, speedKmh: s.speedKmh, ageMs: age)
         gps.accuracyM = s.accuracyM
@@ -127,7 +162,9 @@ final class DriveModel {
         if status != data { data = status }
     }
 
-    func stopped() {
+    func stopped(trip: TripRecap?) {
+        lastTrip = trip
+        firstSight = nil
         running = false
         snapshot = nil
         liveSpeed = nil

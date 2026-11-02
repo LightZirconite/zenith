@@ -5,8 +5,9 @@ import UIKit
  * The one screen of Zenith (port of DriveScreen.kt). At home the logo breathes over drifting stars;
  * "Démarrer" is a flight through space: a tunnel while the GPS searches, a jump at the first good
  * position (once the roads around it have loaded), and the scene opens like a portal at the flash.
- * Then the drive: tilted map, big speed, limit sign, alerts, music and the buttons, for portrait,
- * landscape, tablets and car screens. Opened while a drive runs (back from Waze): straight to the
+ * Then the drive: tilted map, big speed in its ring, limit sign, music and the buttons, the
+ * alerts in the island grown out of the camera ([AlertIsland]), for portrait, landscape, tablets
+ * and car screens. Back home, a drive that reached the map leaves its summary a moment. Opened while a drive runs (back from Waze): straight to the
  * map. A drive started from here always flies, even when its first position comes before the
  * screen sees it running (the demo's comes within milliseconds).
  */
@@ -36,6 +37,13 @@ struct DriveScreen: View {
     /** Radars (or sections) passed: each sends a band of light down the screen. */
     @State private var passes = 0
     @State private var passFlash = false
+    /** When the last radar (or section) was passed, and whether the island still says so. */
+    @State private var passedAt: Date?
+    @State private var passedRecent = false
+    /** Night where the car is (checked every minute): the map and the Canvas dim a little. */
+    @State private var night = false
+    /** The summary of the drive just ended, shown at home for a moment. */
+    @State private var trip: TripRecap?
     @State private var navApps: [NavApp] = []
 
     /** The flight lasts at least this long, even when the position comes at once (demo, warm GPS). */
@@ -121,7 +129,7 @@ struct DriveScreen: View {
     // MARK: Screen
 
     var body: some View {
-        cues(timers(screen))
+        cues(driveTimers(timers(screen)))
     }
 
     private var screen: some View {
@@ -133,6 +141,7 @@ struct DriveScreen: View {
                 }
                 .ignoresSafeArea()
                 column(width: geo.size.width, landscape: landscape, tall: geo.size.height >= 560)
+                island(safeTop: geo.safeAreaInsets.top, landscape: landscape)
             }
         }
         .background(Color.black.ignoresSafeArea())
@@ -185,7 +194,8 @@ struct DriveScreen: View {
                     radars: model.nearbyRadars,
                     zones: model.nearbyZones,
                     media: music.media,
-                    canvas: settings.spotifyCanvas
+                    canvas: settings.spotifyCanvas,
+                    dim: night ? Cockpit.nightDim : 1
                 )
                 .animation(Moves.spring(1, 50), value: focusTarget)
                 .animation(Moves.tween(900), value: music.media == nil)
@@ -227,38 +237,50 @@ struct DriveScreen: View {
         .frame(width: size.width, height: size.height)
     }
 
-    /** Chips, banners, home or the speed, alerts, music and buttons, within the safe area. */
+    /** Chips, banners, home or the speed, music and buttons, within the safe area. */
     @ViewBuilder
     private func column(width: CGFloat, landscape: Bool, tall: Bool) -> some View {
         let f = flight
         let running = model.running
-        let alertSnapshot = running && f.landed ? model.snapshot : nil
         VStack(spacing: 0) {
-            StatusRow(running: running && f.landed, gps: model.gps, data: model.data, demo: model.demo, snapshot: model.snapshot)
+            HStack(alignment: .top, spacing: 8) {
+                StatusRow(running: running && f.landed, gps: model.gps, data: model.data, demo: model.demo, snapshot: model.snapshot)
+                // Home only: the settings, a round glass button at the top right, going with home.
+                if !running {
+                    SettingsButton(action: onOpenSettings)
+                        .transition(.asymmetric(
+                            insertion: Moves.fade(Moves.tween(500, delay: f.comingHome ? 1_100 : 400))
+                                .combined(with: Moves.zoom(0.7, Moves.spring(0.6, 400).delay(f.comingHome ? 1.1 : 0.4))),
+                            removal: Moves.fade(Moves.tween(200)).combined(with: Moves.zoom(0.8, Moves.tween(250)))
+                        ))
+                }
+            }
             UpdateBanner(version: updateVersion)
             CrashBanner(report: running ? nil : crash.report)
             if landscape {
-                // The map (or home) on the left with the alerts under it, the speed and the
+                // The map (or home) on the left with the shortcuts under it, the speed and the
                 // buttons in a column on the right, all within the screen's short height.
                 let inner = max(0, width - 60)
                 let right = inner * (1 - Fades.landSplit)
                 HStack(spacing: 0) {
                     VStack(spacing: 0) {
                         homeArea(landscape: true)
-                        AlertArea(snapshot: alertSnapshot)
+                        landscapeShortcuts
                     }
                     .frame(width: inner * Fades.landSplit)
                     Color.clear.frame(width: 20, height: 1)
                     // A wide car screen: the column keeps a sensible width, centred in its room.
                     // As upright: the speed in the middle of the room left, the music, then the
-                    // buttons resting at the bottom, level with the alerts on the left.
+                    // buttons resting at the bottom, level with the shortcuts on the left.
                     VStack(spacing: 0) {
                         // Holds its room even before the speed is there (home, flight).
                         ZStack { landscapeSpeed(tall: tall) }
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                         Color.clear.frame(height: 12)
                         musicCard
-                        buttons(landscape: true, rowWidth: min(right, 520))
+                        tripCard
+                        StartStop(running: running, compact: running && f.cruising)
+                        credits
                     }
                     .frame(maxWidth: 520)
                     .frame(width: right)
@@ -267,11 +289,11 @@ struct DriveScreen: View {
                 .frame(maxHeight: .infinity)
             } else {
                 homeArea(landscape: false)
-                AlertArea(snapshot: alertSnapshot)
                 Color.clear.frame(height: 12)
                 musicCard
-                navShortcuts
-                buttons(landscape: false, rowWidth: 0)
+                tripCard
+                buttons
+                credits
             }
         }
         .padding(.horizontal, 20)
@@ -281,15 +303,41 @@ struct DriveScreen: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(Moves.spring(0.85, 400), value: LayoutCue(
             view: homeView,
-            alert: alertSnapshot?.alerts.first != nil,
-            upcoming: alertSnapshot?.upcoming != nil,
-            section: alertSnapshot?.section != nil,
             media: running && f.landed && music.media != nil,
             shortcuts: shortcutsShown,
             compact: running && f.cruising,
             update: updateVersion != nil,
-            crash: !running && crash.report != nil
+            crash: !running && crash.report != nil,
+            trip: !running && trip != nil
         ))
+    }
+
+    /**
+     * The alert island, drawn over everything from the very top of the screen: on an iPhone with a
+     * Dynamic Island it rests exactly over the camera and grows out of it.
+     */
+    @ViewBuilder
+    private func island(safeTop: CGFloat, landscape: Bool) -> some View {
+        if model.running && flight.landed {
+            let snapshot = model.snapshot
+            let progress = snapshot?.alerts.first.map { model.progress($0) } ?? 0
+            let ago: Int64 = passedRecent ? passedAt.map { Int64(max(0, Date().timeIntervalSince($0)) * 1_000) } ?? -1 : -1
+            GeometryReader { full in
+                AlertIsland(
+                    snapshot: snapshot,
+                    speed: model.shownSpeed,
+                    progress: progress,
+                    passedAgoMs: ago,
+                    passFlash: passFlash,
+                    screenWidth: full.size.width,
+                    safeTop: safeTop,
+                    landscape: landscape
+                )
+            }
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+            .transition(Moves.fade(Moves.tween(300)))
+        }
     }
 
     /** Home, the flight and the speed swap with a zoom; a little lower than the middle while driving. */
@@ -345,60 +393,65 @@ struct DriveScreen: View {
         }
     }
 
+    /**
+     * One row, the same height: the first navigation app, Stop, the second (on the road the apps
+     * fold away and Stop gets lower and quieter); at home, Start across the whole width.
+     */
     @ViewBuilder
-    private var navShortcuts: some View {
+    private var buttons: some View {
+        let running = model.running
+        HStack(spacing: 10) {
+            if shortcutsShown, let first = navApps.first {
+                NavAppButton(app: first).transition(Self.appFold)
+            }
+            StartStop(running: running, compact: running && flight.cruising)
+            if shortcutsShown, navApps.count > 1 {
+                NavAppButton(app: navApps[1]).transition(Self.appFold)
+            }
+        }
+    }
+
+    /** Landscape: the navigation apps at the bottom of the left column, level with Stop on the right. */
+    @ViewBuilder
+    private var landscapeShortcuts: some View {
         if shortcutsShown {
-            NavAppsRow(apps: navApps, fillHeight: false)
+            HStack(spacing: 10) {
+                ForEach(navApps) { NavAppButton(app: $0) }
+                Spacer(minLength: 0)
+            }
+            .padding(.top, 12)
+            .transition(Self.appFold)
+        }
+    }
+
+    /** The shortcuts arrive after the speed and the music, and fold away on the road. */
+    private static let appFold = AnyTransition.asymmetric(
+        insertion: Moves.fade(Moves.tween(400, delay: 350)).combined(with: Moves.zoom(0.9, Moves.spring(0.75, 400))),
+        removal: Moves.fade(Moves.tween(250)).combined(with: Moves.zoom(0.85, Moves.tween(300)))
+    )
+
+    /** Back from a drive that reached the map: its summary, just above Start, until it fades or is touched. */
+    @ViewBuilder
+    private var tripCard: some View {
+        if !model.running, let trip {
+            TripCard(trip: trip) { self.trip = nil }
                 .padding(.bottom, 10)
                 .transition(.asymmetric(
-                    insertion: Moves.fade(Moves.tween(400, delay: 350)).combined(with: Moves.rise(0.5, Moves.spring(0.75, 400))),
-                    removal: Moves.driveOut
+                    insertion: Moves.fade(Moves.tween(500, delay: 900))
+                        .combined(with: Moves.zoom(0.9, Moves.spring(0.7, 200).delay(0.9))),
+                    removal: Moves.fade(Moves.tween(300)).combined(with: Moves.zoom(0.95, Moves.tween(300)))
                 ))
         }
     }
 
-    /** Start / Stop (on the road: lower and quieter), then Réglages and the credits at home. */
+    /** The map's credits, one short line at the very bottom of home (the licence wants them there). */
     @ViewBuilder
-    private func buttons(landscape: Bool, rowWidth: CGFloat) -> some View {
-        let running = model.running
-        let compact = running && flight.cruising
-        if landscape {
-            // The shortcuts and Stop on one line, the same height, side by side.
-            let share = CGFloat(max(navApps.count, 1))
-            HStack(spacing: 10) {
-                if shortcutsShown {
-                    NavAppsRow(apps: navApps, fillHeight: true)
-                        .frame(width: max(0, rowWidth - 10) * share / (share + 1))
-                        .frame(maxHeight: .infinity)
-                        .transition(.asymmetric(
-                            insertion: Moves.fade(Moves.tween(400, delay: 350)).combined(with: Moves.zoom(0.9, Moves.spring(0.75, 400))),
-                            removal: Moves.fade(Moves.tween(250))
-                        ))
-                }
-                StartStop(running: running, compact: compact, fillHeight: true)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            .fixedSize(horizontal: false, vertical: true)
-        } else {
-            StartStop(running: running, compact: compact, fillHeight: false)
-        }
-        if !running {
-            let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
-            Text("Réglages")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(Color.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .glass(shape)
-                .tap(shape: shape, sound: .open, lift: 1.03, action: onOpenSettings)
-                .padding(.top, 10)
-                .transition(Moves.bottom(late: flight.comingHome))
-        }
-        if !running {
-            Text("Cartes © OpenFreeMap © OpenStreetMap · radars data.gouv.fr, OpenStreetMap, Lufop")
-                .font(.system(size: 10))
-                .foregroundStyle(Ink.dim.opacity(0.6))
-                .multilineTextAlignment(.center)
+    private var credits: some View {
+        if !model.running {
+            Text(verbatim: "© OpenStreetMap · OpenFreeMap")
+                .font(.system(size: 11))
+                .foregroundStyle(Ink.mist.opacity(0.55))
+                .lineLimit(1)
                 .frame(maxWidth: .infinity)
                 .padding(.top, 10)
                 .transition(Moves.bottom(late: flight.comingHome))
@@ -450,15 +503,48 @@ struct DriveScreen: View {
             }
     }
 
+    /** The drive's own clocks: night, the island's "Radar passé", the summary back home. */
+    private func driveTimers<V: View>(_ content: V) -> some View {
+        content
+            // At night where the car is, the map and the Canvas dim a little (checked every minute).
+            .task(id: [model.running, hasFix]) {
+                guard model.running && hasFix else {
+                    night = false
+                    return
+                }
+                while model.running {
+                    if let position = model.snapshot?.position {
+                        let dark = Cockpit.isNight(position)
+                        if dark != night { night = dark }
+                    }
+                    guard await Self.pause(60_000) else { return }
+                }
+            }
+            // A radar passed: the island says so a moment, then folds back.
+            .task(id: passes) {
+                guard passes > 0 else { return }
+                passedRecent = true
+                if await Self.pause(Int(Cockpit.islandPassedMs) + 50) { passedRecent = false }
+            }
+            // The summary of the drive fades after a while.
+            .task(id: trip) {
+                guard trip != nil else { return }
+                if await Self.pause(Int(Cockpit.tripShownMs)) { trip = nil }
+            }
+    }
+
     private func cues<V: View>(_ content: V) -> some View {
         let sound = SoundCue(phase: phase, flightOver: flight.flightOver)
         return content
             .onChange(of: model.running) { _, running in
-                stored = flight
+                let f = flight
+                stored = f
                 if !running { openedMidDrive = false }
+                // A drive that reached the map: its summary at home; a flight cut short says nothing.
+                trip = !running && f.comingHome ? model.lastTrip : nil
             }
             .task(id: sound) { await playFlight(sound) }
-            // Each satellite locked during the search: a soft note, higher each time.
+            // Each satellite locked during the search: a soft "tac", higher each time.
             .onChange(of: LockCue(used: sky.used, phase: phase), initial: true) { _, cue in
                 let n = min(cue.used, 4)
                 guard cue.phase == .search, n > flight.heardLocks else { return }
@@ -479,6 +565,7 @@ struct DriveScreen: View {
             .onChange(of: model.snapshot) { _, snapshot in
                 guard let event = snapshot?.events.first(where: { $0.kind == .passed || $0.kind == .sectionEnded }) else { return }
                 passFlash = event.wouldFlash
+                passedAt = Date()
                 passes += 1
             }
             .onChange(of: scenePhase, initial: true) { _, scene in
@@ -586,7 +673,7 @@ extension DriveScreen {
         let flightOver: Bool
     }
 
-    /** Satellites locked during the search, one note each. */
+    /** Satellites locked during the search, one "tac" each. */
     fileprivate struct LockCue: Equatable {
         let used: Int
         let phase: FlightPhase
@@ -601,14 +688,12 @@ extension DriveScreen {
     /** What changes the column's layout: those changes glide instead of jumping. */
     fileprivate struct LayoutCue: Equatable {
         let view: HomeView
-        let alert: Bool
-        let upcoming: Bool
-        let section: Bool
         let media: Bool
         let shortcuts: Bool
         let compact: Bool
         let update: Bool
         let crash: Bool
+        let trip: Bool
     }
 
     /** A navigation app installed: Zenith keeps alerting from behind it, in the small window. */
@@ -638,12 +723,17 @@ extension DriveScreen {
 
 extension DriveScreen {
     /** The drive screen's colours (iOS system colours, as on Android). */
-    fileprivate enum Ink {
-        static let red = hex(0xFF3B30)
+    enum Ink {
+        static let red = hex(0xFF453A)
         static let orange = hex(0xFF9F0A)
-        static let green = hex(0x30D158)
-        static let blue = hex(0x0A84FF)
+        static let green = hex(0x32D74B)
+        static let blue = hex(0x3D8BFF)
         static let dim = hex(0x8E8E93)
+        /** iOS's label grey, as an opacity of it: secondary text is [label]. */
+        static let mist = hex(0xEBEBF5)
+        static let label = mist.opacity(0.6)
+        /** Under "Ralentis". */
+        static let paleRed = hex(0xFFE1DC)
 
         static func hex(_ rgb: UInt32) -> Color {
             Color(
@@ -665,11 +755,39 @@ extension DriveScreen {
     }
 
     /** Numbers as the driver reads them. */
-    fileprivate enum Words {
+    enum Words {
         static func distance(_ m: Double) -> String {
-            if m < 1_000 { return "\(Int((m / 10).rounded()) * 10) m" }
-            return String(format: "%.1f km", m / 1_000).replacingOccurrences(of: ".", with: ",")
+            let (number, unit) = distanceParts(m)
+            return "\(number) \(unit)"
         }
+
+        /** "380" and "m", "1,2" and "km": the number big, the unit small. */
+        static func distanceParts(_ m: Double) -> (String, String) {
+            if m < 1_000 { return ("\(Int((m / 10).rounded()) * 10)", "m") }
+            return (String(format: "%.1f", m / 1_000).replacingOccurrences(of: ".", with: ","), "km")
+        }
+
+        /** How fresh the radars are: "à jour à 15:35", "à jour hier à 15:35", "à jour le 31/10". */
+        static func updated(_ date: Date) -> String {
+            let calendar = Calendar.current
+            if calendar.isDateInToday(date) { return "à jour à \(clock.string(from: date))" }
+            if calendar.isDateInYesterday(date) { return "à jour hier à \(clock.string(from: date))" }
+            return "à jour le \(dayMonth.string(from: date))"
+        }
+
+        private static let clock: DateFormatter = {
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "fr_FR")
+            f.dateFormat = "HH:mm"
+            return f
+        }()
+
+        private static let dayMonth: DateFormatter = {
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "fr_FR")
+            f.dateFormat = "dd/MM"
+            return f
+        }()
 
         static func thousands(_ n: Int) -> String {
             let digits = String(n.magnitude)
@@ -732,7 +850,7 @@ extension DriveScreen {
     }
 
     /** Compose's springs and easings, and the screen's transitions. */
-    fileprivate enum Moves {
+    enum Moves {
         /** Compose's spring(dampingRatio, stiffness), unit mass. */
         static func spring(_ damping: Double, _ stiffness: Double) -> Animation {
             .spring(response: 2 * .pi / stiffness.squareRoot(), dampingFraction: damping)
@@ -781,14 +899,6 @@ extension DriveScreen {
         static let chip = AnyTransition.asymmetric(
             insertion: fade(tween(300)).combined(with: zoom(0.7, spring(0.6, 1_500))),
             removal: fade(tween(200)).combined(with: zoom(0.85, tween(200)))
-        )
-        static let alert = AnyTransition.asymmetric(
-            insertion: rise(0.5, spring(0.75, 400)).combined(with: fade(tween(250))).combined(with: zoom(0.92, spring(0.75, 400))),
-            removal: rise(1.0 / 3, tween(300)).combined(with: fade(tween(250))).combined(with: zoom(0.95, tween(300)))
-        )
-        static let upcoming = AnyTransition.asymmetric(
-            insertion: fade(tween(400)).combined(with: reveal(spring(0.85, 400))),
-            removal: fade(tween(250)).combined(with: reveal(tween(300)))
         )
         static let banner = fade(tween(300)).combined(with: reveal(spring(1, 400)))
 
@@ -854,6 +964,8 @@ extension DriveScreen {
         let zones: [ZoneInfo]
         let media: MediaInfo?
         let canvas: Bool
+        /** 1 by day; at night the map and the Canvas dim a little (core Daylight). */
+        let dim: Double
 
         var animatableData: AnimatablePair<AnimatablePair<Double, Double>, Double> {
             get { AnimatablePair(AnimatablePair(focus, withMusic), portal) }
@@ -884,6 +996,8 @@ extension DriveScreen {
                     )
                     .frame(width: landscape ? size.width * share : size.width, height: size.height)
                     .frame(width: size.width, height: size.height, alignment: landscape ? .trailing : .center)
+                    .opacity(dim)
+                    .animation(Moves.tween(2_000), value: dim)
                 }
                 // The car where it always was on screen, the map now taller; in landscape a little
                 // low, to see far ahead in the short height.
@@ -897,6 +1011,8 @@ extension DriveScreen {
                         width: landscape ? size.width * Fades.landMapWidth : size.width,
                         height: landscape ? size.height : size.height * Fades.mapHeight
                     )
+                    .opacity(dim)
+                    .animation(Moves.tween(2_000), value: dim)
             }
             .frame(width: size.width, height: size.height, alignment: .topLeading)
             .scaleEffect(CGFloat(scale))
@@ -958,7 +1074,7 @@ extension DriveScreen {
 // MARK: - Home
 
 extension DriveScreen {
-    /** Home: the logo breathing with a red glow, the name, the radars in memory counting up. */
+    /** Home: the logo breathing with a red glow, the name, one quiet line on the radars in memory (counting up). */
     fileprivate struct IdleHome: View {
         let data: DataStatus
         @State private var counted = 0.0
@@ -992,7 +1108,7 @@ extension DriveScreen {
                     .foregroundStyle(Color.white)
                 Color.clear.frame(height: 8)
                 // The radars in memory count up as the screen opens, like a dashboard waking up.
-                RadarCount(value: counted, total: data.radarCount, zones: data.zoneCount)
+                RadarCount(value: counted, total: data.radarCount, updated: data.radarsUpdated)
                     .animation(Moves.tween(1_400), value: counted)
             }
             .onAppear { counted = Double(data.radarCount) }
@@ -1000,51 +1116,89 @@ extension DriveScreen {
         }
     }
 
-    /** "12 345 radars en mémoire", the number rolling as it counts. */
+    /**
+     * "9 318 radars · à jour à 15:35", the number rolling as it counts, after a dot: green when the
+     * radars are less than a day old, orange when older.
+     */
     fileprivate struct RadarCount: View, Animatable {
         var value: Double
         let total: Int
-        let zones: Int
+        let updated: Date?
         var animatableData: Double {
             get { value }
             set { value = newValue }
         }
 
         var body: some View {
-            let radars = Words.thousands(Int(value.rounded()))
-            let text = total == 0 ? "Radars et limitations chargés au démarrage"
-                : zones == 0 ? "\(radars) radars en mémoire"
-                : "\(radars) radars · \(Words.thousands(zones)) itinéraires de contrôle"
-            Text(text)
-                .font(.system(size: 16))
-                .foregroundStyle(Ink.dim)
-                .multilineTextAlignment(.center)
+            if total == 0 {
+                Text(verbatim: "Radars et limitations chargés au démarrage")
+                    .font(.system(size: 15))
+                    .foregroundStyle(Ink.mist.opacity(0.7))
+                    .multilineTextAlignment(.center)
+            } else {
+                let radars = Words.thousands(Int(value.rounded()))
+                HStack(spacing: 8) {
+                    if let updated {
+                        let dot = Date().timeIntervalSince(updated) < 24 * 3_600 ? Ink.green : Ink.orange
+                        Circle()
+                            .fill(dot)
+                            .frame(width: 7, height: 7)
+                            .shadow(color: dot, radius: 4)
+                    }
+                    Text(verbatim: updated.map { "\(radars) radars · \(Words.updated($0))" } ?? "\(radars) radars")
+                        .font(.system(size: 15))
+                        .foregroundStyle(Ink.mist.opacity(0.7))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+            }
         }
     }
 
-    /** Zenith's logo: speedometer arc with the needle in the red zone (the app icon's drawing). */
-    fileprivate struct ZenithLogo: View {
+    /** The settings, from home: a round glass button with a gear. */
+    fileprivate struct SettingsButton: View {
+        let action: () -> Void
+
         var body: some View {
-            Canvas { context, size in
-                // The icon's 108-unit canvas, drawing scaled to 0.86 around (54, 48) and moved down 3.
-                let unit = size.width / 108
-                let k = 0.86 * unit
-                func at(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
-                    CGPoint(x: ((x - 54) * 0.86 + 54) * unit, y: ((y - 48) * 0.86 + 51) * unit)
+            Image(systemName: "gearshape")
+                .font(.system(size: 20, weight: .medium))
+                .foregroundStyle(Color.white)
+                .frame(width: 44, height: 44)
+                .glass(Circle())
+                .tap(shape: Circle(), sound: .open, lift: 1.12, action: action)
+                .accessibilityLabel("Réglages")
+        }
+    }
+
+    /** The drive just ended, in two lines; a touch puts it away. */
+    fileprivate struct TripCard: View {
+        let trip: TripRecap
+        let onDismiss: () -> Void
+
+        var body: some View {
+            let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(verbatim: "Trajet terminé")
+                    .font(.system(size: 13, weight: .semibold).smallCaps())
+                    .foregroundStyle(Ink.label)
+                Text(verbatim: trip.headline)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Color.white)
+                    .lineLimit(1)
+                if !trip.details.isEmpty {
+                    Text(verbatim: trip.details)
+                        .font(.system(size: 14))
+                        .foregroundStyle(Ink.label)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                 }
-                let hub = at(54, 54)
-                var dial = Path()
-                dial.addRelativeArc(center: hub, radius: 24 * k, startAngle: .degrees(150), delta: .degrees(240))
-                context.stroke(dial, with: .color(.white), style: StrokeStyle(lineWidth: 5.5 * k, lineCap: .round))
-                var zone = Path()
-                zone.addRelativeArc(center: hub, radius: 24 * k, startAngle: .degrees(-60), delta: .degrees(90))
-                context.stroke(zone, with: .color(Ink.red), style: StrokeStyle(lineWidth: 5.5 * k, lineCap: .round))
-                var needle = Path()
-                needle.move(to: hub)
-                needle.addLine(to: at(62.5, 40.9))
-                context.stroke(needle, with: .color(Ink.red), style: StrokeStyle(lineWidth: 5 * k, lineCap: .round))
-                context.fill(Path(ellipseIn: CGRect(x: hub.x - 4.5 * k, y: hub.y - 4.5 * k, width: 9 * k, height: 9 * k)), with: .color(.white))
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+            .glass(shape)
+            .tap(shape: shape, lift: 0.98, action: onDismiss)
+            .accessibilityLabel("Trajet terminé, \(trip.headline), \(trip.details)")
         }
     }
 
@@ -1187,41 +1341,32 @@ extension DriveScreen {
         }
     }
 
-    /** Shortcuts to the navigation apps installed: Zenith keeps alerting from behind them, in the small window. */
-    fileprivate struct NavAppsRow: View {
-        let apps: [NavApp]
-        /** In a row of fixed height (landscape, beside Stop): each button takes it all. */
-        let fillHeight: Bool
+    /** A navigation app installed, by its name: Zenith keeps alerting from behind it, in the small window. */
+    fileprivate struct NavAppButton: View {
+        let app: NavApp
 
         var body: some View {
-            HStack(spacing: 10) {
-                ForEach(apps) { app in
-                    let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    Text("Ouvrir \(app.label)")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Color.white)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .padding(.vertical, 12)
-                        .frame(maxWidth: .infinity, maxHeight: fillHeight ? .infinity : nil)
-                        .glass(shape)
-                        .tap(shape: shape, sound: .open) {
-                            // The small window opens over the other app, whatever the setting.
-                            PipController.shared.start()
-                            UIApplication.shared.open(app.url)
-                        }
+            let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
+            Text(verbatim: app.label)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(Color.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(width: 96, height: 52)
+                .glass(shape)
+                .tap(shape: shape, sound: .open) {
+                    // The small window opens over the other app, whatever the setting.
+                    PipController.shared.start()
+                    UIApplication.shared.open(app.url)
                 }
-            }
+                .accessibilityLabel("Ouvrir \(app.label)")
         }
     }
 
-    /** Start, then Stop; [compact] on the road: lower and quieter, still there. */
+    /** Start, then Stop (52 high, beside the navigation apps); [compact] on the road: lower and quieter, still there. */
     fileprivate struct StartStop: View {
         let running: Bool
         let compact: Bool
-        /** In a row of fixed height (landscape): the button takes it all. */
-        let fillHeight: Bool
 
         var body: some View {
             let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -1233,13 +1378,13 @@ extension DriveScreen {
                     Text("Démarrer").foregroundStyle(Color.black).transition(Self.roll)
                 }
             }
-            .font(.system(size: 18, weight: .semibold))
+            .font(.system(size: running ? 16 : 18, weight: .semibold))
             .clipped()
             .opacity(compact ? 0.7 : 1)
             .animation(Moves.tween(500), value: compact)
-            .padding(.vertical, compact ? 9 : 18)
+            .frame(maxWidth: .infinity)
+            .frame(height: running ? (compact ? 44 : 52) : 58)
             .animation(Moves.spring(0.85, 200), value: compact)
-            .frame(maxWidth: .infinity, maxHeight: fillHeight ? .infinity : nil)
             .glass(shape, color: running ? Glass : Color.white)
             .animation(Moves.spring(1, 1_500), value: running)
             // Only the touch: the flight and the way back are the sound.
@@ -1281,7 +1426,11 @@ extension DriveScreen {
 // MARK: - Drive
 
 extension DriveScreen {
-    /** Road name, big speed, limit sign and the next limit on the road. */
+    /**
+     * Road name, the big speed in its ring, the limit sign in the ring's gap and the next limit on
+     * the road. The ring (270°, open at the bottom) fills with the speed in its colour; a tick marks
+     * the limit and glides to a new one with a little overshoot ("la limite qui se recale").
+     */
     fileprivate struct Dashboard: View {
         let snapshot: Snapshot?
         /** Straight from each GPS fix, ahead of the rest of the drive (the demo has only its snapshot). */
@@ -1290,20 +1439,39 @@ extension DriveScreen {
 
         var body: some View {
             let limit = snapshot?.limitKmh
+            let ring: CGFloat = compact ? 190 : 260
+            let k = ring / 260
+            let color = Ink.speed(speed, limit)
+            let over = (speed ?? 0) > (limit ?? Int.max)
+            let fill = speed == nil ? 0 : Cockpit.gaugeFill(speedKmh: speed, limitKmh: limit)
             VStack(spacing: 0) {
                 Text(snapshot?.roadName ?? " ")
-                    .font(.system(size: compact ? 15 : 18))
+                    .font(.system(size: compact ? 14 : 16))
                     .foregroundStyle(Ink.dim)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .shadow(color: .black, radius: 10)
-                HStack(alignment: .center, spacing: 0) {
-                    VStack(spacing: 0) {
+                    .padding(.bottom, 4)
+                ZStack {
+                    RingArc(to: 1)
+                        .stroke(Color.white.opacity(0.1), style: StrokeStyle(lineWidth: 6 * k, lineCap: .round))
+                    RingArc(to: fill)
+                        .stroke(color, style: StrokeStyle(lineWidth: 6 * k, lineCap: .round))
+                        .animation(Moves.spring(0.9, 300), value: fill)
+                        .animation(Moves.spring(1, 1_500), value: color)
+                    if let tick = Cockpit.gaugeTick(limitKmh: limit) {
+                        RingTick(at: tick, reach: 11 * k)
+                            .stroke(over ? Color.white : Ink.red, style: StrokeStyle(lineWidth: 3 * k, lineCap: .round))
+                            .animation(Moves.spring(0.55, 200), value: tick)
+                            .animation(Moves.spring(1, 1_500), value: over)
+                            .transition(Moves.fade(Moves.tween(300)))
+                    }
+                    VStack(spacing: 2 * k) {
                         // Short roll between two fixes: the number glides but keeps up with the car.
-                        SpeedDigits(value: Double(speed ?? 0), known: speed != nil, size: compact ? 96 : 150)
+                        SpeedDigits(value: Double(speed ?? 0), known: speed != nil, size: 108 * k)
                             .animation(Moves.linearOutSlowIn(250), value: speed)
-                            .foregroundStyle(Ink.speed(speed, limit))
-                            .animation(Moves.spring(1, 1_500), value: Ink.speed(speed, limit))
+                            .foregroundStyle(color)
+                            .animation(Moves.spring(1, 1_500), value: color)
                             // Waiting for the GPS: the dashes breathe instead of sitting still.
                             .phaseAnimator([0.35, 1.0]) { content, alpha in
                                 content.opacity(speed == nil ? alpha : 1)
@@ -1312,26 +1480,71 @@ extension DriveScreen {
                             }
                             // Dark halo so the digits stay readable over the map.
                             .shadow(color: .black, radius: 10)
-                        Text("km/h")
-                            .font(.system(size: compact ? 16 : 20))
-                            .foregroundStyle(Ink.dim)
+                        Text(verbatim: "km/h")
+                            .font(.system(size: 15 * k, weight: .medium))
+                            .foregroundStyle(Ink.label)
                     }
+                    .frame(width: ring * 0.8)
+                    .position(x: ring / 2, y: ring * 0.45)
                     if let limit {
-                        HStack(spacing: 0) {
-                            Color.clear.frame(width: compact ? 14 : 20, height: 1)
-                            VStack(spacing: 0) {
-                                LimitSign(limit: limit, uncertain: snapshot?.limitSource?.isGuess == true, size: compact ? 80 : 104)
-                                Text(snapshot?.limitAhead.map { "\($0.limitKmh) dans \(Words.distance($0.distanceM))" } ?? " ")
-                                    .font(.system(size: 15))
-                                    .foregroundStyle(Ink.dim)
-                                    .shadow(color: .black, radius: 10)
-                                    .padding(.top, 8)
-                            }
-                        }
-                        .transition(Moves.fade(Moves.spring(1, 400)))
+                        LimitSign(limit: limit, uncertain: snapshot?.limitSource?.isGuess == true, size: 60 * k)
+                            .shadow(color: .black.opacity(0.5), radius: 12, y: 8)
+                            .position(x: ring / 2, y: ring * 0.885)
+                            .transition(Moves.fade(Moves.spring(1, 400)))
                     }
                 }
+                .frame(width: ring, height: ring)
+                Text(snapshot?.limitAhead.map { "\($0.limitKmh) dans \(Words.distance($0.distanceM))" } ?? " ")
+                    .font(.system(size: 15))
+                    .foregroundStyle(Ink.dim)
+                    .shadow(color: .black, radius: 10)
+                    .padding(.top, 8)
             }
+        }
+    }
+
+    /** Radius of the speed ring, as a share of its box (112 in 260). */
+    fileprivate static let ringRadius: CGFloat = 112.0 / 260.0
+
+    /** The speed ring's arc from its start to [to] (0 to 1 of the sweep). */
+    fileprivate struct RingArc: Shape {
+        var to: Double
+        var animatableData: Double {
+            get { to }
+            set { to = newValue }
+        }
+
+        func path(in rect: CGRect) -> Path {
+            var path = Path()
+            let share = min(max(to, 0), 1)
+            guard share > 0.002 else { return path }
+            path.addRelativeArc(
+                center: CGPoint(x: rect.midX, y: rect.midY),
+                radius: min(rect.width, rect.height) * DriveScreen.ringRadius,
+                startAngle: .degrees(Cockpit.gaugeStartDeg),
+                delta: .degrees(Cockpit.gaugeSweepDeg * share)
+            )
+            return path
+        }
+    }
+
+    /** The limit's tick across the ring at [at] (0 to 1 of the sweep), [reach] in and out of it. */
+    fileprivate struct RingTick: Shape {
+        var at: Double
+        let reach: CGFloat
+        var animatableData: Double {
+            get { at }
+            set { at = newValue }
+        }
+
+        func path(in rect: CGRect) -> Path {
+            let radius = min(rect.width, rect.height) * DriveScreen.ringRadius
+            let angle = (Cockpit.gaugeStartDeg + Cockpit.gaugeSweepDeg * at) * .pi / 180
+            let dx = CGFloat(cos(angle)), dy = CGFloat(sin(angle))
+            var path = Path()
+            path.move(to: CGPoint(x: rect.midX + (radius - reach) * dx, y: rect.midY + (radius - reach) * dy))
+            path.addLine(to: CGPoint(x: rect.midX + (radius + reach) * dx, y: rect.midY + (radius + reach) * dy))
+            return path
         }
     }
 
@@ -1348,14 +1561,14 @@ extension DriveScreen {
         var body: some View {
             Text(known ? String(Int(value.rounded())) : "--")
                 .font(.system(size: size, weight: .bold).monospacedDigit())
-                .tracking(-4)
+                .tracking(-size * 0.035)
                 .lineLimit(1)
                 .minimumScaleFactor(0.5)
         }
     }
 
     /** Round limit sign; grey ring when the limit is only inferred (road type, built-up area or not). */
-    fileprivate struct LimitSign: View {
+    struct LimitSign: View {
         let limit: Int
         let uncertain: Bool
         let size: CGFloat
@@ -1398,195 +1611,8 @@ extension DriveScreen {
     }
 
     /** The limit sign's pop and ring, from 0 (new limit) to rest. */
-    fileprivate struct SignMotion {
+    struct SignMotion {
         var pop = 1.0
         var ring = 1.0
-    }
-
-    /** Section under way, then the radar alert or, without one, the next radar on the road. */
-    fileprivate struct AlertArea: View {
-        let snapshot: Snapshot?
-
-        var body: some View {
-            let alert = snapshot?.alerts.first
-            VStack(spacing: 0) {
-                if let section = snapshot?.section {
-                    SectionCard(section: section)
-                }
-                if let alert {
-                    AlertCard(alert: alert).transition(Moves.alert)
-                }
-                if alert == nil, let upcoming = snapshot?.upcoming {
-                    UpcomingStrip(upcoming: upcoming).transition(Moves.upcoming)
-                }
-            }
-        }
-    }
-
-    /** The radar being announced: type, distance, countdown bar; red and pulsing when too fast. */
-    fileprivate struct AlertCard: View {
-        let alert: AlertInfo
-        /** Distance at first sight of this radar, to draw the countdown bar. */
-        @State private var first = FirstSight(id: "", distanceM: 0)
-
-        var body: some View {
-            let start = first.id == alert.radar.id ? max(first.distanceM, alert.distanceM) : alert.distanceM
-            let progress = start > 0 ? 1 - min(max(alert.distanceM / start, 0), 1) : 0
-            VStack(spacing: 0) {
-                HStack(spacing: 0) {
-                    RadarBadge(kind: alert.radar.kind, limitKmh: alert.limitKmh, size: 54)
-                    Color.clear.frame(width: 16, height: 1)
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(alert.radar.label)
-                            .font(.system(size: 22, weight: .bold))
-                            .foregroundStyle(Color.white)
-                        if !details.isEmpty {
-                            Text(details)
-                                .font(.system(size: 14))
-                                .foregroundStyle(Color.white.opacity(0.75))
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    Text(Words.distance(alert.distanceM))
-                        .font(.system(size: 34, weight: .bold))
-                        .foregroundStyle(Color.white)
-                        .lineLimit(1)
-                        .fixedSize()
-                }
-                .padding(20)
-                ProgressLine(progress: progress)
-            }
-            .frame(maxWidth: .infinity)
-            .glass(RoundedRectangle(cornerRadius: 22, style: .continuous), color: alert.overLimit ? Ink.red : Glass)
-            .animation(Moves.tween(300), value: alert.overLimit)
-            .sheen()
-            .phaseAnimator([1.0, 0.55]) { content, alpha in
-                content.opacity(alert.overLimit ? alpha : 1)
-            } animation: { _ in
-                Moves.tween(450)
-            }
-            .onChange(of: alert.radar.id, initial: true) { _, id in
-                first = FirstSight(id: id, distanceM: alert.distanceM)
-            }
-            .onChange(of: alert.distanceM) { _, d in
-                if first.id == alert.radar.id && d > first.distanceM { first.distanceM = d }
-            }
-        }
-
-        /** Unverified direction, age of a mobile report. */
-        private var details: String {
-            var parts: [String] = []
-            if alert.radar.directionDeg == nil { parts.append("sens non vérifié") }
-            if let age = alert.ageMs { parts.append("signalé il y a \(max(1, age / 60_000)) min") }
-            return parts.joined(separator: " · ")
-        }
-    }
-
-    /** A radar and its distance when first seen. */
-    fileprivate struct FirstSight {
-        let id: String
-        var distanceM: Double
-    }
-
-    /** The next radar on the road, before it is announced. */
-    fileprivate struct UpcomingStrip: View {
-        let upcoming: UpcomingInfo
-
-        var body: some View {
-            HStack(spacing: 0) {
-                RadarBadge(kind: upcoming.radar.kind, limitKmh: upcoming.limitKmh)
-                Color.clear.frame(width: 14, height: 1)
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(upcoming.radar.label)
-                        .font(.system(size: 17))
-                        .foregroundStyle(Color.white)
-                        .lineLimit(1)
-                    if let road = upcoming.roadName {
-                        Text("sur \(road)")
-                            .font(.system(size: 14))
-                            .foregroundStyle(Ink.dim)
-                            .lineLimit(1)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                Text(Words.distance(upcoming.distanceM))
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundStyle(Color.white)
-                    .lineLimit(1)
-                    .fixedSize()
-            }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 14)
-            .frame(maxWidth: .infinity)
-            .glass(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        }
-    }
-
-    /** One number to read (the average, next to the limit sign), one sentence saying what to do. */
-    fileprivate struct SectionCard: View {
-        let section: SectionInfo
-
-        var body: some View {
-            let slowDown = section.lost || section.targetKmh < section.limitKmh
-            let progress = section.lengthM > 0 ? min(max(1 - section.remainingM / section.lengthM, 0), 1) : 0
-            let advice = section.lost ? "Moyenne trop haute : elle finira au-dessus de \(section.limitKmh)"
-                : slowDown ? "Pour finir sous \(section.limitKmh) : pas plus de \(section.targetKmh) jusqu'au bout"
-                : "Moyenne bonne : roule jusqu'à \(section.limitKmh), pas plus"
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 0) {
-                    RadarBadge(kind: .sectionStart, limitKmh: section.limitKmh, size: 54)
-                    Color.clear.frame(width: 16, height: 1)
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text("Ta moyenne sur le tronçon")
-                            .font(.system(size: 14))
-                            .foregroundStyle(Color.white.opacity(0.75))
-                        Text("\(Int(section.averageKmh.rounded())) km/h")
-                            .font(.system(size: 30, weight: .bold))
-                            .foregroundStyle(Color.white)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    VStack(alignment: .trailing, spacing: 0) {
-                        Text("encore")
-                            .font(.system(size: 14))
-                            .foregroundStyle(Color.white.opacity(0.75))
-                        Text(Words.distance(section.remainingM))
-                            .font(.system(size: 22, weight: .bold))
-                            .foregroundStyle(Color.white)
-                            .lineLimit(1)
-                            .fixedSize()
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 18)
-                Text(advice)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(Color.white)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 8)
-                    .padding(.bottom, 14)
-                ProgressLine(progress: progress)
-            }
-            .frame(maxWidth: .infinity)
-            .glass(RoundedRectangle(cornerRadius: 22, style: .continuous), color: slowDown ? Ink.red : Glass)
-            .animation(Moves.tween(400), value: slowDown)
-            .sheen()
-            .padding(.bottom, 12)
-        }
-    }
-
-    /** Thin bar along the bottom of a card, filling as the radar (or the section's end) nears. */
-    fileprivate struct ProgressLine: View {
-        let progress: Double
-
-        var body: some View {
-            ZStack(alignment: .leading) {
-                Rectangle().fill(Color.white.opacity(0.15))
-                Rectangle()
-                    .fill(Color.white)
-                    .scaleEffect(x: max(progress, 0), y: 1, anchor: .leading)
-            }
-            .frame(height: 6)
-            .animation(Moves.spring(1, 1_500), value: progress)
-        }
     }
 }

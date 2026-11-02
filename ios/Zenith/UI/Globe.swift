@@ -3,9 +3,10 @@ import SwiftUI
 /**
  * The Earth at the heart of the tunnel, drawn frame by frame: land as a field of dots on a dark
  * ocean lit from the upper left, a halo of atmosphere, city lights on the night side, and the
- * satellites in view on three tilted orbits, each with a short trail. As they lock, the globe slows
- * and turns home (the driver's position once known, France before) to the viewer; a beacon lights up
- * there and every locked satellite beams down to it, a pulse of data running along each beam.
+ * satellites in view travelling three tilted orbits (no lines drawn), each a small satellite with
+ * its two solar panels, turned along its way. As they lock, the globe slows and turns home (the
+ * driver's position once known, France before) to the viewer; a beacon there grows with each lock,
+ * and from every locked satellite a curved link draws itself down to it.
  * Aimed, it settles on home like a camera, by the shortest way: the dive lands on the driver.
  */
 final class Globe {
@@ -22,6 +23,13 @@ final class Globe {
     private var tilt = 0.35
     private var spinSpeed = Globe.spinRate
     private var tiltSpeed = 0.0
+
+    /** When each locked satellite locked (scene seconds): its link draws itself from then. */
+    private var lockedAt: [Double] = []
+    /** The beacon's halo, springing a little larger with each lock. */
+    private var haloRadius = 8.0
+    private var haloSpeed = 0.0
+    private var lastDrawT: Double?
 
     init() {
         let spinHome = -Globe.homeLon * .pi / 180
@@ -110,11 +118,12 @@ final class Globe {
         flare: Double = 0
     ) {
         guard alpha > 0.01, r >= 1 else { return }
+        track(used: used, t: t)
         let center = CGPoint(x: cx, y: cy)
         let h = rotated(home)
         let beacon: CGPoint? = h.z > 0.12 ? CGPoint(x: cx + h.x * r, y: cy - h.y * r) : nil
         if orbits > 0.01 {
-            satellites(ctx, back: true, cx: cx, cy: cy, r: r, alpha: alpha * orbits, t: t, visible: visible, used: used, beacon: nil)
+            satellites(ctx, back: true, cx: cx, cy: cy, r: r, alpha: alpha * orbits, t: t, visible: visible, used: used)
         }
         var lit = ctx
         lit.opacity = alpha
@@ -132,29 +141,19 @@ final class Globe {
             g.opacity = alpha * Globe.shadeAlpha[s]
             g.fill(shades[s], with: .color(s == 3 ? Globe.cityLight : Globe.landColor))
         }
-        // Light catching the rim on the sun's side.
-        lit.stroke(
-            Globe.circle(center, r),
-            with: .linearGradient(Globe.rim, startPoint: CGPoint(x: cx - r, y: cy - r), endPoint: CGPoint(x: cx + 0.6 * r, y: cy + 0.6 * r)),
-            lineWidth: 1.3
-        )
         if let b = beacon {
-            let color = lock >= 0.999 ? Globe.locked : Globe.seeking
-            let strength = alpha * (0.3 + 0.7 * lock)
-            for w in 0..<3 {
-                let f = (t * 0.55 + Double(w) / 3).truncatingRemainder(dividingBy: 1)
-                ctx.stroke(Globe.circle(b, r * (0.03 + 0.3 * f)), with: .color(color.opacity(0.55 * strength * (1 - f))), lineWidth: 1.2)
+            if orbits > 0.01 {
+                links(ctx, cx: cx, cy: cy, r: r, alpha: alpha * orbits, t: t, visible: visible, used: used, beacon: b)
             }
-            ctx.fill(
-                Globe.circle(b, 12),
-                with: .radialGradient(Gradient(colors: [color.opacity(0.7 * strength), .clear]), center: b, startRadius: 0, endRadius: 12)
-            )
-            ctx.fill(Globe.circle(b, 2.6), with: .color(.white.opacity(strength)))
+            let strength = alpha * (0.55 + 0.45 * min(max(lock, 0), 1))
+            ctx.fill(Globe.circle(b, haloRadius), with: .color(Globe.lightBlue.opacity(0.18 * strength)))
+            ctx.fill(Globe.circle(b, 5.5), with: .color(.white.opacity(strength)))
+            ctx.fill(Globe.circle(b, 2.5), with: .color(Globe.blue.opacity(strength)))
             if flare > 0 && flare < 1 {
                 let k = 1 - (1 - flare) * (1 - flare)
                 ctx.stroke(
                     Globe.circle(b, r * (0.04 + 0.55 * k)),
-                    with: .color(color.opacity(alpha * (1 - flare))),
+                    with: .color(Globe.lightBlue.opacity(alpha * (1 - flare))),
                     lineWidth: 3 * (1 - flare) + 0.6
                 )
                 ctx.fill(
@@ -164,8 +163,22 @@ final class Globe {
             }
         }
         if orbits > 0.01 {
-            satellites(ctx, back: false, cx: cx, cy: cy, r: r, alpha: alpha * orbits, t: t, visible: visible, used: used, beacon: beacon)
+            satellites(ctx, back: false, cx: cx, cy: cy, r: r, alpha: alpha * orbits, t: t, visible: visible, used: used)
         }
+    }
+
+    /** Keeps when each satellite locked, and springs the beacon's halo toward its size for [used] locks. */
+    private func track(used: Int, t: Double) {
+        let n = min(max(used, 0), 12)
+        if lockedAt.count > n { lockedAt.removeLast(lockedAt.count - n) }
+        while lockedAt.count < n { lockedAt.append(t) }
+        let dt = lastDrawT.map { min(max(t - $0, 0), 0.05) } ?? 0
+        lastDrawT = t
+        let target = 8 + 4 * Double(min(n, 4))
+        // A springy bounce: about 0.45 damping, a quarter second to get there.
+        let w = 16.0
+        haloSpeed += (w * w * (target - haloRadius) - 2 * 0.45 * w * haloSpeed) * dt
+        haloRadius = max(haloRadius + haloSpeed * dt, 2)
     }
 
     /** The land dots facing the viewer, one path per shade (bright day, dim day, edge or night, city light). */
@@ -196,7 +209,7 @@ final class Globe {
         return shades
     }
 
-    /** Orbit lines and satellites behind the globe ([back]) or in front of it, with their beams. */
+    /** The satellites behind the globe ([back]) or in front of it: dim while in view, bright with a halo once used. */
     private func satellites(
         _ ctx: GraphicsContext,
         back: Bool,
@@ -206,25 +219,9 @@ final class Globe {
         alpha: Double,
         t: Double,
         visible: Int,
-        used: Int,
-        beacon: CGPoint?
+        used: Int
     ) {
-        var faint = ctx
-        faint.opacity = 0.1 * alpha
-        for k in 0..<3 {
-            let a = Globe.orbitRadius[k] * r
-            let b = a * sin(Globe.orbitInclination[k])
-            let c = cos(Globe.orbitNode[k]), s = sin(Globe.orbitNode[k])
-            var arc = Path()
-            for i in 0...Globe.arcSteps {
-                // Behind: the upper half on screen, from 9 o'clock over the top; in front, the lower half.
-                let u = (back ? Double.pi : 0) + Double.pi * Double(i) / Double(Globe.arcSteps)
-                let lx = a * cos(u), ly = b * sin(u)
-                let p = CGPoint(x: cx + lx * c - ly * s, y: cy + lx * s + ly * c)
-                if i == 0 { arc.move(to: p) } else { arc.addLine(to: p) }
-            }
-            faint.stroke(arc, with: .color(.white), lineWidth: 1)
-        }
+        let base = min(max(r / 80, 0.55), 1.1)
         for i in 0..<min(visible, 12) {
             let k = i % 3
             let u = Double(i) * 2.3999632 + t * Globe.orbitSpeed[k]
@@ -233,47 +230,132 @@ final class Globe {
             let p = orbitPoint(k, u, cx: cx, cy: cy, r: r)
             if !front && hypot(Double(p.x) - cx, Double(p.y) - cy) < r { continue }
             let locked = i < used
-            let color = locked ? Globe.locked : Globe.seeking
-            let a = alpha * (front ? 1 : 0.45)
-            var previous = p
-            for s in 1...7 {
-                let us = u - Double(s) * 0.05
-                let q = orbitPoint(k, us, cx: cx, cy: cy, r: r)
-                let hidden = sin(us) <= 0 && hypot(Double(q.x) - cx, Double(q.y) - cy) < r
-                if !hidden {
-                    var trail = Path()
-                    trail.move(to: previous)
-                    trail.addLine(to: q)
-                    ctx.stroke(
-                        trail,
-                        with: .color(color.opacity(a * 0.45 * (1 - Double(s) / 8))),
-                        style: StrokeStyle(lineWidth: 1.8 - Double(s) * 0.18, lineCap: .round)
+            let a = alpha * (front ? 1 : 0.6) * (locked ? 1 : 0.45)
+            // Nearer the viewer on the front of its orbit: a little larger.
+            let scale = base * (0.8 + 0.2 * sin(u))
+            if locked {
+                let halo = 17 * scale
+                ctx.fill(
+                    Globe.circle(p, halo),
+                    with: .radialGradient(
+                        Gradient(stops: [
+                            .init(color: Globe.blue.opacity(0.22 * a), location: 0),
+                            .init(color: Globe.blue.opacity(0.14 * a), location: 0.6),
+                            .init(color: .clear, location: 1),
+                        ]),
+                        center: p, startRadius: 0, endRadius: halo
                     )
-                }
-                previous = q
-            }
-            ctx.fill(Globe.circle(p, 10), with: .radialGradient(Gradient(colors: [color.opacity(0.45 * a), .clear]), center: p, startRadius: 0, endRadius: 10))
-            let blink = locked ? 1 : 0.65 + 0.35 * sin(t * 4 + Double(i))
-            ctx.fill(Globe.circle(p, 2.3), with: .color(color.opacity(a * blink)))
-            if locked, let beacon {
-                var beam = Path()
-                beam.move(to: p)
-                beam.addLine(to: beacon)
-                ctx.stroke(
-                    beam,
-                    with: .linearGradient(
-                        Gradient(colors: [Globe.locked.opacity(0.5 * a), Globe.locked.opacity(0.08 * a)]),
-                        startPoint: p,
-                        endPoint: beacon
-                    ),
-                    lineWidth: 1.2
                 )
-                let f = (t * 0.8 + Double(i) * 0.37).truncatingRemainder(dividingBy: 1)
-                let q = CGPoint(x: Double(p.x) + Double(beacon.x - p.x) * f, y: Double(p.y) + Double(beacon.y - p.y) * f)
-                ctx.fill(Globe.circle(q, 1.8), with: .color(.white.opacity(a * 0.9 * (1 - f * f))))
             }
+            // Turned along its way round.
+            let ahead = orbitPoint(k, u + 0.02, cx: cx, cy: cy, r: r)
+            let angle = atan2(Double(ahead.y - p.y), Double(ahead.x - p.x))
+            var g = ctx
+            g.opacity = a
+            g.translateBy(x: p.x, y: p.y)
+            g.rotate(by: .radians(angle))
+            g.scaleBy(x: scale, y: scale)
+            Globe.drawSatellite(g)
         }
     }
+
+    /**
+     * From each used satellite down to the beacon, a curve bowing away from the globe's centre: a
+     * glow under a fine line paling toward home. Each draws itself in 450 ms as its satellite locks.
+     */
+    private func links(
+        _ ctx: GraphicsContext,
+        cx: Double,
+        cy: Double,
+        r: Double,
+        alpha: Double,
+        t: Double,
+        visible: Int,
+        used: Int,
+        beacon: CGPoint
+    ) {
+        for i in 0..<min(min(visible, 12), used) {
+            let k = i % 3
+            let u = Double(i) * 2.3999632 + t * Globe.orbitSpeed[k]
+            let p = orbitPoint(k, u, cx: cx, cy: cy, r: r)
+            if sin(u) <= 0 && hypot(Double(p.x) - cx, Double(p.y) - cy) < r { continue }
+            let since = lockedAt.indices.contains(i) ? t - lockedAt[i] : 1
+            let x = min(max(since / 0.45, 0), 1)
+            let drawn = 1 - (1 - x) * (1 - x) * (1 - x)
+            guard drawn > 0.001 else { continue }
+            let mx = (Double(p.x) + Double(beacon.x)) / 2
+            let my = (Double(p.y) + Double(beacon.y)) / 2
+            var dx = mx - cx
+            var dy = my - cy
+            let len = hypot(dx, dy)
+            if len > 0.001 {
+                dx /= len
+                dy /= len
+            } else {
+                dx = 0
+                dy = -1
+            }
+            let bow = 0.3 * hypot(Double(beacon.x - p.x), Double(beacon.y - p.y))
+            var curve = Path()
+            curve.move(to: p)
+            curve.addQuadCurve(to: beacon, control: CGPoint(x: mx + dx * bow, y: my + dy * bow))
+            let line = drawn < 1 ? curve.trimmedPath(from: 0, to: drawn) : curve
+            ctx.stroke(line, with: .color(Globe.blue.opacity(0.2 * alpha)), style: StrokeStyle(lineWidth: 6, lineCap: .round))
+            ctx.stroke(
+                line,
+                with: .linearGradient(
+                    Gradient(colors: [Globe.blue.opacity(0.15 * alpha), Globe.paleBlue.opacity(alpha)]),
+                    startPoint: p,
+                    endPoint: beacon
+                ),
+                style: StrokeStyle(lineWidth: 1.8, lineCap: .round)
+            )
+        }
+    }
+
+    /** One satellite at the origin, panels along x: body 7 × 10, a panel each side on a short boom, the dish under. */
+    private static func drawSatellite(_ g: GraphicsContext) {
+        g.fill(Globe.panels, with: .color(Globe.panelFill))
+        g.stroke(Globe.panels, with: .color(Globe.panelEdge), lineWidth: 1)
+        g.stroke(Globe.panelLines, with: .color(Globe.panelEdge), lineWidth: 0.7)
+        g.stroke(Globe.boom, with: .color(Globe.satWhite), lineWidth: 1.4)
+        g.fill(Globe.body, with: .color(Globe.satWhite))
+        g.stroke(Globe.antenna, with: .color(Globe.satWhite), style: StrokeStyle(lineWidth: 1.2, lineCap: .round))
+    }
+
+    private static let panels: Path = {
+        var p = Path()
+        p.addRoundedRect(in: CGRect(x: -15, y: -4, width: 10, height: 8), cornerSize: CGSize(width: 1, height: 1))
+        p.addRoundedRect(in: CGRect(x: 5, y: -4, width: 10, height: 8), cornerSize: CGSize(width: 1, height: 1))
+        return p
+    }()
+
+    private static let panelLines: Path = {
+        var p = Path()
+        p.move(to: CGPoint(x: -10, y: -4))
+        p.addLine(to: CGPoint(x: -10, y: 4))
+        p.move(to: CGPoint(x: 10, y: -4))
+        p.addLine(to: CGPoint(x: 10, y: 4))
+        return p
+    }()
+
+    private static let boom: Path = {
+        var p = Path()
+        p.move(to: CGPoint(x: -5, y: 0))
+        p.addLine(to: CGPoint(x: 5, y: 0))
+        return p
+    }()
+
+    private static let body = Path(roundedRect: CGRect(x: -3.5, y: -5, width: 7, height: 10), cornerRadius: 1.6)
+
+    private static let antenna: Path = {
+        var p = Path()
+        p.move(to: CGPoint(x: 0, y: 5))
+        p.addLine(to: CGPoint(x: 0, y: 8.5))
+        p.move(to: CGPoint(x: -2.5, y: 9.5))
+        p.addQuadCurve(to: CGPoint(x: 2.5, y: 9.5), control: CGPoint(x: 0, y: 11.5))
+        return p
+    }()
 
     private func orbitPoint(_ k: Int, _ u: Double, cx: Double, cy: Double, r: Double) -> CGPoint {
         let a = Globe.orbitRadius[k] * r
@@ -317,8 +399,12 @@ final class Globe {
     private static let atmosphereBlue = rgb(0x4DA8FF)
     private static let landColor = rgb(0xD2EAFF)
     private static let cityLight = rgb(0xFFB35C)
-    private static let locked = rgb(0x30D158)
-    private static let seeking = rgb(0xE6F0FF)
+    private static let blue = rgb(0x3D8BFF)
+    private static let lightBlue = rgb(0x5AA2FF)
+    private static let paleBlue = rgb(0xCFE3FF)
+    private static let satWhite = rgb(0xE6F0FF)
+    private static let panelFill = rgb(0x1B4E8F)
+    private static let panelEdge = rgb(0x9CC2F0)
 
     /** Bright day, dim day, edge or night, city light. */
     private static let shadeAlpha: [Double] = [0.95, 0.6, 0.22, 0.75]
@@ -335,7 +421,6 @@ final class Globe {
         .init(color: oceanMid, location: 0.5),
         .init(color: oceanDark, location: 1),
     ])
-    private static let rim = Gradient(colors: [.white.opacity(0.55), atmosphereBlue.opacity(0.18), .clear])
 
     /** France until the first position: the globe turns home to the viewer as the satellites lock, and the beacon lights up there. */
     private static let homeLat = 46.5
@@ -359,9 +444,6 @@ final class Globe {
     private static let orbitInclination: [Double] = [0.3, 0.5, 0.2]
     private static let orbitNode: [Double] = [-0.35, 0.3, 0.12]
     private static let orbitSpeed: [Double] = [0.55, 0.4, 0.3]
-
-    /** Segments of each half orbit line. */
-    private static let arcSteps = 32
 
     private static let alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
