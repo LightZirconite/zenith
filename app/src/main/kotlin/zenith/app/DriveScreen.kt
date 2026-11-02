@@ -718,7 +718,11 @@ fun DriveScreen(
                         Modifier.weight(1f - LAND_SPLIT).fillMaxHeight().wrapContentWidth().widthIn(max = 520.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        Column(
+                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                            verticalArrangement = Arrangement.Center,
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
                             AnimatedVisibility(
                                 visible = view == HomeView.DRIVE,
                                 enter = fadeIn(tween(250, delayMillis = 50)) + scaleIn(spring(dampingRatio = 0.65f, stiffness = Spring.StiffnessMediumLow), initialScale = 1.5f),

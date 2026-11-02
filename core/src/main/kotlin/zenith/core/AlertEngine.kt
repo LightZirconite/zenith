@@ -334,9 +334,10 @@ class AlertEngine(
                 continue
             }
             if (!ahead && (straight > 150 || leaving)) {
-                // Turned off before reaching it.
+                // Turned off before reaching it, unless the car drove right by it (a red light at the
+                // crossroads, whose road distance vanished a little early): then it is behind, done.
                 iterator.remove()
-                dropped[r.id] = drop(t, now)
+                if (t.minDistanceM < PASSED_NEAR_M) recentlyPassed[r.id] = now else dropped[r.id] = drop(t, now)
                 continue
             }
             // Further and further by road: the car goes another way (it came by a side road, or
@@ -554,6 +555,9 @@ class AlertEngine(
         /** A track given up and found again within this time and distance is not announced again. */
         const val DROPPED_MS = 120_000L
         const val DROPPED_NEAR_M = 150.0
+
+        /** A track left after the car came this close to it, in a straight line, was driven by. */
+        const val PASSED_NEAR_M = 40.0
 
         /** A tracked radar this much further by road than it has been is not on the way any more. */
         const val GROWING_M = 200.0
