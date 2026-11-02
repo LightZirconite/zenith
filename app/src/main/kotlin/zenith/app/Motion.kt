@@ -49,7 +49,7 @@ object Motion {
         val client = ActivityRecognition.getClient(context)
         val events = pendingIntent(context)
         runCatching {
-            if (UserSettings.state.value.motionStart && hasActivity(context) && hasBackgroundLocation(context)) {
+            if (UserSettings.state.value.motionWanted && hasActivity(context) && hasBackgroundLocation(context)) {
                 val transitions = listOf(ActivityTransition.ACTIVITY_TRANSITION_ENTER, ActivityTransition.ACTIVITY_TRANSITION_EXIT).map {
                     ActivityTransition.Builder().setActivityType(DetectedActivity.IN_VEHICLE).setActivityTransition(it).build()
                 }
@@ -64,7 +64,7 @@ object Motion {
     /** The phone started riding in a vehicle: start the drive, or ask for a tap if Android refuses. */
     fun vehicleEntered(context: Context) {
         UserSettings.init(context)
-        if (!UserSettings.state.value.motionStart || DriveState.running.value) return
+        if (!UserSettings.state.value.motionWanted || DriveState.running.value) return
         val started = runCatching { DriveService.startMotion(context) }.isSuccess
         if (!started) CarLink.notifyTapToStart(context, "En voiture ?")
     }

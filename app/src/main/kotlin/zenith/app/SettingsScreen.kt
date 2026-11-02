@@ -116,9 +116,21 @@ fun SettingsScreen(
             ) { on -> onChange { it.copy(autoRain = on) } }
         }
         Section("En voiture", order++) {
-            MotionRows(settings, permissions, onChange, onMotionPermission)
-            Divider()
-            CarRows(settings.cars, onPairCar, onUnpairCar)
+            ToggleRow(
+                "Démarrage automatique",
+                if (settings.autoStart) {
+                    "Zenith peut démarrer seul : quand tu roules en voiture ou quand l'une de tes voitures se connecte."
+                } else {
+                    "Désactivé : Zenith ne démarre jamais seul, seulement quand tu touches « Démarrer »."
+                },
+                settings.autoStart,
+            ) { on -> onChange { it.copy(autoStart = on) } }
+            if (settings.autoStart) {
+                Divider()
+                MotionRows(settings, permissions, onChange, onMotionPermission)
+                Divider()
+                CarRows(settings.cars, onPairCar, onUnpairCar)
+            }
             Divider()
             ToggleRow(
                 "Arrêt automatique",

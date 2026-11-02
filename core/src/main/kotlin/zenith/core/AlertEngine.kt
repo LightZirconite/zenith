@@ -157,6 +157,14 @@ class AlertEngine(
 
     private val tracked = LinkedHashMap<String, Track>()
     private val recentlyPassed = HashMap<String, Long>()
+    /** Radars just passed, kept a little while: a copy of one met after it is the same camera. */
+    private val justPassed = HashMap<String, Pair<Radar, Long>>()
+    /**
+     * Radars the car drove right by, whatever came of their track (other carriageway, other
+     * direction, twin): once behind the car, they are behind it, even when the road ahead loops
+     * back to them (U-turn at a roundabout onto the other carriageway of the same road).
+     */
+    private val drivenBy = HashMap<String, Long>()
     private var section: SectionTracker? = null
     private var sectionLimit = 0
     private var lastPosition: LatLon? = null
@@ -199,6 +207,9 @@ class AlertEngine(
         val moving = motion == Motion.MOVING
         advanceSection(state, moving, events)
         recentlyPassed.entries.removeAll { now - it.value > 5 * 60_000 }
+        justPassed.entries.removeAll { now - it.value.second > JUST_PASSED_MS }
+        drivenBy.entries.removeAll { now - it.value > 5 * 60_000 }
+        if (moving) for (r in radars.near(state.position, DRIVEN_BY_M)) drivenBy[r.id] = now
         sectionsHandled.entries.removeAll { now - it.value > 30 * 60_000 }
 
         val heading = state.headingDeg
@@ -214,6 +225,7 @@ class AlertEngine(
             val r = queue.removeFirst()
             if (r.type.mobile && r.reportedAtMs != null && now - r.reportedAtMs > settings.mobileMaxAgeMs) continue
             if (heading == null || r.id in recentlyPassed) continue
+            if (r.id in drivenBy && behind(state.position, heading, r.position)) continue
             val snaps = horizon?.snaps(r).orEmpty()
             val d: Double
             if (horizon != null && snaps.isNotEmpty()) {
@@ -239,13 +251,13 @@ class AlertEngine(
                 }
             }
             if (r.id !in tracked && d <= triggerM) {
-                val twin = tracked.values.any { t ->
-                    !t.silent && t.radar.type == r.type && Geo.distanceM(t.radar.position, r.position) <= settings.twinM &&
-                        (t.radar.limitKmh == null || r.limitKmh == null || t.radar.limitKmh == r.limitKmh) &&
-                        // Two measured directions that differ: two cameras (level crossing, crossroads), not one.
-                        (t.radar.directionDeg == null || r.directionDeg == null ||
-                            Geo.headingDiffDeg(t.radar.directionDeg, r.directionDeg) <= TWIN_DIRECTION_DEG)
+                // A copy of the camera just passed, a little further (sources disagree on its spot):
+                // it is behind the car in truth, never "radar dans 150 mètres" right after it.
+                if (justPassed.values.any { sameCamera(it.first, r) }) {
+                    recentlyPassed[r.id] = now
+                    continue
                 }
+                val twin = tracked.values.any { t -> !t.silent && sameCamera(t.radar, r) }
                 tracked[r.id] = Track(r, Geo.distanceM(state.position, r.position), v, silent = twin)
                 if (!twin) events += AlertEvent.Approach(now, r, d, radarLimit(r, roadLimit))
             }
@@ -280,6 +292,7 @@ class AlertEngine(
             if (leaving && reached && !ahead) {
                 iterator.remove()
                 recentlyPassed[r.id] = now
+                justPassed[r.id] = r to now
                 onPassed(t, now, roadLimit, events)
                 continue
             }
@@ -359,6 +372,18 @@ class AlertEngine(
         if (underLimitSinceMs?.let { now - it >= settings.overspeedResetMs } == true) lastWarnMs = null
         overspeed = level
     }
+
+    /**
+     * [b] is [a] seen by another source: same kind of camera (fixed and discriminant alike, as the
+     * data merge counts them), close, limits and measured directions that do not disagree. Two
+     * measured directions that differ: two cameras (level crossing, crossroads), not one.
+     */
+    private fun sameCamera(a: Radar, b: Radar): Boolean =
+        family(a.type) == family(b.type) && Geo.distanceM(a.position, b.position) <= settings.twinM &&
+            (a.limitKmh == null || b.limitKmh == null || a.limitKmh == b.limitKmh) &&
+            (a.directionDeg == null || b.directionDeg == null || Geo.headingDiffDeg(a.directionDeg, b.directionDeg) <= TWIN_DIRECTION_DEG)
+
+    private fun family(t: RadarType) = if (t == RadarType.DISCRIMINANT) RadarType.FIXED else t
 
     private fun behind(p: LatLon, heading: Double, target: LatLon): Boolean =
         Geo.distanceM(p, target) > 15 && Geo.headingDiffDeg(heading, Geo.bearingDeg(p, target)) > 90
@@ -455,6 +480,12 @@ class AlertEngine(
 
         /** A tracked radar whose road distance vanishes under this (or two fixes of travel) was reached. */
         const val REACHED_M = 30.0
+
+        /** A radar this close to the car was driven by. */
+        const val DRIVEN_BY_M = 40.0
+
+        /** A radar met this soon after passing a copy of it is that same camera. */
+        const val JUST_PASSED_MS = 90_000L
 
         /** Same camera seen by two sources: their measured directions agree within this. */
         const val TWIN_DIRECTION_DEG = 25.0

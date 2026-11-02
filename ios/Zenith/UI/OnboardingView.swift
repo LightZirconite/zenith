@@ -99,7 +99,7 @@ struct OnboardingView: View {
 
     /** The motion start counts only when wanted, as on Android. */
     private var steps: [OnboardingStep] {
-        OnboardingStep.allCases.filter { $0 != .motion || settings.motionStart }
+        OnboardingStep.allCases.filter { $0 != .motion || settings.motionWanted }
     }
 
     private func granted(_ step: OnboardingStep) -> Bool {

@@ -88,6 +88,25 @@ class AlertEngineTest {
     }
 
     @Test
+    fun `same camera seen again just after passing it is not announced again`() {
+        // Slow: the copy 140 m further was not yet in range when the first one was announced, and
+        // used to be announced right after passing it ("radar dans 150 mètres").
+        val further = Radar("R1-lufop", Sim.ll(4.0, 1_640.0), RadarType.FIXED, limitKmh = 90)
+        val discriminant = Radar("R1-d", Sim.ll(-3.0, 1_620.0), RadarType.DISCRIMINANT, limitKmh = 90)
+        for (copy in listOf(further, discriminant)) {
+            val events = run(listOf(fixed90, copy), 50 / 3.6).events()
+            assertEquals(listOf("R1"), events.filterIsInstance<AlertEvent.Approach>().map { it.radar.id }, copy.id)
+        }
+    }
+
+    @Test
+    fun `a second camera well after the first one is still announced`() {
+        val second = Radar("R2", Sim.ll(0.0, 1_900.0), RadarType.FIXED, limitKmh = 90, directionDeg = 0.0)
+        val ids = run(listOf(fixed90, second), 50 / 3.6).events().filterIsInstance<AlertEvent.Approach>().map { it.radar.id }
+        assertEquals(listOf("R1", "R2"), ids)
+    }
+
+    @Test
     fun `two different radars close together are both announced`() {
         val redLight = Radar("F1", Sim.ll(0.0, 1_600.0), RadarType.RED_LIGHT, directionDeg = 0.0)
         val ids = run(listOf(fixed90, redLight), 25.0).events().filterIsInstance<AlertEvent.Approach>().map { it.radar.id }

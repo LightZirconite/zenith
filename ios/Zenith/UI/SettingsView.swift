@@ -82,35 +82,54 @@ struct SettingsView: View {
 
     private var car: some View {
         SettingsGroup("En voiture") {
-            SettingsToggleRow(title: "Démarrage en roulant", text: motionText, on: settings.motionStart, enabled: motionAvailable) { on in
-                settings.motionStart = on
+            SettingsToggleRow(
+                title: "Démarrage automatique",
+                text: settings.autoStart
+                    ? "Zenith peut démarrer seul : quand tu roules en voiture ou quand la voiture se connecte (Raccourcis)."
+                    : "Désactivé : Zenith ne démarre jamais seul, seulement quand tu touches « Démarrer ». " +
+                        "Les automatisations Raccourcis restent, mais ne démarrent plus rien.",
+                on: settings.autoStart
+            ) { on in
+                settings.autoStart = on
                 MotionStarter.shared.sync()
             }
-            if let missing = motionMissing {
+            if settings.autoStart {
                 SettingsSeparator()
-                SettingsActionRow(label: missing, sound: .open, action: askMotionPermission)
-            }
-            SettingsSeparator()
-            SettingsInfoRow(
-                title: "Démarrage automatique en voiture",
-                text: "iOS ne prévient pas les applis quand la voiture se connecte : une automatisation Raccourcis s'en charge, " +
-                    "à créer une fois par voiture.\n" +
-                    "Raccourcis → Automatisation → + → « CarPlay » (ou « Bluetooth » → ta voiture) → « Est connecté » → " +
-                    "action Zenith « Voiture connectée » → « Exécuter immédiatement ».\n" +
-                    "Pareil avec « Est déconnecté » → « Voiture déconnectée » : seule une conduite lancée par la voiture s'arrête."
-            )
-            SettingsSeparator()
-            SettingsActionRow(label: "Ouvrir Raccourcis", sound: .open) {
-                if let url = URL(string: "shortcuts://") { openURL(url) }
+                autoStartRows
             }
             SettingsSeparator()
             SettingsToggleRow(
                 title: "Arrêt automatique",
                 text: "Pour la batterie : Zenith s'arrête seul quand la voiture est garée depuis 10 minutes, quand tu repars à pied " +
                     "ou à l'intérieur sans GPS. Jamais sur autoroute ni pendant un bouchon. Une conduite lancée par la voiture " +
-                    "(Raccourcis, au-dessus) s'arrête, elle, avec la voiture.",
+                    "(Raccourcis) s'arrête, elle, avec la voiture.",
                 on: settings.autoStop
             ) { settings.autoStop = $0 }
+        }
+    }
+
+    /** Rows of the automatic start, shown while its master switch is on. */
+    @ViewBuilder private var autoStartRows: some View {
+        SettingsToggleRow(title: "Démarrage en roulant", text: motionText, on: settings.motionStart, enabled: motionAvailable) { on in
+            settings.motionStart = on
+            MotionStarter.shared.sync()
+        }
+        if let missing = motionMissing {
+            SettingsSeparator()
+            SettingsActionRow(label: missing, sound: .open, action: askMotionPermission)
+        }
+        SettingsSeparator()
+        SettingsInfoRow(
+            title: "Démarrage automatique en voiture",
+            text: "iOS ne prévient pas les applis quand la voiture se connecte : une automatisation Raccourcis s'en charge, " +
+                "à créer une fois par voiture.\n" +
+                "Raccourcis → Automatisation → + → « CarPlay » (ou « Bluetooth » → ta voiture) → « Est connecté » → " +
+                "action Zenith « Voiture connectée » → « Exécuter immédiatement ».\n" +
+                "Pareil avec « Est déconnecté » → « Voiture déconnectée » : seule une conduite lancée par la voiture s'arrête."
+        )
+        SettingsSeparator()
+        SettingsActionRow(label: "Ouvrir Raccourcis", sound: .open) {
+            if let url = URL(string: "shortcuts://") { openURL(url) }
         }
     }
 
@@ -235,7 +254,7 @@ struct SettingsView: View {
     /** What can make rows come or go: the groups animate their size when it changes. */
     private var layout: [Bool] {
         [
-            settings.motionStart, permissions.location == .always, permissions.motion,
+            settings.autoStart, settings.motionStart, permissions.location == .always, permissions.motion,
             spotify.connected, permissions.appleMusic, updateAvailable, trip != nil,
         ]
     }
@@ -251,7 +270,7 @@ struct SettingsView: View {
 
     /** The permission the motion start still lacks, as the words of its row; nil when nothing is missing. */
     private var motionMissing: String? {
-        guard motionAvailable, settings.motionStart else { return nil }
+        guard motionAvailable, settings.motionWanted else { return nil }
         if permissions.location != .always { return "Autoriser la position « Toujours »" }
         if !permissions.motion { return "Autoriser « Mouvements et forme »" }
         return nil

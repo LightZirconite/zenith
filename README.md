@@ -50,7 +50,7 @@ Zenith ne vient pas de l'App Store : il s'installe avec [SideStore](https://side
 | Écran verrouillé | notification avec la vitesse et « Arrêter » | Activité en direct et Dynamic Island, avec « Arrêter » |
 | Musique | tous les lecteurs (Spotify, YouTube, Deezer…) avec l'accès aux notifications ; sinon Spotify par compte connecté | Spotify (compte connecté) et Apple Music seulement |
 | Contrôle de Spotify | toujours avec l'accès aux notifications ; par compte connecté, avec Premium | précédent / pause / suivant avec Spotify Premium (règle de Spotify) |
-| Démarrage auto | en roulant ou à la connexion de la voiture | en roulant, et à la connexion de la voiture par une automatisation Raccourcis (voir plus bas) |
+| Démarrage auto (désactivable d'un interrupteur) | en roulant ou à la connexion de la voiture | en roulant, et à la connexion de la voiture par une automatisation Raccourcis (voir plus bas) ; désactivé, l'automatisation reste mais ne démarre plus rien |
 | Mises à jour | installées seules | proposées par SideStore, une confirmation |
 | Volume monté pendant la conduite | oui | oui (glissière de volume du système) |
 

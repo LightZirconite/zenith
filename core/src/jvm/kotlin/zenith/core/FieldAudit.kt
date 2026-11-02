@@ -15,7 +15,9 @@ import kotlin.random.Random
  *   the car reached it, although the route ran at least [LEAD_M] before it;
  * - off route: a radar announced that the route never drives past (side branches within 500 m by
  *   road included: they are listed apart, as alerts kept on purpose when the road is in doubt);
- * - wrong next: share of the time the "next radar" shown is not on the route ahead.
+ * - wrong next: share of the time the "next radar" shown is not on the route ahead;
+ * - after pass: a radar announced already behind the car, again, or right after passing a radar
+ *   close to it ("radar dans 300 m" just after the camera).
  */
 object FieldAudit {
     private const val LEAD_M = 600.0
@@ -34,6 +36,7 @@ object FieldAudit {
         val wrongNext: Int,
         val falsePassedFlash: List<String>,
         val wrongExamples: List<String> = emptyList(),
+        val afterPass: List<String> = emptyList(),
     )
 
     fun run(network: RoadNetwork, radars: List<Radar>, drives: Int, seed: Int): Report {
@@ -50,6 +53,7 @@ object FieldAudit {
         val offRoute = mutableListOf<String>()
         val falseFlash = mutableListOf<String>()
         val wrongExamples = mutableListOf<String>()
+        val afterPass = mutableListOf<String>()
         repeat(drives) { k ->
             val route = route(network, starts.random(rnd), rnd)
             val line = Polyline(geometry(route).takeIf { it.size >= 2 } ?: return@repeat)
@@ -73,12 +77,22 @@ object FieldAudit {
             val travelled = fixes.associate { it.timeMs to (it.speedMps ?: 0.0) }
             var done = 0.0
             var lastT: Long? = null
+            val passed = mutableListOf<Pair<Radar, Long>>()
             for (s in snaps) {
                 lastT?.let { done += (travelled[s.timeMs] ?: 0.0) * (s.timeMs - it) / 1000.0 }
                 lastT = s.timeMs
                 for (e in s.events) {
                     when (e) {
-                        is AlertEvent.Approach -> if (e.radar.id !in firstSeen) {
+                        is AlertEvent.Approach -> if (e.radar.id in firstSeen) {
+                            afterPass += "trajet $k : ${e.radar.id} ${e.radar.type} annoncé deux fois"
+                        } else {
+                            val at = along[e.radar.id]
+                            val near = passed.firstOrNull { (p, t) -> s.timeMs - t < 30_000 && Geo.distanceM(p.position, e.radar.position) < 400 }
+                            if (at != null && at < done - 30) {
+                                afterPass += "trajet $k : ${e.radar.id} ${e.radar.type} annoncé ${(done - at).toInt()} m après lui"
+                            } else if (near != null && at == null) {
+                                afterPass += "trajet $k : ${e.radar.id} ${e.radar.type} annoncé à ${e.distanceM.toInt()} m juste après ${near.first.id} ${near.first.type}"
+                            }
                             firstSeen[e.radar.id] = done
                             announced++
                             if (e.radar.id !in along && !e.radar.id.endsWith(">start") && done + e.distanceM < line.lengthM - 50) {
@@ -86,8 +100,9 @@ object FieldAudit {
                                 if (far) offRoute += "trajet $k : ${e.radar.id} ${e.radar.type} annoncé à ${e.distanceM.toInt()} m" else branch++
                             }
                         }
-                        is AlertEvent.Passed -> if (e.wouldFlash && e.radar.id !in along) {
-                            falseFlash += "trajet $k : ${e.radar.id} ${e.radar.type}"
+                        is AlertEvent.Passed -> {
+                            passed += e.radar to s.timeMs
+                            if (e.wouldFlash && e.radar.id !in along) falseFlash += "trajet $k : ${e.radar.id} ${e.radar.type}"
                         }
                         else -> Unit
                     }
@@ -112,7 +127,7 @@ object FieldAudit {
                     (seen?.let { " (annoncé à ${it.toInt()} m)" } ?: "")
             }
         }
-        return Report(drives, onRoute, announced, missed, offRoute, branch, snapshots, wrongNext, falseFlash, wrongExamples)
+        return Report(drives, onRoute, announced, missed, offRoute, branch, snapshots, wrongNext, falseFlash, wrongExamples, afterPass)
     }
 
     /** A drive that follows the road where it obviously goes on, as people do, and picks at random at real forks. Never a U-turn. */
@@ -194,7 +209,8 @@ fun auditMain(args: Array<String>) {
     println("Annonces : ${r.announced}, hors route (> 500 m) : ${r.offRoute.size}, branches proches (doute gardé) : ${r.branch}")
     println("« Prochain radar » faux : ${r.wrongNext} sur ${r.snapshots} instants")
     println("« Flash probable » sur un radar hors route : ${r.falsePassedFlash.size}")
-    (r.missed.take(15) + r.offRoute.take(15) + r.falsePassedFlash.take(10) + r.wrongExamples.take(10)).forEach { println("  $it") }
+    println("Annonce après le radar (déjà passé, en double, ou juste après un passage) : ${r.afterPass.size}")
+    (r.afterPass.take(15) + r.missed.take(15) + r.offRoute.take(15) + r.falsePassedFlash.take(10) + r.wrongExamples.take(10)).forEach { println("  $it") }
 }
 
 /** Separate entry point for the `audit` task. */

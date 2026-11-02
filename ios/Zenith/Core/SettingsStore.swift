@@ -22,6 +22,8 @@ final class SettingsStore {
     var raiseVolume: Bool { didSet { defaults.set(raiseVolume, forKey: "raise_volume") } }
     /** A drive started by hand ends by itself once the car is parked. */
     var autoStop: Bool { didSet { defaults.set(autoStop, forKey: "auto_stop") } }
+    /** Master switch of every automatic start (riding, car shortcut): off, a drive only starts by hand. */
+    var autoStart: Bool { didSet { defaults.set(autoStart, forKey: "auto_start") } }
     /** Drive started by itself when the phone starts riding in a vehicle. */
     var motionStart: Bool { didSet { defaults.set(motionStart, forKey: "motion_start") } }
     /** Rain mode from the weather (Open-Meteo) while driving. */
@@ -37,6 +39,9 @@ final class SettingsStore {
     /** iOS: the small window opens by itself when Zenith goes to the background during a drive. */
     var autoPip: Bool { didSet { defaults.set(autoPip, forKey: "auto_pip") } }
 
+    /** The start by riding is wanted: its own switch and the master one. */
+    var motionWanted: Bool { autoStart && motionStart }
+
     private init() {
         let d = UserDefaults.standard
         func bool(_ key: String, _ fallback: Bool) -> Bool {
@@ -47,6 +52,7 @@ final class SettingsStore {
         pauseMusic = bool("voice_pause", false)
         raiseVolume = bool("raise_volume", true)
         autoStop = bool("auto_stop", true)
+        autoStart = bool("auto_start", true)
         motionStart = bool("motion_start", true)
         autoRain = bool("auto_rain", true)
         spotifyCanvas = bool("spotify_canvas", true)

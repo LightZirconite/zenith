@@ -116,7 +116,7 @@ class MainActivity : ComponentActivity() {
             var onboarded by remember { mutableStateOf(prefs.getBoolean(KEY_ONBOARDED, false)) }
             // Every permission is required (the music's notification access aside): the welcome screen
             // comes back whenever one is missing, a new one or one taken back (never during a drive).
-            val showWelcome = !running && (!onboarded || permissions.missing(settings.motionStart) > 0)
+            val showWelcome = !running && (!onboarded || permissions.missing(settings.motionWanted, settings.autoStart) > 0)
             // "Car connected · tap to start" notification.
             LaunchedEffect(startNow, permissions.location) {
                 if (startNow && permissions.location) {
@@ -180,8 +180,8 @@ class MainActivity : ComponentActivity() {
                     !permissions.notifications -> onNotifications()
                     !permissions.battery -> openSettings(Permissions.batteryIntent(context))
                     !permissions.installs -> openSettings(Permissions.installsIntent(context))
-                    permissions.motionAvailable && settings.motionStart && !permissions.motion -> onMotion()
-                    permissions.overlayNeeded(settings.motionStart) && !permissions.overlay -> openSettings(Permissions.overlayIntent(context))
+                    permissions.motionAvailable && settings.motionWanted && !permissions.motion -> onMotion()
+                    permissions.overlayNeeded(settings.motionWanted, settings.autoStart) && !permissions.overlay -> openSettings(Permissions.overlayIntent(context))
                     else -> Unit
                 }
             }
@@ -207,7 +207,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
             // Activity recognition follows the setting and the permissions (renewed at each start too).
-            LaunchedEffect(permissions.motion, settings.motionStart) { Motion.sync(context) }
+            LaunchedEffect(permissions.motion, settings.motionWanted) { Motion.sync(context) }
             // Music bar: picks up a notification access granted during the drive.
             LaunchedEffect(resumeCount, running) { if (running) NowPlaying.start(context) }
             // Parked: install as soon as the update is downloaded (silent once Zenith installed itself once).
@@ -290,7 +290,8 @@ class MainActivity : ComponentActivity() {
                 Screen.WELCOME -> Onboarding(
                     permissions = permissions,
                     returning = onboarded,
-                    motionWanted = settings.motionStart,
+                    motionWanted = settings.motionWanted,
+                    autoStart = settings.autoStart,
                     onLocation = onLocation,
                     onNotifications = onNotifications,
                     onInstalls = { openSettings(Permissions.installsIntent(context)) },

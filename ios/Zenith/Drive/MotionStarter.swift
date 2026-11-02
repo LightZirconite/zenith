@@ -23,7 +23,7 @@ final class MotionStarter: NSObject, CLLocationManagerDelegate {
 
     /** Follows the setting and the permissions; called at launch, on a background wake and when they change. */
     func sync() {
-        let want = SettingsStore.shared.motionStart
+        let want = SettingsStore.shared.motionWanted
             && manager.authorizationStatus == .authorizedAlways
             && CMMotionActivityManager.isActivityAvailable()
             && CMMotionActivityManager.authorizationStatus() != .denied
@@ -42,7 +42,7 @@ final class MotionStarter: NSObject, CLLocationManagerDelegate {
     }
 
     private func onActivity(_ a: CMMotionActivity) {
-        guard SettingsStore.shared.motionStart else { return }
+        guard SettingsStore.shared.motionWanted else { return }
         if a.automotive && a.confidence != .low {
             startIfIdle()
         } else if (a.walking || a.running || a.cycling) && a.confidence == .high {
@@ -52,7 +52,7 @@ final class MotionStarter: NSObject, CLLocationManagerDelegate {
 
     /** Woken by a significant change: was the phone riding these last minutes? */
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard SettingsStore.shared.motionStart, !DriveModel.shared.running else { return }
+        guard SettingsStore.shared.motionWanted, !DriveModel.shared.running else { return }
         let now = Date()
         activity.queryActivityStarting(from: now.addingTimeInterval(-180), to: now, to: .main) { [weak self] list, _ in
             guard let last = list?.last, last.automotive, last.confidence != .low else { return }

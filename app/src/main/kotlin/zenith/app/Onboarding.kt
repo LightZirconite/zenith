@@ -96,18 +96,19 @@ data class Permissions(
     val motion: Boolean get() = motionAvailable && activity && backgroundLocation
 
     /** The small window opens by itself only after an automatic start (riding, or a paired car). */
-    fun overlayNeeded(motionWanted: Boolean): Boolean = overlayAvailable && ((motionAvailable && motionWanted) || CarLink.supported)
+    fun overlayNeeded(motionWanted: Boolean, autoStart: Boolean = true): Boolean =
+        overlayAvailable && autoStart && ((motionAvailable && motionWanted) || CarLink.supported)
 
     /**
      * Required permissions still missing; the motion start counts only when wanted and possible
      * here. The notification access is not among them: a Spotify account can stand in for it, and
      * [MusicInvite] asks for one or the other.
      */
-    fun missing(motionWanted: Boolean): Int =
+    fun missing(motionWanted: Boolean, autoStart: Boolean = true): Int =
         listOf(
             location, notifications, installs, battery,
             !(motionAvailable && motionWanted) || motion,
-            !overlayNeeded(motionWanted) || overlay,
+            !overlayNeeded(motionWanted, autoStart) || overlay,
         ).count { !it }
 
     companion object {
@@ -182,6 +183,8 @@ fun Onboarding(
     /** Shown again because something is missing: not the first launch. */
     returning: Boolean = false,
     motionWanted: Boolean = true,
+    /** Automatic start switched on: the small-window permission only serves it. */
+    autoStart: Boolean = true,
     onMotion: () -> Unit = {},
     onMedia: () -> Unit = {},
     onOverlay: () -> Unit = {},
@@ -192,9 +195,9 @@ fun Onboarding(
     /** The big button: the next missing permission, one after the other. */
     onNext: () -> Unit = {},
 ) {
-    val missing = permissions.missing(motionWanted)
+    val missing = permissions.missing(motionWanted, autoStart)
     val showMotion = permissions.motionAvailable && motionWanted
-    val showOverlay = permissions.overlayNeeded(motionWanted)
+    val showOverlay = permissions.overlayNeeded(motionWanted, autoStart)
     val total = 4 + (if (showMotion) 1 else 0) + (if (showOverlay) 1 else 0)
     LargeTitlePage(
         title = if (returning) "Autorisations" else "Bienvenue",

@@ -23,6 +23,8 @@ data class SettingsState(
     val raiseVolume: Boolean = true,
     /** Battery saver: a drive started by hand ends by itself once the car is parked. */
     val autoStop: Boolean = true,
+    /** Master switch of every automatic start (riding, cars): off, a drive only starts by hand. */
+    val autoStart: Boolean = true,
     /** Drive started by itself when the phone starts riding in a vehicle (activity recognition). */
     val motionStart: Boolean = true,
     /** Rain mode from the weather (Open-Meteo) while driving. */
@@ -37,6 +39,9 @@ data class SettingsState(
     val uiSounds: Boolean = true,
 ) {
     val profile: DriverProfile get() = DriverProfile(probationary = probationary, raining = raining)
+
+    /** The start by activity recognition is wanted: its own switch and the master one. */
+    val motionWanted: Boolean get() = autoStart && motionStart
 }
 
 /** Settings shared by the screen and the drive service; [init] is cheap and idempotent. */
@@ -61,6 +66,7 @@ object UserSettings {
             autoStop = p.getBoolean("auto_stop", true),
             raiseVolume = p.getBoolean("raise_volume", true),
             autoRain = p.getBoolean("auto_rain", true),
+            autoStart = p.getBoolean("auto_start", true),
             motionStart = p.getBoolean("motion_start", true),
             cars = readCars(p.getString("cars", null))
                 // The single car of earlier versions.
@@ -84,6 +90,7 @@ object UserSettings {
             putBoolean("auto_stop", next.autoStop)
             putBoolean("raise_volume", next.raiseVolume)
             putBoolean("auto_rain", next.autoRain)
+            putBoolean("auto_start", next.autoStart)
             putBoolean("motion_start", next.motionStart)
             putString("cars", JSONArray(next.cars.map { JSONObject().put("id", it.associationId).put("name", it.name) }).toString())
             putBoolean("spotify_canvas", next.spotifyCanvas)

@@ -15,7 +15,8 @@ struct CarConnectedIntent: AppIntent, LiveActivityIntent {
 
     func perform() async throws -> some IntentResult {
         #if ZENITH_APP
-        await MainActor.run { DriveEngine.shared.start(origin: .car) }
+        // "Démarrage automatique" off in the settings: the automation stays, the drive does not start.
+        await MainActor.run { if SettingsStore.shared.autoStart { DriveEngine.shared.start(origin: .car) } }
         #endif
         return .result()
     }
