@@ -30,6 +30,10 @@ import zenith.core.SpeedStabilizer
 import zenith.core.SpotifyDuck
 import zenith.core.SpotifyTrack
 import zenith.core.Weather
+import zenith.core.Island
+import zenith.core.Gauge
+import zenith.core.Daylight
+import zenith.core.TripStats
 
 /**
  * Entry points for the Swift app. A Kotlin exception reaching Swift aborts the app, so every call
@@ -187,6 +191,52 @@ object Bridge {
     fun uiGain(volume: Int, max: Int): Float = Loudness.uiGain(volume, max)
 
     /** May a drive start by itself, [sinceMs] after a stop by hand (0: none)? */
+    // ---- Alert island, speed ring, night, trip summary ----
+
+    /** [passedAgoMs]: -1 when no radar was passed. 0 none, 1 approach, 2 slow down, 3 section, 4 passed. */
+    fun islandState(alert: Boolean, overLimit: Boolean, section: Boolean, passedAgoMs: Long): Int =
+        Island.state(alert, overLimit, section, passedAgoMs).ordinal
+
+    fun islandPassedMs(): Long = Island.PASSED_MS
+
+    fun islandProgress(distanceM: Double, startM: Double): Float = Island.progress(distanceM, startM)
+
+    /** -1 for an unknown speed or limit. */
+    fun islandOverText(speedKmh: Int, limitKmh: Int): String? =
+        Island.overText(speedKmh.takeIf { it >= 0 }, limitKmh.takeIf { it >= 0 })
+
+    fun gaugeFill(speedKmh: Int, limitKmh: Int): Float = Gauge.fill(speedKmh.takeIf { it >= 0 }, limitKmh.takeIf { it >= 0 })
+
+    /** -1 without a limit. */
+    fun gaugeTick(limitKmh: Int): Float = Gauge.tick(limitKmh.takeIf { it >= 0 }) ?: -1f
+
+    fun gaugeSweepDeg(): Float = Gauge.SWEEP_DEG
+
+    fun gaugeStartDeg(): Float = Gauge.START_DEG
+
+    fun isNight(lat: Double, lon: Double, timeMs: Long): Boolean =
+        runCatching { Daylight.isNight(LatLon(lat, lon), timeMs) }.getOrDefault(false)
+
+    fun nightDim(): Float = Daylight.NIGHT_DIM
+
+    fun tripStats(): TripStats = TripStats()
+
+    /** [speedKmh] -1 when unknown; [lat] / [lon] NaN when no position. */
+    fun tripAdd(trip: TripStats, timeMs: Long, lat: Double, lon: Double, speedKmh: Int, radarsPassed: Int) {
+        runCatching {
+            val pos = if (lat.isNaN() || lon.isNaN()) null else LatLon(lat, lon)
+            trip.add(timeMs, pos, speedKmh.takeIf { it >= 0 }, radarsPassed)
+        }
+    }
+
+    /** "23 km · 32 min"; null for a drive too short. */
+    fun tripHeadline(trip: TripStats): String? = runCatching { trip.summary()?.headline() }.getOrNull()
+
+    /** "4 radars passés · 92 km/h au plus"; null for a drive too short. */
+    fun tripDetails(trip: TripStats): String? = runCatching { trip.summary()?.details() }.getOrNull()
+
+    fun tripShownMs(): Long = TripStats.SHOWN_MS
+
     fun autoStartAllowed(sinceMs: Long, nowMs: Long): Boolean = AutoStartPause.allows(sinceMs, nowMs)
 
     fun autoStartPausesOnStop(startedByItself: Boolean): Boolean = AutoStartPause.pausesOnStop(startedByItself)

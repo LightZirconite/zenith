@@ -21,7 +21,7 @@ object Weather {
         "https://api.open-meteo.com/v1/forecast?latitude=${oneDecimal(p.lat)}&longitude=${oneDecimal(p.lon)}&current=precipitation,weather_code"
 
     /** [x] with one decimal, half away from zero ("%.1f" without java.util.Formatter, absent on iOS). */
-    private fun oneDecimal(x: Double): String {
+    internal fun oneDecimal(x: Double): String {
         val tenths = floor(abs(x) * 10 + 0.5).toLong()
         val sign = if (x < 0 || 1.0 / x < 0) "-" else ""
         return "$sign${tenths / 10}.${tenths % 10}"
