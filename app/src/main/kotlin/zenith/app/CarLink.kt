@@ -71,12 +71,15 @@ object CarLink {
     /** The car connected: start the drive, or ask for a tap when Android forbids a background start. */
     fun carConnected(context: Context) {
         UserSettings.init(context)
-        if (!UserSettings.state.value.autoStart) return
+        if (!UserSettings.state.value.autoStart || !UserSettings.autoStartAllowed(context)) return
         val started = runCatching { DriveService.startAuto(context) }.isSuccess
         if (!started) notifyTapToStart(context)
     }
 
-    fun carDisconnected(context: Context) = DriveService.stopIfStartedBy(context, DriveOrigin.CAR)
+    fun carDisconnected(context: Context) {
+        UserSettings.resumeAutoStart(context)
+        DriveService.stopIfStartedBy(context, DriveOrigin.CAR)
+    }
 
     /** Fallback notification: one tap starts the drive. */
     fun notifyTapToStart(context: Context, title: String = "Voiture connectée") {

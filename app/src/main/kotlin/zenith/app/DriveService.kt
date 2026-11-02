@@ -105,6 +105,8 @@ class DriveService : Service(), LocationListener {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
+            // "Arrêter" in the notification.
+            if (started) UserSettings.stoppedByHand(this, origin)
             stopSelf()
             return START_NOT_STICKY
         }
@@ -548,8 +550,11 @@ class DriveService : Service(), LocationListener {
         /** A vehicle exit received while fast stops the drive at the first slow fix within this delay. */
         private const val VEHICLE_EXIT_GRACE_MS = 3 * 60_000L
 
-        fun start(context: Context) =
+        /** Started by hand: a pause of the automatic start (stop by hand earlier) is over. */
+        fun start(context: Context) {
+            UserSettings.resumeAutoStart(context)
             ContextCompat.startForegroundService(context, Intent(context, DriveService::class.java))
+        }
 
         /** Car connected (paired Bluetooth): throws when Android forbids the background start. */
         fun startAuto(context: Context) {

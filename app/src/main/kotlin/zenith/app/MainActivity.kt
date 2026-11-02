@@ -319,7 +319,10 @@ class MainActivity : ComponentActivity() {
                     onStart = {
                         if (permissions.location) DriveService.start(context) else launcher.launch(Permissions.locationPermissions())
                     },
-                    onStop = { DriveService.stop(context) },
+                    onStop = {
+                        if (DriveState.running.value) UserSettings.stoppedByHand(context, DriveState.origin.value)
+                        DriveService.stop(context)
+                    },
                     onInstallUpdate = {
                         if (permissions.installs) Updater.install(context) else openSettings(Permissions.installsIntent(context))
                     },

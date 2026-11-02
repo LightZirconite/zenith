@@ -713,16 +713,19 @@ fun DriveScreen(
                     Spacer(Modifier.width(20.dp))
                     Column(
                         // A wide car screen: the column keeps a sensible width, centered in its room.
+                        // As upright: the speed in the middle of the room left, the music, then the
+                        // buttons resting at the bottom, level with the alerts on the left.
                         Modifier.weight(1f - LAND_SPLIT).fillMaxHeight().wrapContentWidth().widthIn(max = 520.dp),
-                        verticalArrangement = Arrangement.Center,
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        AnimatedVisibility(
-                            visible = view == HomeView.DRIVE,
-                            enter = fadeIn(tween(250, delayMillis = 50)) + scaleIn(spring(dampingRatio = 0.65f, stiffness = Spring.StiffnessMediumLow), initialScale = 1.5f),
-                            exit = fadeOut(tween(250)) + scaleOut(tween(400), targetScale = 0.85f),
-                        ) {
-                            Dashboard(snapshot, compact = !tall)
+                        Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            AnimatedVisibility(
+                                visible = view == HomeView.DRIVE,
+                                enter = fadeIn(tween(250, delayMillis = 50)) + scaleIn(spring(dampingRatio = 0.65f, stiffness = Spring.StiffnessMediumLow), initialScale = 1.5f),
+                                exit = fadeOut(tween(250)) + scaleOut(tween(400), targetScale = 0.85f),
+                            ) {
+                                Dashboard(snapshot, compact = !tall)
+                            }
                         }
                         Spacer(Modifier.height(12.dp))
                         musicCard()

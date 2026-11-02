@@ -39,6 +39,12 @@ final class SettingsStore {
     /** iOS: the small window opens by itself when Zenith goes to the background during a drive. */
     var autoPip: Bool { didSet { defaults.set(autoPip, forKey: "auto_pip") } }
 
+    /**
+     * When "Arrêter" was touched on a drive that started by itself (ms since 1970, 0: none): no
+     * automatic start until the trip is over (core AutoStartPause).
+     */
+    var autoPauseSince: Int64 { didSet { defaults.set(autoPauseSince, forKey: "auto_pause_since") } }
+
     /** The start by riding is wanted: its own switch and the master one. */
     var motionWanted: Bool { autoStart && motionStart }
 
@@ -53,6 +59,7 @@ final class SettingsStore {
         raiseVolume = bool("raise_volume", true)
         autoStop = bool("auto_stop", true)
         autoStart = bool("auto_start", true)
+        autoPauseSince = (d.object(forKey: "auto_pause_since") as? NSNumber)?.int64Value ?? 0
         motionStart = bool("motion_start", true)
         autoRain = bool("auto_rain", true)
         spotifyCanvas = bool("spotify_canvas", true)

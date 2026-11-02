@@ -64,7 +64,7 @@ object Motion {
     /** The phone started riding in a vehicle: start the drive, or ask for a tap if Android refuses. */
     fun vehicleEntered(context: Context) {
         UserSettings.init(context)
-        if (!UserSettings.state.value.motionWanted || DriveState.running.value) return
+        if (!UserSettings.state.value.motionWanted || DriveState.running.value || !UserSettings.autoStartAllowed(context)) return
         val started = runCatching { DriveService.startMotion(context) }.isSuccess
         if (!started) CarLink.notifyTapToStart(context, "En voiture ?")
     }
@@ -92,7 +92,11 @@ class MotionReceiver : BroadcastReceiver() {
             .maxByOrNull { it.elapsedRealTimeNanos } ?: return
         when (last.transitionType) {
             ActivityTransition.ACTIVITY_TRANSITION_ENTER -> Motion.vehicleEntered(context)
-            ActivityTransition.ACTIVITY_TRANSITION_EXIT -> DriveService.motionExit(context)
+            ActivityTransition.ACTIVITY_TRANSITION_EXIT -> {
+                // The trip is over: a stop by hand during it no longer holds the automatic start.
+                UserSettings.resumeAutoStart(context)
+                DriveService.motionExit(context)
+            }
         }
     }
 

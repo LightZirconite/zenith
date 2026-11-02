@@ -65,6 +65,8 @@ final class DriveEngine: NSObject, CLLocationManagerDelegate {
 
     func start(origin: DriveOrigin = .hand) {
         guard !running else { return }
+        // Started by hand: a pause of the automatic start (stop by hand earlier) is over.
+        if origin == .hand { settings.autoPauseSince = 0 }
         running = true
         self.origin = origin
         ending = false
@@ -142,6 +144,24 @@ final class DriveEngine: NSObject, CLLocationManagerDelegate {
         UIApplication.shared.isIdleTimerDisabled = false
         model.stopped()
     }
+
+    /**
+     * "Arrêter" touched (screen, Live Activity, Siri): on a drive that started by itself, no
+     * automatic start again until the trip is over (a passenger, a driving lesson).
+     */
+    func stopByHand() {
+        guard running else { return }
+        if Bridge.shared.autoStartPausesOnStop(startedByItself: origin == .motion || origin == .car) {
+            settings.autoPauseSince = Self.nowMs()
+        }
+        stop()
+    }
+
+    /** May a drive start by itself now (no stop by hand during this trip)? */
+    var autoStartAllowed: Bool { Bridge.shared.autoStartAllowed(sinceMs: settings.autoPauseSince, nowMs: Self.nowMs()) }
+
+    /** The trip is over (out of the vehicle, car disconnected): automatic starts again. */
+    func tripEnded() { settings.autoPauseSince = 0 }
 
     /** The car disconnected: ends the drive only if [origin] started it (a drive started by hand goes on). */
     func stopIfStartedBy(_ origin: DriveOrigin) {

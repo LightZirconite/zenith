@@ -7,6 +7,7 @@ import zenith.core.CanvasService
 import zenith.core.Cockpit
 import zenith.core.DemoDrive
 import zenith.core.DemoScenario
+import zenith.core.AutoStartPause
 import zenith.core.DriveVolume
 import zenith.core.DriverProfile
 import zenith.core.DrivingSession
@@ -184,6 +185,11 @@ object Bridge {
     fun restoreVolumeTo(before: Int, raisedTo: Int, now: Int): Int = DriveVolume.restoreTo(before, raisedTo, now) ?: -1
 
     fun uiGain(volume: Int, max: Int): Float = Loudness.uiGain(volume, max)
+
+    /** May a drive start by itself, [sinceMs] after a stop by hand (0: none)? */
+    fun autoStartAllowed(sinceMs: Long, nowMs: Long): Boolean = AutoStartPause.allows(sinceMs, nowMs)
+
+    fun autoStartPausesOnStop(startedByItself: Boolean): Boolean = AutoStartPause.pausesOnStop(startedByItself)
 
     fun tapGain(volume: Int, max: Int): Float = Loudness.tapGain(volume, max)
 
