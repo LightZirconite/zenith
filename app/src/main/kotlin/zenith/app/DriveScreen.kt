@@ -51,8 +51,6 @@ import androidx.compose.foundation.layout.statusBarsIgnoringVisibility
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.IntrinsicSize
-import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.widthIn
@@ -670,19 +668,17 @@ fun DriveScreen(
                     }
                 }
             } else {
-                // Landscape: the shortcuts and Stop on one line, the same height, side by side.
-                val shortcuts = running && landed && navApps.isNotEmpty() && !cruising
-                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    AnimatedVisibility(
-                        visible = shortcuts,
-                        modifier = Modifier.weight(navApps.size.coerceAtLeast(1).toFloat()).fillMaxHeight(),
-                        enter = fadeIn(tween(400, delayMillis = 350)) + scaleIn(spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow), initialScale = 0.9f),
-                        exit = fadeOut(tween(250)),
-                    ) {
-                        NavApps(navApps, onOpenNavApp, Modifier.fillMaxSize(), fillHeight = true)
-                    }
-                    StartStop(running, onStart, onStop, compact = running && cruising, modifier = Modifier.weight(1f).fillMaxHeight())
-                }
+                // Landscape: Stop at the bottom of the right column, the apps level with it on the left.
+                val rowHeight by animateDpAsState(
+                    when {
+                        !running -> 58.dp
+                        cruising -> 44.dp
+                        else -> 52.dp
+                    },
+                    spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessLow),
+                    label = "landButton",
+                )
+                StartStop(running, onStart, onStop, compact = running && cruising, modifier = Modifier.fillMaxWidth().height(rowHeight), fixedHeight = true)
             }
             // The map's credits, required, in one short line (the full ones are in the settings).
             AnimatedVisibility(visible = !running, enter = if (comingHome) BottomInLate else BottomIn, exit = BottomOut) {
@@ -728,6 +724,17 @@ fun DriveScreen(
                             verticalArrangement = Arrangement.Center,
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) { homeView() }
+                        // Waze and Maps at the bottom on the left, on the same line and height as Stop.
+                        AnimatedVisibility(
+                            visible = running && landed && navApps.isNotEmpty() && !cruising,
+                            modifier = Modifier.align(Alignment.Start),
+                            enter = fadeIn(tween(400, delayMillis = 350)) + slideInVertically(spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow)) { it / 2 },
+                            exit = fadeOut(tween(250)) + slideOutVertically(tween(300)) { it / 2 },
+                        ) {
+                            Row(Modifier.height(52.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                for (app in navApps) NavAppButton(app, onOpenNavApp, Modifier.width(110.dp).fillMaxHeight())
+                            }
+                        }
                     }
                     Spacer(Modifier.width(20.dp))
                     Column(
@@ -966,22 +973,6 @@ private fun TripCard(summary: TripSummary?, comingHome: Boolean) {
             Spacer(Modifier.height(2.dp))
             Text(trip.headline(), color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
             Text(trip.details(), color = Dim, fontSize = 14.sp)
-        }
-    }
-}
-
-/** Shortcuts to the navigation apps installed: Zenith keeps alerting from behind them. */
-@Composable
-private fun NavApps(
-    apps: List<NavApp>,
-    onOpen: (NavApp) -> Unit,
-    modifier: Modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
-    /** In a row of fixed height (landscape, beside Stop): each button takes it all. */
-    fillHeight: Boolean = false,
-) {
-    Row(modifier, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        for (app in apps) {
-            NavAppButton(app, onOpen, Modifier.weight(1f).then(if (fillHeight) Modifier.fillMaxHeight() else Modifier.height(52.dp)))
         }
     }
 }
