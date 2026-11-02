@@ -127,19 +127,33 @@ final class Globe {
         }
         var lit = ctx
         lit.opacity = alpha
-        // Atmosphere: a blue halo just outside the edge.
-        lit.fill(Globe.circle(center, r * 1.5), with: .radialGradient(Globe.atmosphere, center: center, startRadius: 0, endRadius: r * 1.5))
+        // Atmosphere: a wide soft glow, stronger on the sunlit side (upper left); no line at the edge.
+        lit.fill(Globe.circle(center, r * 1.6), with: .radialGradient(Globe.atmosphere, center: center, startRadius: 0, endRadius: r * 1.6))
+        let sunSide = CGPoint(x: cx - 0.18 * r, y: cy - 0.2 * r)
+        lit.fill(Globe.circle(sunSide, r * 1.35), with: .radialGradient(Globe.sunRim, center: sunSide, startRadius: 0, endRadius: r * 1.35))
+        // The ocean, lit from the upper left, with the sun's soft glint on it.
         lit.fill(
             Globe.circle(center, r),
             with: .radialGradient(Globe.ocean, center: CGPoint(x: cx - 0.45 * r, y: cy - 0.5 * r), startRadius: 0, endRadius: 1.9 * r)
         )
+        let glint = CGPoint(x: cx - 0.4 * r, y: cy - 0.42 * r)
+        lit.fill(Globe.circle(glint, 0.36 * r), with: .radialGradient(Globe.glint, center: glint, startRadius: 0, endRadius: 0.36 * r))
         // Dots grow as the globe nears, up to a point: the dive reads as halftone rushing past.
         let dot = min(max(r * 0.019, 0.4), 7)
         let shades = project(cx: cx, cy: cy, r: r, dot: dot)
-        for s in 0..<4 where !shades[s].isEmpty {
+        for s in 0..<3 where !shades[s].isEmpty {
             var g = ctx
             g.opacity = alpha * Globe.shadeAlpha[s]
-            g.fill(shades[s], with: .color(s == 3 ? Globe.cityLight : Globe.landColor))
+            g.fill(shades[s], with: .color(s == 0 ? Globe.landLit : Globe.landColor))
+        }
+        // The night side: a soft shadow over the lower right, which gives the globe its roundness;
+        // the city lights shine through it.
+        let night = CGPoint(x: cx - 0.55 * r, y: cy - 0.6 * r)
+        lit.fill(Globe.circle(center, r), with: .radialGradient(Globe.nightShade, center: night, startRadius: 0, endRadius: 2.1 * r))
+        if !shades[3].isEmpty {
+            var g = ctx
+            g.opacity = alpha * Globe.shadeAlpha[3]
+            g.fill(shades[3], with: .color(Globe.cityLight))
         }
         if let b = beacon {
             if orbits > 0.01 {
@@ -398,6 +412,8 @@ final class Globe {
     private static let oceanDark = rgb(0x020814)
     private static let atmosphereBlue = rgb(0x4DA8FF)
     private static let landColor = rgb(0xD2EAFF)
+    private static let landLit = rgb(0xF2F8FF)
+    private static let sunGlow = rgb(0x9FD0FF)
     private static let cityLight = rgb(0xFFB35C)
     private static let blue = rgb(0x3D8BFF)
     private static let lightBlue = rgb(0x5AA2FF)
@@ -407,14 +423,27 @@ final class Globe {
     private static let panelEdge = rgb(0x9CC2F0)
 
     /** Bright day, dim day, edge or night, city light. */
-    private static let shadeAlpha: [Double] = [0.95, 0.6, 0.22, 0.75]
+    private static let shadeAlpha: [Double] = [0.97, 0.62, 0.22, 0.85]
 
     private static let atmosphere = Gradient(stops: [
-        .init(color: atmosphereBlue.opacity(0.35), location: 0),
-        .init(color: atmosphereBlue.opacity(0.35), location: 0.64),
-        .init(color: atmosphereBlue.opacity(0.22), location: 0.69),
-        .init(color: atmosphereBlue.opacity(0.06), location: 0.8),
+        .init(color: atmosphereBlue.opacity(0.3), location: 0),
+        .init(color: atmosphereBlue.opacity(0.3), location: 0.6),
+        .init(color: atmosphereBlue.opacity(0.18), location: 0.66),
+        .init(color: atmosphereBlue.opacity(0.05), location: 0.8),
         .init(color: .clear, location: 1),
+    ])
+    private static let sunRim = Gradient(stops: [
+        .init(color: .clear, location: 0),
+        .init(color: .clear, location: 0.62),
+        .init(color: sunGlow.opacity(0.32), location: 0.72),
+        .init(color: .clear, location: 1),
+    ])
+    private static let glint = Gradient(colors: [.white.opacity(0.2), .clear])
+    private static let nightShade = Gradient(stops: [
+        .init(color: .clear, location: 0),
+        .init(color: .clear, location: 0.55),
+        .init(color: .black.opacity(0.45), location: 0.85),
+        .init(color: .black.opacity(0.7), location: 1),
     ])
     private static let ocean = Gradient(stops: [
         .init(color: oceanLit, location: 0),

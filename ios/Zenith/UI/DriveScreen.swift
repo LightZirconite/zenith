@@ -146,7 +146,21 @@ struct DriveScreen: View {
         }
         .background(Color.black.ignoresSafeArea())
         // The flight takes the whole screen: the status bar folds away until the map is there.
-        .immersiveBars(hidden: (model.running && !flight.flightOver) || homeBound)
+        // The flight takes the whole screen, and so does the island: the time and battery would sit
+        // over it, so they step aside while it says something (as iOS does for its own island).
+        .immersiveBars(hidden: (model.running && !flight.flightOver) || homeBound || islandUp)
+    }
+
+    /** The island is saying something (approach, slow down, section, passed). */
+    private var islandUp: Bool {
+        guard model.running && flight.landed else { return false }
+        let alert = model.snapshot?.alerts.first
+        return Cockpit.islandMode(
+            alert: alert != nil,
+            overLimit: alert?.overLimit == true,
+            section: model.snapshot?.section != nil,
+            passedAgoMs: passedRecent ? 0 : -1
+        ) != .idle
     }
 
     /** Everything drawn across the whole screen, behind and over the column. */
@@ -891,7 +905,8 @@ extension DriveScreen {
         static let rushPast = fade(tween(450)).combined(with: zoom(2.4, tween(600)))
         static let landing = fade(tween(250, delay: 50)).combined(with: zoom(1.5, spring(0.65, 400)))
         static let stepBack = fade(tween(250)).combined(with: zoom(0.85, tween(400)))
-        static let homecomingIn = fade(tween(500, delay: 800)).combined(with: zoom(0.6, easeOutBack(800, delay: 700)))
+        /** The take-off backwards: home comes back from the viewer's side, the way it left, and lands with a little give. */
+        static let homecomingIn = fade(tween(350, delay: 950)).combined(with: zoom(2.4, easeOutBack(950, delay: 900)))
         static let cutShortIn = fade(tween(700, delay: 350)).combined(with: zoom(0.55, spring(0.75, 50)))
         /** The drive's cards step back and fade with the scene. */
         static let driveOut = fade(tween(220)).combined(with: zoom(0.9, tween(320)))
@@ -1078,6 +1093,8 @@ extension DriveScreen {
     fileprivate struct IdleHome: View {
         let data: DataStatus
         @State private var counted = 0.0
+        /** Each time home appears (opening, back from a drive), the red glow blooms wide and settles. */
+        @State private var bloom = 1.0
 
         var body: some View {
             VStack(spacing: 0) {
@@ -1086,8 +1103,8 @@ extension DriveScreen {
                         Circle()
                             .fill(RadialGradient(colors: [Ink.red, Ink.red.opacity(0)], center: .center, startRadius: 0, endRadius: 75))
                             .frame(width: 150, height: 150)
-                            .opacity(up ? 0.28 : 0.10)
-                            .scaleEffect(up ? 1.04 : 0.96)
+                            .opacity((up ? 0.28 : 0.10) + 0.35 * bloom)
+                            .scaleEffect((up ? 1.04 : 0.96) * (1 + 0.7 * bloom))
                         // The icon drawing leaves a margin for the masks: drawn larger here so the
                         // dial keeps its size on screen.
                         ZenithLogo()
@@ -1111,7 +1128,10 @@ extension DriveScreen {
                 RadarCount(value: counted, total: data.radarCount, updated: data.radarsUpdated)
                     .animation(Moves.tween(1_400), value: counted)
             }
-            .onAppear { counted = Double(data.radarCount) }
+            .onAppear {
+                counted = Double(data.radarCount)
+                withAnimation(Moves.tween(1_600).delay(0.9)) { bloom = 0 }
+            }
             .onChange(of: data.radarCount) { _, n in counted = Double(n) }
         }
     }

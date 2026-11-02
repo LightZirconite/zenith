@@ -129,9 +129,10 @@ private const val MAX_LAG_NS = 350_000_000L
  * swinging home dead center on the way, until it fills the screen; a white flash and the map opens
  * beneath it ([onLanded]), then the stars fade out ([onGone]).
  *
- * [comingHome]: a drive just ended. Behind the scene fading away, the Earth, home in front, drifts
- * back from the viewer and fades into the stars, which slow down to the calm of home. Soft, short,
- * nothing crossing the screen.
+ * [comingHome]: a drive just ended: the take-off backwards. Behind the scene fading away, the stars
+ * stream back past the viewer toward the heart, fast then slowing; the Earth, home in front and
+ * still turning, falls away on a curve to the upper right and dwindles into a point of light among
+ * them; home comes back from the viewer's side ([Back]). No closing circle, no flash.
  *
  * Both follow their sound ([heardAt]: when it is first heard, Bluetooth included when Android knows),
  * so the boom lands on the flash.
@@ -267,7 +268,19 @@ fun Starfield(
                     ),
                 )
             }
-            globe.draw(this, cx, cy, base * b.size, alpha = b.globe, orbits = 0f, t = t, visible = 0, used = 0, lock = 1f)
+            // Off the centre: the Earth falls away on a curve, up and to the right, as the stars stream back.
+            val gx = cx + size.width * 0.3f * b.drift
+            val gy = cy - size.height * 0.16f * b.drift + size.height * 0.05f * b.drift * (1f - b.drift)
+            globe.draw(this, gx, gy, base * b.size, alpha = b.globe, orbits = 0f, t = t, visible = 0, used = 0, lock = 1f)
+            // What is left of it: a point of light, fading among the stars.
+            if (b.spark > 0.01f) {
+                drawCircle(
+                    Brush.radialGradient(listOf(StarBlue.copy(alpha = 0.7f * b.spark), Color.Transparent), center = Offset(gx, gy), radius = 18 * density),
+                    radius = 18 * density,
+                    center = Offset(gx, gy),
+                )
+                drawCircle(Color.White.copy(alpha = b.spark), radius = 1.8f * density, center = Offset(gx, gy))
+            }
         }
         // The jump's flash: white at the heart, blue at the edges, at its brightest as the map opens.
         val flash = if (arriveMs >= 0f) exp(-((a.dive - LANDING) / 0.09f).pow(2)) else 0f
@@ -298,14 +311,20 @@ private class Back(ms: Float) {
     private val recede = if (on) (ms / RECEDE_MS).coerceIn(0f, 1f) else 0f
     private val vanish = if (on) ((ms - RECEDE_MS) / (HOMECOMING_MS - RECEDE_MS)).coerceIn(0f, 1f) else 0f
 
-    /** The stars drift gently back toward the heart, then rest. */
-    val speed = if (on) -3f * (1f - recede).pow(2) else 0f
-    val tube = if (on) 0.6f * (1f - smooth(vanish)) else 0f
-    val glow = if (on) 0.5f * (1f - recede).pow(2) * smooth(ms / CLOSE_MS) else 0f
+    /** The stars stream back toward the heart, fast at first (the take-off backwards), then rest. */
+    val speed = if (on) -9f * (1f - recede).pow(1.6f) * smooth(ms / 250f) else 0f
+    val tube = if (on) 0.75f * (1f - smooth(vanish)) else 0f
+    val glow = if (on) 0.35f * (1f - recede).pow(2) * smooth(ms / CLOSE_MS) else 0f
 
-    /** The Earth's radius in globe radii: near behind the scene, its size in the tunnel, then a point. */
-    val size = (1f + 2.5f * (1f - recede).pow(2)) * (1f - 0.8f * smooth(vanish))
-    val globe = if (on) smooth((ms - 120f) / (CLOSE_MS - 120f)) * (1f - smooth(vanish)) else 0f
+    /** How far the Earth has gone along its curve, up and to the right, 0 to 1. */
+    val drift = if (on) smooth(recede * 1.1f) else 0f
+
+    /** The Earth's radius in globe radii: near behind the scene, then smaller and smaller as it falls away. */
+    val size = (0.35f + 3.2f * (1f - recede).pow(2.2f)) * (1f - smooth(vanish * 1.4f))
+    val globe = if (on) smooth((ms - 120f) / (CLOSE_MS - 120f)) * (1f - smooth(vanish * 1.4f)) else 0f
+
+    /** The point of light it leaves, lit as it dwindles, gone with the last of the way back. */
+    val spark = if (on) smooth(vanish * 2f) * (1f - smooth((vanish - 0.5f) * 2f)) else 0f
 }
 
 private fun smooth(x: Float): Float {

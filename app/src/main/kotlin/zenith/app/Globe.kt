@@ -23,6 +23,8 @@ private val OceanMid = Color(0xFF0B2B55)
 private val OceanDark = Color(0xFF020814)
 private val Atmosphere = Color(0xFF4DA8FF)
 private val Land = Color(0xFFD2EAFF)
+private val LandLit = Color(0xFFF2F8FF)
+private val SunGlow = Color(0xFF9FD0FF)
 private val CityLight = Color(0xFFFFB35C)
 private val Locked = Color(0xFF30D158)
 private val Seeking = Color(0xFFE6F0FF)
@@ -158,41 +160,82 @@ internal class Globe {
         val center = Offset(cx, cy)
         val beacon = rotated(home).takeIf { it[2] > 0.12f }?.let { Offset(cx + it[0] * r, cy - it[1] * r) }
         if (orbits > 0.01f) satellites(back = true, cx, cy, r, alpha * orbits, t, visible, used, null)
-        // Atmosphere: a blue halo just outside the edge.
+        // Atmosphere: a wide soft glow, stronger on the sunlit side (upper left); no line at the edge.
         drawCircle(
             Brush.radialGradient(
-                0f to Atmosphere.copy(alpha = 0.35f * alpha),
-                0.64f to Atmosphere.copy(alpha = 0.35f * alpha),
-                0.69f to Atmosphere.copy(alpha = 0.22f * alpha),
-                0.8f to Atmosphere.copy(alpha = 0.06f * alpha),
+                0f to Atmosphere.copy(alpha = 0.3f * alpha),
+                0.6f to Atmosphere.copy(alpha = 0.3f * alpha),
+                0.66f to Atmosphere.copy(alpha = 0.18f * alpha),
+                0.8f to Atmosphere.copy(alpha = 0.05f * alpha),
                 1f to Color.Transparent,
                 center = center,
-                radius = r * 1.5f,
+                radius = r * 1.6f,
             ),
-            radius = r * 1.5f,
+            radius = r * 1.6f,
             center = center,
         )
+        val sunSide = Offset(cx - 0.18f * r, cy - 0.2f * r)
+        drawCircle(
+            Brush.radialGradient(
+                0f to Color.Transparent,
+                0.62f to Color.Transparent,
+                0.72f to SunGlow.copy(alpha = 0.32f * alpha),
+                1f to Color.Transparent,
+                center = sunSide,
+                radius = r * 1.35f,
+            ),
+            radius = r * 1.35f,
+            center = sunSide,
+        )
+        // The ocean, lit from the upper left, with the sun's soft glint on it.
         drawCircle(
             Brush.radialGradient(0f to OceanLit, 0.5f to OceanMid, 1f to OceanDark, center = Offset(cx - 0.45f * r, cy - 0.5f * r), radius = 1.9f * r),
             radius = r,
             center = center,
             alpha = alpha,
         )
+        val glint = Offset(cx - 0.4f * r, cy - 0.42f * r)
+        drawCircle(
+            Brush.radialGradient(listOf(Color.White.copy(alpha = 0.2f * alpha), Color.Transparent), center = glint, radius = 0.36f * r),
+            radius = 0.36f * r,
+            center = glint,
+        )
         project(cx, cy, r)
+        // Dots grow as the globe nears, up to a point: the dive reads as halftone rushing past.
+        val dot = (r * 0.019f).coerceIn(1.2f, 7f * density)
         drawIntoCanvas { canvas ->
-            // Dots grow as the globe nears, up to a point: the dive reads as halftone rushing past.
-            val dot = (r * 0.019f).coerceIn(1.2f, 7f * density)
-            for (s in 0 until 4) {
+            for (s in 0 until 3) {
                 if (shadeCount[s] == 0) continue
-                paint.strokeWidth = if (s == 3) dot * 0.8f else dot
+                paint.strokeWidth = dot
                 val color = when (s) {
-                    0 -> Land.copy(alpha = 0.95f * alpha)
-                    1 -> Land.copy(alpha = 0.6f * alpha)
-                    2 -> Land.copy(alpha = 0.22f * alpha)
-                    else -> CityLight.copy(alpha = 0.75f * alpha)
+                    0 -> LandLit.copy(alpha = 0.97f * alpha)
+                    1 -> Land.copy(alpha = 0.62f * alpha)
+                    else -> Land.copy(alpha = 0.22f * alpha)
                 }
                 paint.color = color.toArgb()
                 canvas.nativeCanvas.drawPoints(shades[s], 0, shadeCount[s] * 2, paint)
+            }
+        }
+        // The night side: a soft shadow sweeping over the lower right, which gives the globe its
+        // roundness; the city lights shine through it.
+        val night = Offset(cx - 0.55f * r, cy - 0.6f * r)
+        drawCircle(
+            Brush.radialGradient(
+                0f to Color.Transparent,
+                0.55f to Color.Transparent,
+                0.85f to Color.Black.copy(alpha = 0.45f * alpha),
+                1f to Color.Black.copy(alpha = 0.7f * alpha),
+                center = night,
+                radius = 2.1f * r,
+            ),
+            radius = r,
+            center = center,
+        )
+        if (shadeCount[3] > 0) {
+            drawIntoCanvas { canvas ->
+                paint.strokeWidth = dot * 0.8f
+                paint.color = CityLight.copy(alpha = 0.85f * alpha).toArgb()
+                canvas.nativeCanvas.drawPoints(shades[3], 0, shadeCount[3] * 2, paint)
             }
         }
         beacon?.let { b ->

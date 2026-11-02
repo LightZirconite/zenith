@@ -240,7 +240,17 @@ private final class FlightScene: ObservableObject {
                 ])
                 ctx.fill(Path(full), with: .radialGradient(glow, center: CGPoint(x: cx, y: cy), startRadius: 0, endRadius: max(w, h) * 0.7))
             }
-            globe.draw(ctx, cx: cx, cy: cy, r: base * b.size, alpha: b.globe, orbits: 0, t: t, visible: 0, used: 0, lock: 1)
+            // Off the centre: the Earth falls away on a curve, up and to the right, as the stars stream back.
+            let gx = cx + w * 0.3 * b.drift
+            let gy = cy - h * 0.16 * b.drift + h * 0.05 * b.drift * (1 - b.drift)
+            globe.draw(ctx, cx: gx, cy: gy, r: base * b.size, alpha: b.globe, orbits: 0, t: t, visible: 0, used: 0, lock: 1)
+            // What is left of it: a point of light, fading among the stars.
+            if b.spark > 0.01 {
+                let spark = Gradient(colors: [FlightPalette.starBlue.opacity(0.7 * b.spark), .clear])
+                let at = CGPoint(x: gx, y: gy)
+                ctx.fill(Path(ellipseIn: CGRect(x: gx - 18, y: gy - 18, width: 36, height: 36)), with: .radialGradient(spark, center: at, startRadius: 0, endRadius: 18))
+                ctx.fill(Path(ellipseIn: CGRect(x: gx - 1.8, y: gy - 1.8, width: 3.6, height: 3.6)), with: .color(.white.opacity(b.spark)))
+            }
         }
         // The jump's flash: white at the heart, blue at the edges, at its brightest as the map opens.
         let x = (a.dive - LANDING) / 0.09
@@ -297,9 +307,15 @@ private struct FlightBack {
     let tube: Double
     let glow: Double
 
-    /** The Earth's radius in globe radii: near behind the scene, its size in the tunnel, then a point. */
+    /** The Earth's radius in globe radii: near behind the scene, then smaller and smaller as it falls away. */
     let size: Double
     let globe: Double
+
+    /** How far the Earth has gone along its curve, up and to the right, 0 to 1. */
+    let drift: Double
+
+    /** The point of light it leaves, lit as it dwindles, gone with the last of the way back. */
+    let spark: Double
 
     init(ms: Double) {
         let on = ms >= 0
@@ -307,11 +323,14 @@ private struct FlightBack {
         let recede = on ? min(max(ms / Double(RECEDE_MS), 0), 1) : 0
         let vanish = on ? min(max((ms - Double(RECEDE_MS)) / Double(HOMECOMING_MS - RECEDE_MS), 0), 1) : 0
         let near = (1 - recede) * (1 - recede)
-        speed = on ? -3 * near : 0
-        tube = on ? 0.6 * (1 - FlightBack.smooth(vanish)) : 0
-        glow = on ? 0.5 * near * FlightBack.smooth(ms / Double(CLOSE_MS)) : 0
-        size = (1 + 2.5 * near) * (1 - 0.8 * FlightBack.smooth(vanish))
-        globe = on ? FlightBack.smooth((ms - 120) / Double(CLOSE_MS - 120)) * (1 - FlightBack.smooth(vanish)) : 0
+        // The take-off backwards: the stars stream back toward the heart, fast at first, then rest.
+        speed = on ? -9 * pow(1 - recede, 1.6) * FlightBack.smooth(ms / 250) : 0
+        tube = on ? 0.75 * (1 - FlightBack.smooth(vanish)) : 0
+        glow = on ? 0.35 * near * FlightBack.smooth(ms / Double(CLOSE_MS)) : 0
+        drift = on ? FlightBack.smooth(recede * 1.1) : 0
+        size = (0.35 + 3.2 * pow(1 - recede, 2.2)) * (1 - FlightBack.smooth(vanish * 1.4))
+        globe = on ? FlightBack.smooth((ms - 120) / Double(CLOSE_MS - 120)) * (1 - FlightBack.smooth(vanish * 1.4)) : 0
+        spark = on ? FlightBack.smooth(vanish * 2) * (1 - FlightBack.smooth((vanish - 0.5) * 2)) : 0
     }
 
     private static func smooth(_ x: Double) -> Double {

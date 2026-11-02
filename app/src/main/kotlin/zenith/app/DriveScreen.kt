@@ -401,7 +401,9 @@ fun DriveScreen(
     // A tablet or car screen across has the height for the full-size speed; a phone across does not.
     val tall = screen.screenHeightDp >= 560
     // The flight takes the whole screen: the status bar (time, battery) folds away until the map is there.
-    ImmersiveBars(hidden = (running && !flightOver) || homeBound)
+    // The island at the top: the time and battery would sit over it, they step aside while it speaks.
+    var islandUp by remember { mutableStateOf(false) }
+    ImmersiveBars(hidden = (running && !flightOver) || homeBound || (running && islandUp))
     val withMusic by animateFloatAsState(if (media != null) 1f else 0f, tween(900), label = "withMusic")
     // The arrival: the whole scene (map and Canvas, loaded during the flight) opens like a portal
     // from the heart of the tunnel at the flash, rushing in from a zoom, with a shock ring. At the
@@ -582,8 +584,10 @@ fun DriveScreen(
                                 .togetherWith(fadeOut(tween(300)) + scaleOut(tween(350), targetScale = 2.6f))
                         // Back from a drive: the speed steps back with the scene; home comes out of
                         // the distance as the Earth drifts away.
+                        // The take-off backwards: home comes back from the viewer's side, the way it
+                        // left, and lands with a little give.
                         initialState == HomeView.DRIVE && targetState == HomeView.IDLE ->
-                            (fadeIn(tween(500, delayMillis = 800)) + scaleIn(tween(800, delayMillis = 700, easing = EaseOutBack), initialScale = 0.6f))
+                            (fadeIn(tween(350, delayMillis = 950)) + scaleIn(tween(950, delayMillis = 900, easing = EaseOutBack), initialScale = 2.4f))
                                 .togetherWith(fadeOut(tween(250)) + scaleOut(tween(400), targetScale = 0.85f))
                         // A flight cut short: home comes out of the distance as the stars slow down.
                         targetState == HomeView.IDLE ->
@@ -766,7 +770,7 @@ fun DriveScreen(
             }
         }
         // Radars, sections and passes: the island out of the camera, over everything.
-        if (running && landed) AlertIsland(snapshot, passedAtMs, passFlash, landscape, Modifier.fillMaxSize())
+        if (running && landed) AlertIsland(snapshot, passedAtMs, passFlash, landscape, Modifier.fillMaxSize(), onShown = { islandUp = it })
         // Home: the settings, a round glass button at the top right.
         AnimatedVisibility(
             visible = !running,
@@ -892,10 +896,16 @@ private fun Idle(data: DataStatus, onDemo: () -> Unit) {
     val breath = rememberInfiniteTransition(label = "logo")
     val scale by breath.animateFloat(0.96f, 1.04f, infiniteRepeatable(tween(2_200), RepeatMode.Reverse), label = "scale")
     val glow by breath.animateFloat(0.10f, 0.28f, infiniteRepeatable(tween(2_200), RepeatMode.Reverse), label = "glow")
+    // Each time home appears (opening, back from a drive), the red glow blooms wide and settles.
+    val bloom = remember { Animatable(1f) }
+    LaunchedEffect(Unit) {
+        delay(900)
+        bloom.animateTo(0f, tween(1_600, easing = FastOutSlowInEasing))
+    }
     Box(contentAlignment = Alignment.Center) {
         Box(
-            Modifier.size(150.dp).scale(scale)
-                .background(Brush.radialGradient(listOf(Red.copy(alpha = glow), Color.Transparent)), CircleShape),
+            Modifier.size(150.dp).scale(scale * (1f + 0.7f * bloom.value))
+                .background(Brush.radialGradient(listOf(Red.copy(alpha = glow + 0.35f * bloom.value), Color.Transparent)), CircleShape),
         )
         // Hidden: a long press on the logo starts the simulated drive. The icon drawing leaves a
         // margin for launcher masks: drawn larger here so the dial keeps its size on screen.

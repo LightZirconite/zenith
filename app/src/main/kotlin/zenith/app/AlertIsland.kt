@@ -32,6 +32,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -86,7 +87,15 @@ private sealed interface IslandContent {
  * Laid over the whole screen (edge to edge); [passedAtMs] changes at each radar or section passed.
  */
 @Composable
-fun AlertIsland(s: DriveSnapshot?, passedAtMs: Long, passedFlash: Boolean, landscape: Boolean, modifier: Modifier = Modifier) {
+fun AlertIsland(
+    s: DriveSnapshot?,
+    passedAtMs: Long,
+    passedFlash: Boolean,
+    landscape: Boolean,
+    modifier: Modifier = Modifier,
+    /** The island starts or stops saying something: the status bar steps aside meanwhile. */
+    onShown: (Boolean) -> Unit = {},
+) {
     val alert = s?.alerts?.firstOrNull()
     var passedShown by remember { mutableStateOf(false) }
     LaunchedEffect(passedAtMs) {
@@ -100,6 +109,9 @@ fun AlertIsland(s: DriveSnapshot?, passedAtMs: Long, passedFlash: Boolean, lands
     if (alert != null && alert.distanceM > start) start = alert.distanceM.toFloat()
     val state = Island.state(alert != null, alert?.overLimit == true, s?.section != null, if (passedShown) 0L else -1L)
     val progress = alert?.let { Island.progress(it.distanceM, start.toDouble()) } ?: 0f
+    val up = state != Island.State.NONE
+    LaunchedEffect(up) { onShown(up) }
+    DisposableEffect(Unit) { onDispose { onShown(false) } }
     val content: IslandContent = when (state) {
         Island.State.APPROACH -> IslandContent.Approach(alert!!, progress, detail(alert, s))
         Island.State.SLOW_DOWN -> IslandContent.SlowDown(alert!!, progress, Island.overText(s?.speedKmh, alert.limitKmh))
