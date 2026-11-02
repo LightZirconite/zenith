@@ -137,7 +137,17 @@ class AlertEngine(
         /** Last distance by road while it was still ahead, and the speed then; null in straight-line mode. */
         var lastRoadM: Double? = null
         var speedAtLastRoadMps = 0.0
+
+        /** Nearest it has been by road, and the distance driven then. */
+        var minRoadM: Double? = null
+        var odometerAtMinRoadM = 0.0
     }
+
+    /**
+     * A track given up: when, and where the radar was expected by road ([roadM], with the distance
+     * driven then, [odometerM]); null [roadM] without a road.
+     */
+    private class Dropped(val timeMs: Long, val odometerM: Double, val roadM: Double?)
 
     /** Where radars stand on the road ahead, for one step. Null fields: no matched road. */
     private class Horizon(
@@ -167,8 +177,15 @@ class AlertEngine(
      * back to them (U-turn at a roundabout onto the other carriageway of the same road).
      */
     private val drivenBy = HashMap<String, Long>()
-    /** Tracks given up (turned off before them): picked up again soon, they are shown, not spoken twice. */
-    private val dropped = HashMap<String, Long>()
+    /**
+     * Tracks given up (turned off before them, or the road to them grew longer). Picked up again
+     * where the drive since then says it should be (the road match hesitated), they are shown, not
+     * spoken twice; picked up nearer by far (a side road announced it, the car went the long way
+     * and now really comes to it), they are announced again.
+     */
+    private val dropped = HashMap<String, Dropped>()
+    /** Distance driven since the start, meters. */
+    private var odometerM = 0.0
     private var section: SectionTracker? = null
     private var sectionLimit = 0
     private var lastPosition: LatLon? = null
@@ -209,11 +226,12 @@ class AlertEngine(
 
         // Standing (red light, jam): heading and road match are noise, so nothing moves on until the car does.
         val moving = motion == Motion.MOVING
+        if (moving) lastPosition?.let { odometerM += Geo.distanceM(it, state.position) }
         advanceSection(state, moving, events)
         recentlyPassed.entries.removeAll { now - it.value > 5 * 60_000 }
         justPassed.entries.removeAll { now - it.value.second > JUST_PASSED_MS }
         drivenBy.entries.removeAll { now - it.value > 5 * 60_000 }
-        dropped.entries.removeAll { now - it.value > DROPPED_MS }
+        dropped.entries.removeAll { now - it.value.timeMs > DROPPED_MS }
         if (moving) for (r in radars.near(state.position, DRIVEN_BY_M)) drivenBy[r.id] = now
         sectionsHandled.entries.removeAll { now - it.value > 30 * 60_000 }
 
@@ -265,7 +283,11 @@ class AlertEngine(
                 }
                 val twin = tracked.values.any { t -> !t.silent && sameCamera(t.radar, r) }
                 tracked[r.id] = Track(r, Geo.distanceM(state.position, r.position), v, silent = twin)
-                if (!twin && r.id !in dropped) events += AlertEvent.Approach(now, r, d, radarLimit(r, roadLimit))
+                val hesitated = dropped[r.id]?.let { x ->
+                    val driven = odometerM - x.odometerM
+                    if (x.roadM == null) driven < DROPPED_NEAR_M else d <= x.roadM - driven + DROPPED_NEAR_M
+                } == true
+                if (!twin && !hesitated) events += AlertEvent.Approach(now, r, d, radarLimit(r, roadLimit))
             }
         }
 
@@ -294,6 +316,10 @@ class AlertEngine(
             if (roadD != null) {
                 t.lastRoadM = roadD
                 t.speedAtLastRoadMps = v
+                if (t.minRoadM.let { it == null || roadD < it }) {
+                    t.minRoadM = roadD
+                    t.odometerAtMinRoadM = odometerM
+                }
             }
             // Gone by: the road distance was nearly used up when it vanished (two fixes at most), or
             // without road, the radar is now behind. Otherwise the car turned off before it.
@@ -308,9 +334,18 @@ class AlertEngine(
                 continue
             }
             if (!ahead && (straight > 150 || leaving)) {
-                // Turned off before reaching it.
+                // Turned off before reaching it, unless the car drove right by it (a red light at the
+                // crossroads, whose road distance vanished a little early): then it is behind, done.
                 iterator.remove()
-                dropped[r.id] = now
+                if (t.minDistanceM < PASSED_NEAR_M) recentlyPassed[r.id] = now else dropped[r.id] = drop(t, now)
+                continue
+            }
+            // Further and further by road: the car goes another way (it came by a side road, or
+            // turned off where the radar stays reachable). Let it go; met again, it is announced anew.
+            val minRoad = t.minRoadM
+            if (roadD != null && minRoad != null && roadD > minRoad + GROWING_M && roadD > triggerM) {
+                iterator.remove()
+                dropped[r.id] = drop(t, now)
                 continue
             }
             val d = roadD ?: straight
@@ -345,6 +380,9 @@ class AlertEngine(
         val ahead = horizon?.let { RoadHorizon.polyline(it.path, settings.aheadDrawnM) }.orEmpty()
         return AlertOutput(events, active, sectionStatus(), upcoming, limitAhead, ahead)
     }
+
+    private fun drop(t: Track, now: Long) =
+        t.minRoadM?.let { Dropped(now, t.odometerAtMinRoadM, it) } ?: Dropped(now, odometerM, null)
 
     private fun horizon(road: RoadCandidate?, network: RoadNetwork?): Horizon? {
         if (road == null || network == null) return null
@@ -514,8 +552,15 @@ class AlertEngine(
         const val DETOUR_FACTOR = 2.5
         const val DETOUR_SLACK_M = 150.0
 
-        /** A track given up and found again within this is not announced again. */
+        /** A track given up and found again within this time and distance is not announced again. */
         const val DROPPED_MS = 120_000L
+        const val DROPPED_NEAR_M = 150.0
+
+        /** A track left after the car came this close to it, in a straight line, was driven by. */
+        const val PASSED_NEAR_M = 40.0
+
+        /** A tracked radar this much further by road than it has been is not on the way any more. */
+        const val GROWING_M = 200.0
 
         /** A radar this close to the car was driven by. */
         const val DRIVEN_BY_M = 40.0

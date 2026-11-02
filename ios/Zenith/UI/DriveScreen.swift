@@ -250,8 +250,12 @@ struct DriveScreen: View {
                     .frame(width: inner * Fades.landSplit)
                     Color.clear.frame(width: 20, height: 1)
                     // A wide car screen: the column keeps a sensible width, centred in its room.
+                    // As upright: the speed in the middle of the room left, the music, then the
+                    // buttons resting at the bottom, level with the alerts on the left.
                     VStack(spacing: 0) {
-                        landscapeSpeed(tall: tall)
+                        // Holds its room even before the speed is there (home, flight).
+                        ZStack { landscapeSpeed(tall: tall) }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                         Color.clear.frame(height: 12)
                         musicCard
                         buttons(landscape: true, rowWidth: min(right, 520))
@@ -1240,7 +1244,7 @@ extension DriveScreen {
             .animation(Moves.spring(1, 1_500), value: running)
             // Only the touch: the flight and the way back are the sound.
             .tap(shape: shape, sound: .silent, lift: 1.04, glow: running ? PressLight : PressShade) {
-                if running { DriveEngine.shared.stop() } else { DriveEngine.shared.start() }
+                if running { DriveEngine.shared.stopByHand() } else { DriveEngine.shared.start() }
             }
             // At home, the button sends out a soft ring of light now and then: the one thing to touch.
             .background {

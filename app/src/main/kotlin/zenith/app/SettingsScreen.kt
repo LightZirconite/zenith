@@ -119,7 +119,8 @@ fun SettingsScreen(
             ToggleRow(
                 "Démarrage automatique",
                 if (settings.autoStart) {
-                    "Zenith peut démarrer seul : quand tu roules en voiture ou quand l'une de tes voitures se connecte."
+                    "Zenith peut démarrer seul : quand tu roules en voiture ou quand l'une de tes voitures se connecte. " +
+                        "Pas toi au volant ? Touche « Arrêter » : il ne redémarre plus seul avant la fin du trajet. Désactiver est déconseillé."
                 } else {
                     "Désactivé : Zenith ne démarre jamais seul, seulement quand tu touches « Démarrer »."
                 },

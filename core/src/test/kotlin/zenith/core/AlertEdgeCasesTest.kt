@@ -151,6 +151,29 @@ class AlertEdgeCasesTest {
     }
 
     @Test
+    fun `radar first announced from a side road is announced again when the car really comes to it`() {
+        // Found by the radar sweep, and seen by the author: shown on the screen, never spoken.
+        // Announced from the cross road, the car turned before the junction, came back on the main
+        // road a minute later: the radar came back silently, as if the road match had hesitated.
+        val network = RoadNetwork(listOf(
+            Sim.seg(1, 1, 2, 0.0 to 0.0, 0.0 to 900.0, limit = 50),
+            Sim.seg(2, 2, 3, 0.0 to 900.0, 0.0 to 1_300.0, limit = 50),
+            Sim.seg(3, 3, 4, 0.0 to 1_300.0, 0.0 to 2_000.0, limit = 50),
+            Sim.seg(4, 5, 6, -800.0 to 1_300.0, -50.0 to 1_300.0, limit = 50),
+            Sim.seg(5, 6, 3, -50.0 to 1_300.0, 0.0 to 1_300.0, limit = 50),
+            Sim.seg(6, 6, 7, -50.0 to 1_300.0, -50.0 to 900.0, limit = 50),
+            Sim.seg(7, 7, 2, -50.0 to 900.0, 0.0 to 900.0, limit = 50),
+        ))
+        val radar = Radar("R", Sim.ll(0.0, 1_500.0), RadarType.FIXED, 50)
+        val path = listOf(-800.0 to 1_300.0, -50.0 to 1_300.0, -50.0 to 900.0, 0.0 to 900.0, 0.0 to 1_700.0)
+        for (seed in seeds) {
+            val snaps = replay(network, listOf(radar), Sim.drive(path, 50 / 3.6, noiseM = 3.0, seed = seed))
+            val onMainRoad = snaps.filter { val p = Sim.frame.toXY(it.position); p.x > -20 && p.y in 950.0..1_480.0 }
+            assertTrue(onMainRoad.any { s -> s.events.any { it is AlertEvent.Approach && it.radar.id == "R" } }, "seed $seed")
+        }
+    }
+
+    @Test
     fun `a late fix during a section is ignored instead of failing`() {
         val tracker = SectionTracker(1_000.0, 90, 0)
         tracker.advance(100.0, 4_000)

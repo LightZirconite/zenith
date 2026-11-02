@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import org.json.JSONArray
 import org.json.JSONObject
+import zenith.core.AutoStartPause
 import zenith.core.DriverProfile
 
 /** A car paired for the automatic start: its CompanionDeviceManager association and its name. */
@@ -101,6 +102,22 @@ object UserSettings {
             remove("car_name")
         }
     }
+
+    /** "Arrêter" touched on a drive that started by itself: no automatic start until the trip is over. */
+    fun stoppedByHand(context: Context, origin: DriveOrigin) {
+        if (!AutoStartPause.pausesOnStop(origin == DriveOrigin.MOTION || origin == DriveOrigin.CAR)) return
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit { putLong(PAUSE_KEY, System.currentTimeMillis()) }
+    }
+
+    /** The trip is over (out of the vehicle, car gone) or a drive started by hand: automatic starts again. */
+    fun resumeAutoStart(context: Context) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit { remove(PAUSE_KEY) }
+    }
+
+    fun autoStartAllowed(context: Context): Boolean =
+        AutoStartPause.allows(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getLong(PAUSE_KEY, 0), System.currentTimeMillis())
+
+    private const val PAUSE_KEY = "auto_pause_since"
 
     private fun readCars(json: String?): List<Car>? = json?.let {
         runCatching {

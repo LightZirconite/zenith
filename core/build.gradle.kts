@@ -51,3 +51,12 @@ tasks.register<JavaExec>("audit") {
     classpath = sourceSets["main"].runtimeClasspath
     workingDir = rootDir
 }
+
+// ./gradlew :core:sweep --args="radars.json dossier_des_tuiles [variantes] [graine]"
+tasks.register<JavaExec>("sweep") {
+    group = "zenith"
+    description = "Chaque radar des tuiles, de chaque côté, avec des variantes de conduite : ratés, annonces tardives, doublons."
+    mainClass = "zenith.core.RadarSweepMain"
+    classpath = sourceSets["main"].runtimeClasspath
+    workingDir = rootDir
+}

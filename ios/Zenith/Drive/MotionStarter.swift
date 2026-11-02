@@ -46,6 +46,8 @@ final class MotionStarter: NSObject, CLLocationManagerDelegate {
         if a.automotive && a.confidence != .low {
             startIfIdle()
         } else if (a.walking || a.running || a.cycling) && a.confidence == .high {
+            // Out of the vehicle: the trip is over.
+            DriveEngine.shared.tripEnded()
             DriveEngine.shared.motionExit()
         }
     }
@@ -65,7 +67,7 @@ final class MotionStarter: NSObject, CLLocationManagerDelegate {
     }
 
     private func startIfIdle() {
-        guard !DriveModel.shared.running else { return }
+        guard !DriveModel.shared.running, DriveEngine.shared.autoStartAllowed else { return }
         DriveEngine.shared.start(origin: .motion)
     }
 }

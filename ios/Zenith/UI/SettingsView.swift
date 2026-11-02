@@ -85,7 +85,8 @@ struct SettingsView: View {
             SettingsToggleRow(
                 title: "Démarrage automatique",
                 text: settings.autoStart
-                    ? "Zenith peut démarrer seul : quand tu roules en voiture ou quand la voiture se connecte (Raccourcis)."
+                    ? "Zenith peut démarrer seul : quand tu roules en voiture ou quand la voiture se connecte (Raccourcis). " +
+                        "Pas toi au volant ? Touche « Arrêter » : il ne redémarre plus seul avant la fin du trajet. Désactiver est déconseillé."
                     : "Désactivé : Zenith ne démarre jamais seul, seulement quand tu touches « Démarrer ». " +
                         "Les automatisations Raccourcis restent, mais ne démarrent plus rien.",
                 on: settings.autoStart

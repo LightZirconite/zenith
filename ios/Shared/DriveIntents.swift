@@ -16,7 +16,10 @@ struct CarConnectedIntent: AppIntent, LiveActivityIntent {
     func perform() async throws -> some IntentResult {
         #if ZENITH_APP
         // "Démarrage automatique" off in the settings: the automation stays, the drive does not start.
-        await MainActor.run { if SettingsStore.shared.autoStart { DriveEngine.shared.start(origin: .car) } }
+        // Nor after "Arrêter" during this trip (a passenger).
+        await MainActor.run {
+            if SettingsStore.shared.autoStart && DriveEngine.shared.autoStartAllowed { DriveEngine.shared.start(origin: .car) }
+        }
         #endif
         return .result()
     }
@@ -29,7 +32,10 @@ struct CarDisconnectedIntent: AppIntent, LiveActivityIntent {
 
     func perform() async throws -> some IntentResult {
         #if ZENITH_APP
-        await MainActor.run { DriveEngine.shared.stopIfStartedBy(.car) }
+        await MainActor.run {
+            DriveEngine.shared.tripEnded()
+            DriveEngine.shared.stopIfStartedBy(.car)
+        }
         #endif
         return .result()
     }
@@ -55,7 +61,7 @@ struct StopDriveIntent: AppIntent, LiveActivityIntent {
 
     func perform() async throws -> some IntentResult {
         #if ZENITH_APP
-        await MainActor.run { DriveEngine.shared.stop() }
+        await MainActor.run { DriveEngine.shared.stopByHand() }
         #endif
         return .result()
     }
