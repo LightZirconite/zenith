@@ -827,20 +827,26 @@ fun rememberWarpSound(): WarpSound {
     return sound
 }
 
-/** Over the limit near a radar: the edges of the whole screen pulse red, the middle stays clear. */
+/**
+ * Over the limit near a radar: a soft red light breathes out of the alert island at the top of the
+ * screen, with no line nor frame (a frame along the edges broke on the phone's rounded corners).
+ */
 @Composable
 fun DangerGlow(on: Boolean, modifier: Modifier = Modifier) {
     val level by animateFloatAsState(if (on) 1f else 0f, tween(400), label = "danger")
     if (level <= 0f) return
     val pulse = rememberInfiniteTransition(label = "dangerPulse")
-    val beat by pulse.animateFloat(0.45f, 1f, infiniteRepeatable(tween(450), RepeatMode.Reverse), label = "dangerBeat")
+    val beat by pulse.animateFloat(0.55f, 1f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "dangerBeat")
     Canvas(modifier) {
+        val red = Color(0xFFFF3B30)
+        val a = level * beat
         drawRect(
             Brush.radialGradient(
-                0.55f to Color.Transparent,
-                1f to Color(0xFFFF3B30).copy(alpha = 0.55f * beat * level),
-                center = center,
-                radius = max(size.width, size.height) * 0.75f,
+                0f to red.copy(alpha = 0.34f * a),
+                0.45f to red.copy(alpha = 0.12f * a),
+                1f to Color.Transparent,
+                center = Offset(size.width / 2, 40.dp.toPx()),
+                radius = max(size.width, size.height * 0.5f) * 0.85f,
             ),
         )
     }

@@ -676,26 +676,33 @@ struct DangerGlow: View {
     let on: Bool
 
     var body: some View {
-        ZStack {
-            if on {
-                ZStack {
-                    // The glow inside the edges, about 56 pt deep.
-                    Rectangle()
-                        .strokeBorder(FlightPalette.red.opacity(0.38), lineWidth: 40)
-                        .blur(radius: 22)
-                    Rectangle()
-                        .strokeBorder(FlightPalette.red.opacity(0.6), lineWidth: 1.5)
+        GeometryReader { geo in
+            ZStack {
+                if on {
+                    // A soft red light out of the Dynamic Island, no line nor frame (a frame along
+                    // the edges broke on the screen's rounded corners).
+                    RadialGradient(
+                        stops: [
+                            .init(color: FlightPalette.red.opacity(0.34), location: 0),
+                            .init(color: FlightPalette.red.opacity(0.12), location: 0.45),
+                            .init(color: .clear, location: 1),
+                        ],
+                        center: UnitPoint(x: 0.5, y: 40 / max(geo.size.height, 1)),
+                        startRadius: 0,
+                        endRadius: max(geo.size.width, geo.size.height * 0.5) * 0.85
+                    )
+                    // From 0.55 up to 1 and back, 900 ms each way.
+                    .phaseAnimator([0.55, 1.0]) { content, beat in
+                        content.opacity(beat)
+                    } animation: { _ in
+                        .easeInOut(duration: 0.9)
+                    }
+                    .transition(.opacity)
                 }
-                .clipped()
-                // From 0.45 up to 1 and back, 450 ms each way.
-                .phaseAnimator([0.45, 1.0]) { content, beat in
-                    content.opacity(beat)
-                } animation: { _ in
-                    .timingCurve(0.4, 0, 0.2, 1, duration: 0.45)
-                }
-                .transition(.opacity)
             }
+            .frame(width: geo.size.width, height: geo.size.height)
         }
+        .ignoresSafeArea()
         .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.4), value: on)
         .allowsHitTesting(false)
     }

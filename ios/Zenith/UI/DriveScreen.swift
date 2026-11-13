@@ -232,7 +232,7 @@ struct DriveScreen: View {
                         removal: Moves.fade(Moves.tween(300)).combined(with: Moves.zoom(1.8, Moves.tween(400)))
                     ))
             }
-            // Too fast near a radar: the edges of the screen pulse red.
+            // Too fast near a radar: a soft red light breathes out of the Dynamic Island.
             DangerGlow(on: f.landed && snapshot?.alerts.first?.overLimit == true)
                 .frame(width: size.width, height: size.height)
                 .allowsHitTesting(false)

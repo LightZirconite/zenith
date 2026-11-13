@@ -1,6 +1,7 @@
 package zenith.app
 
 import android.os.Build
+import android.view.RoundedCorner
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
@@ -43,7 +44,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -63,6 +67,7 @@ import zenith.core.DriveSnapshot
 import zenith.core.Island
 import zenith.core.SectionStatus
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 private val IslandRed = Color(0xFFFF453A)
 private val IslandOrange = Color(0xFFFF9F0A)
@@ -130,6 +135,15 @@ fun AlertIsland(
             ?.firstOrNull { it.top <= 0 && it.width() < view.width / 3 && kotlin.math.abs(it.centerX() - view.width / 2) < view.width / 8 }
     }
     val holeCenterY = with(density) { hole?.exactCenterY()?.toDp() } ?: 22.dp
+    // The screen's own rounded corner: the grown island keeps its corners inside it. Before
+    // Android 12 the radius is unknown: a cautious one (a square screen only gets a little lower).
+    val screenCorner = remember(view) {
+        if (Build.VERSION.SDK_INT >= 31) {
+            with(density) { (view.rootWindowInsets?.getRoundedCorner(RoundedCorner.POSITION_TOP_LEFT)?.radius ?: 0).toDp() }
+        } else {
+            32.dp
+        }
+    }
     val wide = if (landscape) 420.dp else 370.dp
 
     BoxWithConstraints(modifier.fillMaxSize()) {
@@ -157,16 +171,29 @@ fun AlertIsland(
             tween(400),
             label = "islandHalo",
         )
-        val top = (holeCenterY - 15.dp).coerceAtLeast(4.dp)
+        val top = maxOf((holeCenterY - 15.dp).coerceAtLeast(4.dp), cornerSafeTop(maxWidth, width, radius, screenCorner))
         val shape = RoundedCornerShape(radius)
+        val glow = if (state == Island.State.SLOW_DOWN) 0.5f else 0.32f
         Box(
             Modifier
                 .offset { IntOffset(((maxWidth - width) / 2).roundToPx(), top.roundToPx()) }
                 .size(width, height)
                 .alpha(shown)
-                .shadow(if (state == Island.State.NONE) 0.dp else 22.dp, shape, ambientColor = halo, spotColor = halo)
-                .background(Color.Black, shape)
-                .border(1.dp, halo.copy(alpha = if (state == Island.State.SLOW_DOWN) 0.55f else 0.35f), shape)
+                // Its colour as a soft light under it, no outline: the island stays a clean black shape.
+                .drawBehind {
+                    drawRect(
+                        Brush.radialGradient(
+                            0f to halo.copy(alpha = halo.alpha * glow),
+                            1f to Color.Transparent,
+                            center = Offset(size.width / 2, size.height * 0.75f),
+                            radius = size.width * 0.62f,
+                        ),
+                        topLeft = Offset(-size.width * 0.15f, 0f),
+                        size = Size(size.width * 1.3f, size.height + size.width * 0.35f),
+                    )
+                }
+                .background(Brush.verticalGradient(listOf(Color(0xFF111115), Color.Black)), shape)
+                .border(0.5.dp, Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.1f), Color.Transparent)), shape)
                 .clip(shape)
                 .semantics {
                     liveRegion = LiveRegionMode.Polite
@@ -189,6 +216,20 @@ fun AlertIsland(
             }
         }
     }
+}
+
+/**
+ * Lowest top for an island [w] wide with corners of radius [r] on a screen [screen] wide whose own
+ * corners have radius [corner]: the island's corner arcs stay inside the screen's, 6 dp clear.
+ */
+private fun cornerSafeTop(screen: Dp, w: Dp, r: Dp, corner: Dp): Dp {
+    val big = corner.value
+    val arc = r.value
+    val clear = big - arc - 6f
+    val dx = big - ((screen.value - w.value) / 2 + arc)
+    if (big <= 0f || dx <= 0f) return 0.dp
+    if (clear <= dx) return (big - arc).coerceAtLeast(0f).dp
+    return (big - arc - sqrt(clear * clear - dx * dx)).coerceAtLeast(0f).dp
 }
 
 private fun detail(a: ActiveAlert, s: DriveSnapshot?): String? = when {
