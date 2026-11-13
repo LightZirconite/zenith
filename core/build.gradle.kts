@@ -52,6 +52,15 @@ tasks.register<JavaExec>("audit") {
     workingDir = rootDir
 }
 
+// ./gradlew :core:limits --args="dossier_des_tuiles [trajets] [graine]"
+tasks.register<JavaExec>("limits") {
+    group = "zenith"
+    description = "Trajets simulés à la limite sur les vraies routes : limite affichée fausse, « Limite X » dit à tort."
+    mainClass = "zenith.core.LimitAuditMain"
+    classpath = sourceSets["main"].runtimeClasspath
+    workingDir = rootDir
+}
+
 // ./gradlew :core:sweep --args="radars.json dossier_des_tuiles [variantes] [graine]"
 tasks.register<JavaExec>("sweep") {
     group = "zenith"

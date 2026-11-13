@@ -13,6 +13,17 @@ class SpeedRulesTest {
     }
 
     @Test
+    fun `flash threshold is the first speed whose retained speed exceeds the limit`() {
+        assertEquals(36, SpeedRules.flashThresholdKmh(30))
+        assertEquals(56, SpeedRules.flashThresholdKmh(50))
+        assertEquals(86, SpeedRules.flashThresholdKmh(80))
+        assertEquals(96, SpeedRules.flashThresholdKmh(90))
+        assertEquals(107, SpeedRules.flashThresholdKmh(100))
+        assertEquals(117, SpeedRules.flashThresholdKmh(110))
+        assertEquals(138, SpeedRules.flashThresholdKmh(130))
+    }
+
+    @Test
     fun `moving radar margin is 10 kmh below 100 and 10 percent above`() {
         assertEquals(80.0, SpeedRules.retainedSpeed(90.0, movingRadar = true))
         assertEquals(126.0, SpeedRules.retainedSpeed(140.0, movingRadar = true))

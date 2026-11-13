@@ -15,6 +15,16 @@ object SpeedRules {
         return floor(retained.coerceAtLeast(0.0))
     }
 
+    /**
+     * Lowest whole measured speed a fixed radar flashes at for [limitKmh], once its margin is taken
+     * off: 56 for 50, 96 for 90, 138 for 130. Under it, a radar retains the limit or less.
+     */
+    fun flashThresholdKmh(limitKmh: Int): Int {
+        var v = limitKmh
+        while (retainedSpeed(v.toDouble()) <= limitKmh) v++
+        return v
+    }
+
     /** Points lost for an excess of [excessKmh] over the limit (retained speed). 0 when not speeding. */
     fun pointsLost(excessKmh: Double): Int = when {
         excessKmh <= 0 -> 0

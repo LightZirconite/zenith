@@ -2,8 +2,43 @@ package zenith.core
 
 import kotlin.math.roundToInt
 
+/**
+ * What the driver chose to hear besides the radars, which are always announced (radar ahead,
+ * "Ralentis", section start). Some only want the radars: each of these can be turned off.
+ */
+data class AnnouncePrefs(
+    /** "Limite 80" when too fast for the road, away from any radar. */
+    val speeding: Boolean = true,
+    /** After a radar: "Radar passé à 92, flash probable"; after a section: the average. */
+    val passResult: Boolean = true,
+    /** "Itinéraire de contrôle sur 12 kilomètres, radar possible". */
+    val zones: Boolean = true,
+)
+
+/** Sound played before the voice; each app has a tone of the same name. */
+enum class Cue { APPROACH, CHIME, BRAKE, OVERSPEED, PASSED }
+
+/** [urgent]: changes the driver's speed now, so it goes first and older announcements still queued are dropped. */
+data class Announcement(val cue: Cue?, val text: String?, val urgent: Boolean)
+
 /** French spoken texts for alert events. Null for events that stay silent. */
 object Announcer {
+
+    /** Sound and text for [event] as the driver chose ([prefs]); null when nothing is heard. */
+    fun plan(event: AlertEvent, prefs: AnnouncePrefs = AnnouncePrefs()): Announcement? {
+        val cue = when (event) {
+            is AlertEvent.Approach -> if (event.radar.type.measuresSpeed) Cue.APPROACH else Cue.CHIME
+            is AlertEvent.SectionStarted -> Cue.APPROACH
+            is AlertEvent.Brake -> Cue.BRAKE
+            is AlertEvent.Overspeed -> Cue.OVERSPEED.takeIf { event.level == OverspeedLevel.WARN && prefs.speeding }
+            is AlertEvent.Passed -> Cue.PASSED.takeIf { event.wouldFlash && prefs.passResult }
+            is AlertEvent.SectionEnded -> Cue.PASSED.takeIf { prefs.passResult }
+            is AlertEvent.ZoneEntered -> Cue.CHIME.takeIf { prefs.zones }
+            is AlertEvent.LimitChanged, is AlertEvent.ZoneLeft -> null
+        } ?: return null
+        val urgent = event is AlertEvent.Brake || event is AlertEvent.Overspeed || (event is AlertEvent.Passed && event.wouldFlash)
+        return Announcement(cue, text(event), urgent)
+    }
 
     fun text(event: AlertEvent): String? = when (event) {
         is AlertEvent.Approach -> buildString {

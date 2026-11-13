@@ -1,6 +1,7 @@
 package zenith.core
 
-data class DriverProfile(val probationary: Boolean = false, val raining: Boolean = false)
+/** [earlySpeeding]: too fast from 3 km/h over the limit, instead of from the radar's flash speed. */
+data class DriverProfile(val probationary: Boolean = false, val raining: Boolean = false, val earlySpeeding: Boolean = false)
 
 /** Everything the UI needs after one GPS fix. */
 data class DriveSnapshot(
@@ -102,16 +103,21 @@ class DrivingSession(
     private fun step(fix: GpsFix, estimated: Boolean): DriveSnapshot? {
         val state = filter.update(fix) ?: return null
         val net = network()
-        val road = matcher.update(state)
+        val matched = matcher.update(state)
+        // Farther than this, the car is on a road the tiles lack (car park, private lane): the
+        // nearest one is not its road, and showing that road's limit would be wrong.
+        val road = matched?.takeIf { it.distanceM <= MAX_MATCH_M }
         val roadLimit = road?.limitKmh
         val moving = motion.update(state, fix)
-        val out = engine.step(state, road, net, motion = moving)
+        val shown = stabilizer.update(fix, state.speedMps)
+        engine.earlySpeeding = profile.earlySpeeding
+        val out = engine.step(state, road, net, motion = moving, shownKmh = shown)
         // A phone at home next to a control itinerary must not enter it either.
         val zone = if (moving == Motion.MOVING) zoneTracker.step(state) else zoneTracker.idle()
         return DriveSnapshot(
             timeMs = state.timeMs,
             position = state.position,
-            speedKmh = stabilizer.update(fix, state.speedMps),
+            speedKmh = shown,
             gpsAccuracyM = fix.accuracyM,
             headingDeg = state.headingDeg,
             road = road,
@@ -130,6 +136,7 @@ class DrivingSession(
 
     companion object {
         const val MAX_COAST_MS = 60_000L
+        private const val MAX_MATCH_M = 30.0
         private const val MIN_COAST_MPS = 3.0
         private const val COAST_ACCURACY_M = 10.0
 

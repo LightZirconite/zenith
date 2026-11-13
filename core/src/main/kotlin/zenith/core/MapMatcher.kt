@@ -72,7 +72,11 @@ class MapMatcher(
             column.firstOrNull { it.first.segment.id == r.segment.id && it.first.forward == r.forward }
                 ?: column.filter { it.first.entryNode == r.exitNode }.maxByOrNull { it.second }
         }
-        val chosen = if (current != null && best.second - current.second < switchMargin) current else best
+        // Past the end of the current road onto the road that goes on from it: that is the car
+        // driving on, not a parallel road to resist (the old limit would linger past the sign).
+        val drivenOn = current != null && current.first.segment.id == reported?.segment?.id &&
+            current.first.remainingM < END_M && best.first.entryNode == current.first.exitNode
+        val chosen = if (current != null && !drivenOn && best.second - current.second < switchMargin) current else best
         reported = chosen.first
         return chosen.first
     }
@@ -112,5 +116,8 @@ class MapMatcher(
 
     private companion object {
         const val IMPOSSIBLE = -1e9
+
+        /** Projected this close to its end, the car has driven off a segment. */
+        const val END_M = 1.0
     }
 }

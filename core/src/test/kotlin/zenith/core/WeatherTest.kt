@@ -25,6 +25,8 @@ class WeatherTest {
         assertTrue(Weather.isWet(WeatherNow(0.0, 73)))
         assertTrue(Weather.isWet(WeatherNow(0.2, 3)))
         assertTrue(!Weather.isWet(WeatherNow(0.0, 45)))
+        assertTrue(!Weather.isWet(WeatherNow(0.0, 51)))
+        assertTrue(Weather.isWet(WeatherNow(0.1, 51)))
         assertTrue(!Weather.isWet(WeatherNow(0.0, 3)))
     }
 

@@ -13,8 +13,19 @@ data class AlertSettings(
     val aheadConeDeg: Double = 35.0,
     /** Max difference between travel heading and the radar's measured direction. */
     val directionToleranceDeg: Double = 50.0,
-    /** Over the limit by more than this many km/h triggers the audible overspeed warning. */
-    val overspeedToleranceKmh: Int = 3,
+    /** Early warning ([AlertEngine.earlySpeeding]): over the limit by more than this many km/h. */
+    val earlyToleranceKmh: Int = 3,
+    /**
+     * A limit is said only once it has held this long: right after a change the road match may
+     * still lag behind the sign, and a driver needs a moment to slow down.
+     */
+    val overspeedGraceMs: Long = 6_000,
+    /** Fixes in a row over the threshold before it is said (one fix of GPS noise is not speeding). */
+    val overspeedFixes: Int = 2,
+    /** A higher limit this close ahead (or within 2 s) is already the limit: the sign is being passed. */
+    val limitAnticipateM: Double = 60.0,
+    /** A road matched farther than this from the fix may not be the road driven: its limit is never said. */
+    val spokenMatchM: Double = 25.0,
     val mobileMaxAgeMs: Long = 3 * 3_600_000L,
     /** How far ahead the "next radar" is looked up along the road. */
     val upcomingRangeM: Double = 15_000.0,
@@ -126,6 +137,13 @@ class AlertEngine(
     /** Turns a nominal limit into the one that applies to the driver (rain, probationary licence). */
     private val effectiveLimit: (Int) -> Int = { it },
 ) {
+    /**
+     * Too fast from 3 km/h over the limit, instead of from the speed a radar flashes at once its
+     * margin is taken off (56 for 50, 96 for 90, 138 for 130). Can change during a drive.
+     */
+    @kotlin.concurrent.Volatile
+    var earlySpeeding: Boolean = false
+
     /** [silent]: same camera as one already announced, from another source. */
     private class Track(
         val radar: Radar,
@@ -193,6 +211,8 @@ class AlertEngine(
     private var lastWarnMs: Long? = null
     private var underLimitSinceMs: Long? = null
     private var lastLimit: Int? = null
+    private var limitSinceMs = 0L
+    private var overFixes = 0
     private var snapper: RadarSnapper? = null
 
     /** Section ends whose section was started without a start camera, with the time it was. */
@@ -209,11 +229,13 @@ class AlertEngine(
         road: RoadCandidate? = null,
         network: RoadNetwork? = null,
         motion: Motion = Motion.MOVING,
+        /** Speed shown to the driver (accurate Doppler); "too fast" is judged on it when known. */
+        shownKmh: Int? = null,
     ): AlertOutput {
         val events = mutableListOf<AlertEvent>()
         val now = state.timeMs
         val v = state.speedMps
-        val speedKmh = v * 3.6
+        val speedKmh = shownKmh?.toDouble() ?: (v * 3.6)
         val limit = road?.limitKmh?.let(effectiveLimit)
         // A limit guessed from the place (built-up or not) is shown, but never spoken nor lent to a radar.
         val sure = road?.segment?.limitSource != LimitSource.AREA
@@ -222,6 +244,7 @@ class AlertEngine(
         if (limit != lastLimit) {
             if (lastPosition != null) events += AlertEvent.LimitChanged(now, lastLimit, limit)
             lastLimit = limit
+            limitSinceMs = now
         }
 
         // Standing (red light, jam): heading and road match are noise, so nothing moves on until the car does.
@@ -282,7 +305,7 @@ class AlertEngine(
                     continue
                 }
                 val twin = tracked.values.any { t -> !t.silent && sameCamera(t.radar, r) }
-                tracked[r.id] = Track(r, Geo.distanceM(state.position, r.position), v, silent = twin)
+                tracked[r.id] = Track(r, Geo.distanceM(state.position, r.position), speedKmh / 3.6, silent = twin)
                 val hesitated = dropped[r.id]?.let { x ->
                     val driven = odometerM - x.odometerM
                     if (x.roadM == null) driven < DROPPED_NEAR_M else d <= x.roadM - driven + DROPPED_NEAR_M
@@ -299,7 +322,7 @@ class AlertEngine(
             val straight = Geo.distanceM(state.position, r.position)
             if (straight < t.minDistanceM) {
                 t.minDistanceM = straight
-                t.speedAtMinMps = v
+                t.speedAtMinMps = speedKmh / 3.6
             }
             val snaps = horizon?.snaps(r).orEmpty()
             // Reachable only by turning round (loop, roundabout behind it): it is behind, not ahead.
@@ -361,7 +384,14 @@ class AlertEngine(
             }
         }
 
-        overspeed(now, speedKmh, limit, spoken = sure, events)
+        val nextLimit = horizon?.let { RoadHorizon.nextLimit(it.path, settings.limitAheadM) }
+        // The sign of a higher limit is being passed (the road match lags a little behind the car).
+        val rising = nextLimit != null && limit != null && effectiveLimit(nextLimit.limitKmh) > limit &&
+            nextLimit.distanceM <= maxOf(settings.limitAnticipateM, 2 * v)
+        val source = road?.segment?.limitSource
+        val spoken = (source == LimitSource.EXPLICIT || source == LimitSource.IMPLICIT) && !rising &&
+            (road?.distanceM ?: Double.MAX_VALUE) <= settings.spokenMatchM && now - limitSinceMs >= settings.overspeedGraceMs
+        overspeed(now, speedKmh, limit, spoken, events)
 
         lastPosition = state.position
         val active = tracked.values.filter { motion != Motion.PARKED }.map { t ->
@@ -370,12 +400,11 @@ class AlertEngine(
                 radar = t.radar,
                 distanceM = distances[t.radar.id] ?: Geo.distanceM(state.position, t.radar.position),
                 limitKmh = rl,
-                overLimit = rl != null && speedKmh >= rl + 1,
+                overLimit = rl != null && speedKmh >= warnAt(rl),
                 ageMs = t.radar.reportedAtMs?.let { now - it },
             )
         }.sortedBy { it.distanceM }
-        val limitAhead = horizon?.let { RoadHorizon.nextLimit(it.path, settings.limitAheadM) }
-            ?.let { it.copy(limitKmh = effectiveLimit(it.limitKmh)) }
+        val limitAhead = nextLimit?.let { it.copy(limitKmh = effectiveLimit(it.limitKmh)) }
             ?.takeIf { it.limitKmh != limit }
         val ahead = horizon?.let { RoadHorizon.polyline(it.path, settings.aheadDrawnM) }.orEmpty()
         return AlertOutput(events, active, sectionStatus(), upcoming, limitAhead, ahead)
@@ -395,14 +424,21 @@ class AlertEngine(
         )
     }
 
+    /** Speed from which the driver is too fast for [limit]: the radar's flash speed, or 3 km/h over when early. */
+    private fun warnAt(limit: Int): Int =
+        if (earlySpeeding) limit + settings.earlyToleranceKmh + 1 else SpeedRules.flashThresholdKmh(limit)
+
     /**
-     * Silent "over" state, spoken warning past the tolerance, not repeated while hovering around it.
-     * Not [spoken] (limit guessed from the place): never past the silent state.
+     * Silent "over" state, spoken warning from [warnAt] on, not repeated while hovering around it.
+     * Not [spoken] (limit guessed, unsure road, sign just passed): never past the silent state, so
+     * it is said once the limit is sure, if the car is still too fast then.
      */
     private fun overspeed(now: Long, speedKmh: Double, limit: Int?, spoken: Boolean, events: MutableList<AlertEvent>) {
+        val tooFast = limit != null && speedKmh >= warnAt(limit)
+        overFixes = if (tooFast) overFixes + 1 else 0
         val level = when {
             limit == null -> OverspeedLevel.NONE
-            speedKmh > limit + settings.overspeedToleranceKmh -> if (spoken) OverspeedLevel.WARN else OverspeedLevel.OVER
+            tooFast -> if (spoken && overFixes >= settings.overspeedFixes) OverspeedLevel.WARN else OverspeedLevel.OVER
             speedKmh >= limit + 1 -> OverspeedLevel.OVER
             else -> OverspeedLevel.NONE
         }

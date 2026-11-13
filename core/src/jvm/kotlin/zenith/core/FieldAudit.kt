@@ -131,7 +131,7 @@ object FieldAudit {
     }
 
     /** A drive that follows the road where it obviously goes on, as people do, and picks at random at real forks. Never a U-turn. */
-    private fun route(network: RoadNetwork, start: RoadSegment, rnd: Random): List<Step> {
+    internal fun route(network: RoadNetwork, start: RoadSegment, rnd: Random): List<Step> {
         val steps = mutableListOf(Step(start, start.oneway || rnd.nextBoolean()))
         var length = start.lengthM
         val used = HashSet<Pair<Long, Boolean>>()
@@ -150,7 +150,7 @@ object FieldAudit {
         return steps
     }
 
-    private fun geometry(route: List<Step>): List<LatLon> = route.flatMapIndexed { i, s ->
+    internal fun geometry(route: List<Step>): List<LatLon> = route.flatMapIndexed { i, s ->
         val pts = if (s.forward) s.segment.points else s.segment.points.reversed()
         if (i == 0) pts else pts.drop(1)
     }
@@ -181,9 +181,9 @@ object FieldAudit {
         return fixes
     }
 
-    private fun gauss(rnd: Random) = sqrt(-2 * ln(rnd.nextDouble().coerceAtLeast(1e-12))) * cos(2 * Math.PI * rnd.nextDouble())
+    internal fun gauss(rnd: Random) = sqrt(-2 * ln(rnd.nextDouble().coerceAtLeast(1e-12))) * cos(2 * Math.PI * rnd.nextDouble())
 
-    private val DRIVEN = setOf(
+    internal val DRIVEN = setOf(
         "motorway", "trunk", "primary", "secondary", "tertiary", "unclassified", "residential",
         "motorway_link", "trunk_link", "primary_link", "secondary_link", "tertiary_link",
     )

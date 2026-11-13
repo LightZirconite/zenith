@@ -203,9 +203,10 @@ class RoadHorizonTest {
             if (at(t, speed(t)).any { it is AlertEvent.Overspeed && it.level == OverspeedLevel.WARN }) warns += t
             t++
         }
-        phase(20) { if (it % 2 == 0) 84.0 else 82.0 } // hovering: one warning
+        // Flash speed for 80 is 86: hovering over it and back under, one warning only.
+        phase(20) { if (it % 3 == 2) 84.0 else 88.0 }
         phase(15) { 70.0 } // calm down
-        phase(3) { 86.0 } // new excess: new warning
+        phase(3) { 90.0 } // new excess: new warning
         assertEquals(2, warns.size, "warnings at $warns")
         assertNotNull(warns.firstOrNull { it >= 35 })
     }

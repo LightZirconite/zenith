@@ -13,8 +13,12 @@ data class WeatherNow(val precipitationMm: Double, val weatherCode: Int?)
 
 /** Open-Meteo current weather (free, no key, nothing to register). */
 object Weather {
-    /** Drizzle, rain, freezing rain, snow, showers, thunderstorms (WMO codes). Fog is not rain. */
-    private val WET_CODES = setOf(51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 71, 73, 75, 77, 80, 81, 82, 85, 86, 95, 96, 99)
+    /**
+     * Drizzle, rain, freezing rain, snow, showers, thunderstorms (WMO codes). Fog is not rain, nor
+     * is a light drizzle (51) with no measurable water: the model gives it often on a dry road, and
+     * lowering the limits then would show wrong ones.
+     */
+    private val WET_CODES = setOf(53, 55, 56, 57, 61, 63, 65, 66, 67, 71, 73, 75, 77, 80, 81, 82, 85, 86, 95, 96, 99)
 
     /** Request for [p] rounded to 0.1° (~10 km): plenty for the weather, and little about where the car is. */
     fun url(p: LatLon): String =
