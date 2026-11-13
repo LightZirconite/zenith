@@ -118,6 +118,18 @@ def fill(rings, cells):
                 cells.add(i * ROW + j)
 
 
+def street_blocks(streets, min_cells):
+    """Cells whose 3 × 3 block holds residential streets in at least [min_cells] cells: a street grid."""
+    out = set()
+    for k in streets:
+        for c in (k + di * ROW + dj for di in (-1, 0, 1) for dj in (-1, 0, 1)):
+            if c in out:
+                continue
+            if sum((c + di * ROW + dj) in streets for di in (-1, 0, 1) for dj in (-1, 0, 1)) >= min_cells:
+                out.add(c)
+    return out
+
+
 def drop_small_patches(cells, min_cells):
     """Removes the 4-connected groups of fewer than [min_cells] cells."""
     seen = set()
@@ -172,31 +184,67 @@ class Neighbours(BuiltUp):
         return cell_key(lat, lon) in self.cells
 
 
+class Confident:
+    """Default of the place only where it is clear: built-up when every cell within [urban] cells is,
+    outside when no cell within [rural] cells is; None (no guess) in between."""
+
+    def __init__(self, cells, urban, rural):
+        self.cells = cells
+        self.urban = urban
+        self.rural = rural
+
+    def state(self, lat, lon):
+        k = cell_key(lat, lon)
+        near = lambda r: (k + di * ROW + dj for di in range(-r, r + 1) for dj in range(-r, r + 1))
+        if all(n in self.cells for n in near(self.urban)):
+            return URBAN_KMH
+        if not any(n in self.cells for n in near(self.rural)):
+            return RURAL_KMH
+        return None
+
+
 class LimitCheck:
     """How the default of the place compares with tagged limits, per variant of the built-up grid.
 
     For each two-way road of AREA_CLASSES with one tagged limit, the default is guessed along it as
     for an untagged road, and its length counted under (guess, tagged limit)."""
 
-    def __init__(self, variants):
+    def __init__(self, variants, confident=None):
         self.variants = variants  # name -> BuiltUp
-        self.length = {name: {} for name in variants}
+        self.confident = confident or {}  # name -> Confident
+        self.length = {name: {} for name in list(variants) + list(self.confident)}
 
     def add(self, limit, coords):
         if limit not in (30, 50, 70, 80, 90):
             return
+        lengths = [math.dist((a * 111_000, b * 78_000), (c * 111_000, d * 78_000)) for (a, b), (c, d) in zip(coords, coords[1:])]
         for name, grid in self.variants.items():
             flags = smooth([grid.covers(*c) for c in coords], coords)
             counts = self.length[name]
-            for k in range(len(coords) - 1):
-                (a, b), (c, d) = coords[k], coords[k + 1]
-                m = math.dist((a * 111_000, b * 78_000), (c * 111_000, d * 78_000))
+            for k, m in enumerate(lengths):
                 guess = URBAN_KMH if flags[k] else RURAL_KMH
                 counts[(guess, limit)] = counts.get((guess, limit), 0) + m
+        for name, grid in self.confident.items():
+            states = [grid.state(*c) for c in coords]
+            counts = self.length[name]
+            for k, m in enumerate(lengths):
+                counts[(states[k], limit)] = counts.get((states[k], limit), 0) + m
 
     def report(self):
         print("Contrôle de la limite par défaut du lieu (routes à double sens dont la limite est connue) :")
         for name, counts in self.length.items():
+            if name in self.confident:
+                total = sum(counts.values()) or 1
+                guessed = sum(v for (g, _), v in counts.items() if g is not None) or 1
+                right = sum(v for (g, t), v in counts.items() if g == t)
+                urban = sum(v for (g, _), v in counts.items() if g == URBAN_KMH) or 1
+                rural = sum(v for (g, _), v in counts.items() if g == RURAL_KMH) or 1
+                urban_ok = sum(v for (g, t), v in counts.items() if g == URBAN_KMH and t <= 50)
+                rural_ok = sum(v for (g, t), v in counts.items() if g == RURAL_KMH and t >= 70)
+                print(f"  {name:28} devine {guessed / total:6.1%}  juste {right / guessed:6.1%}  "
+                      f"50 : {urban_ok / urban:6.1%} ≤ 50 ({urban / total:5.1%})  80 : {rural_ok / rural:6.1%} ≥ 70 ({rural / total:5.1%})"
+                      f"  80 exact {counts.get((RURAL_KMH, 80), 0) / rural:6.1%}")
+                continue
             total = sum(counts.values()) or 1
             right = sum(v for (g, t), v in counts.items() if g == t)
             # Built-up guessed where the road is tagged as outside (70 and up), and the reverse.
@@ -219,6 +267,8 @@ class JunctionCounter(osmium.SimpleHandler):
         self.seen = osmium.index.IdSet()
         self.junction = osmium.index.IdSet()
         self.cells = set()
+        # Cells crossed by residential streets: a built-up area where no landuse is mapped.
+        self.streets = set()
 
     def area(self, a):
         if a.tags.get("landuse") not in BUILTUP_LANDUSE:
@@ -236,6 +286,10 @@ class JunctionCounter(osmium.SimpleHandler):
         if w.tags.get("highway") not in CLASS_INDEX:
             return
         refs = [n.ref for n in w.nodes]
+        if w.tags.get("highway") in ("residential", "living_street"):
+            for n in w.nodes:
+                if n.location.valid():
+                    self.streets.add(cell_key(n.location.lat, n.location.lon))
         for k, ref in enumerate(refs):
             if ref in self.seen or (0 < k < len(refs) - 1 and refs.count(ref) > 1):
                 self.junction.set(ref)
@@ -354,7 +408,15 @@ def main():
         variants[f"voisines, ≥ {size}"] = BuiltUp(bigger)
         variants[f"sans voisines, ≥ {size}"] = Neighbours(bigger)
     del raw_cells
-    check = LimitCheck(variants)
+    print(f"rues résidentielles : {len(counter.streets)} cellules")
+    confident = {f"sûr (bâti {u}, hors bâti {r})": Confident(cells, u, r) for u, r in ((0, 2), (1, 2), (1, 3), (1, 5), (2, 4))}
+    for dense in (4, 6):
+        merged = cells | street_blocks(counter.streets, dense)
+        drop_small_patches(merged, MIN_PATCH_CELLS)
+        variants[f"+ rues ≥ {dense}/9, voisines"] = BuiltUp(merged)
+        confident[f"sûr + rues ≥ {dense}/9 (1, 3)"] = Confident(merged, 1, 3)
+        confident[f"sûr + rues ≥ {dense}/9 (0, 3)"] = Confident(merged, 0, 3)
+    check = LimitCheck(variants, confident)
     writer = None if only_check else TileWriter(out_dir)
     if writer:
         os.makedirs(out_dir, exist_ok=True)
