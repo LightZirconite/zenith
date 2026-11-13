@@ -65,4 +65,14 @@ class SpeedingTest {
     fun `a limit inferred from the road class is never said`() {
         assertTrue(warnings(network(0.0 to 50, source = LimitSource.INFERRED), 40) { 70.0 }.isEmpty())
     }
+
+    @Test
+    fun `no limit shown for a road far off the fix (car park, private lane)`() {
+        val session = DrivingSession(network(0.0 to 50), emptyList())
+        val snaps = (0 until 10).mapNotNull { t -> session.process(GpsFix(t * 1_000L, Sim.ll(40.0, t * 8.0), 4.0, 8.0, 0.0)) }
+        assertTrue(snaps.all { it.limitKmh == null })
+        val near = DrivingSession(network(0.0 to 50), emptyList())
+        val shown = (0 until 10).mapNotNull { t -> near.process(GpsFix(t * 1_000L, Sim.ll(8.0, t * 8.0), 4.0, 8.0, 0.0)) }
+        assertEquals(50, shown.last().limitKmh)
+    }
 }

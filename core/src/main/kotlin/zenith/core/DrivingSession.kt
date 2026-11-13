@@ -103,11 +103,11 @@ class DrivingSession(
     private fun step(fix: GpsFix, estimated: Boolean): DriveSnapshot? {
         val state = filter.update(fix) ?: return null
         val net = network()
-        val matched = matcher.update(state)
-        // Farther than this, the car is on a road the tiles lack (car park, private lane): the
-        // nearest one is not its road, and showing that road's limit would be wrong.
-        val road = matched?.takeIf { it.distanceM <= MAX_MATCH_M }
-        val roadLimit = road?.limitKmh
+        val road = matcher.update(state)
+        // Much farther than the fix's accuracy, the car is on a road the tiles lack (car park,
+        // private lane): the nearest road is not its road, and its limit would be wrong.
+        val sure = road != null && road.distanceM <= maxOf(MAX_MATCH_M, (fix.accuracyM ?: 0.0) + 10)
+        val roadLimit = road?.limitKmh?.takeIf { sure }
         val moving = motion.update(state, fix)
         val shown = stabilizer.update(fix, state.speedMps)
         engine.earlySpeeding = profile.earlySpeeding
@@ -122,7 +122,7 @@ class DrivingSession(
             headingDeg = state.headingDeg,
             road = road,
             limitKmh = roadLimit?.let(effective),
-            limitSource = road?.segment?.limitSource,
+            limitSource = road?.segment?.limitSource?.takeIf { roadLimit != null },
             alerts = out.active,
             section = out.section,
             upcoming = out.upcoming,
