@@ -6,14 +6,16 @@ Each drivable OSM way is split at junction nodes into segments carrying their sp
 to 0.5° tiles: roads_<i>_<j>.json.gz with i = floor(lat * 2), j = floor(lon * 2). A segment
 crossing a tile edge is written to every tile it touches (same id), so tiles stand alone.
 
-Roads with no limit at all get the French default of where they are: 50 in a built-up area,
-80 outside on a two-way road (since 2018). Built-up areas come from landuse polygons, rasterised
-on a ~100 m grid; small isolated patches (farms, hamlets without entry signs) are dropped. Such
-roads are also cut where they enter or leave a built-up area.
+Roads with no limit at all get the French default of where they are, only where it is clear:
+50 deep inside a built-up area (the road's cell and the 8 around it built up), 80 on a two-way
+communal road (unclassified) with no built-up cell within ~330 m. Elsewhere they stay without a
+limit: measured on France (13/11/2026) against the tagged roads, guessing everywhere was right
+only 60 % of the time (50 roads taken for 80, departmental roads back at 90). Built-up areas come
+from landuse polygons and from blocks of residential streets, on a ~110 m grid; small isolated
+patches are dropped. Such roads are cut where the default changes.
 
-Each run also checks that guess against the roads whose limit is tagged (two-way roads of the
-same classes): how often 50 / 80 from the place would have been their real limit, for a few
-variants of the built-up grid ("--check" prints only that, without writing tiles).
+Each run checks that rule against the roads whose limit is tagged (two-way roads of the same
+classes), by road class ("--check" prints only that, without writing tiles).
 
 Usage: build_roads.py <extract.osm.pbf> <out_dir> [--check]
 """
@@ -45,6 +47,9 @@ BUILTUP_LANDUSE = {"residential", "retail", "commercial"}
 AREA_CLASSES = {"trunk", "primary", "secondary", "tertiary", "unclassified"}
 CELL_LAT, CELL_LON = 1 / 1000, 1 / 700  # ~110 m both ways across France
 MIN_PATCH_CELLS = 4  # ~5 ha
+STREET_CELLS = 4  # a 3 × 3 block with residential streets in this many cells is built up
+URBAN_RING, RURAL_RING = 1, 3  # cells around the road: all built up for 50, none for 80
+RURAL_CLASSES = {"unclassified"}  # departmental roads are too often back at 90 for a guessed 80
 MIN_RUN_M = 100  # shorter in/out runs inside a way are noise along a boundary
 URBAN_KMH, RURAL_KMH = 50, 80
 ROW = 1_000_000  # cell key = row * ROW + column
@@ -149,18 +154,6 @@ def drop_small_patches(cells, min_cells):
             cells.difference_update(group)
 
 
-class BuiltUp:
-    """Built-up grid. A point counts as built-up when its cell or one of the 4 next to it is: roads
-    often run between landuse polygons, on cells left out of them."""
-
-    def __init__(self, cells):
-        self.cells = cells
-
-    def covers(self, lat, lon):
-        k = cell_key(lat, lon)
-        return any(n in self.cells for n in (k, k + 1, k - 1, k + ROW, k - ROW))
-
-
 def smooth(flags, coords):
     """A run shorter than MIN_RUN_M between two runs of one same other state takes that state."""
     runs, start = [], 0
@@ -178,86 +171,50 @@ def smooth(flags, coords):
     return out
 
 
-class Neighbours(BuiltUp):
-    """Built-up grid that only counts the cell itself, no neighbour (variant of the check)."""
+class Place:
+    """Default limit of the place, only where it is clear (see the module doc); None elsewhere."""
 
-    def covers(self, lat, lon):
-        return cell_key(lat, lon) in self.cells
-
-
-class Confident:
-    """Default of the place only where it is clear: built-up when every cell within [urban] cells is,
-    outside when no cell within [rural] cells is; None (no guess) in between."""
-
-    def __init__(self, cells, urban, rural):
+    def __init__(self, cells):
         self.cells = cells
-        self.urban = urban
-        self.rural = rural
 
-    def state(self, lat, lon):
+    def default(self, lat, lon, highway, oneway):
         k = cell_key(lat, lon)
-        near = lambda r: (k + di * ROW + dj for di in range(-r, r + 1) for dj in range(-r, r + 1))
-        if all(n in self.cells for n in near(self.urban)):
+        ring = lambda r: (k + di * ROW + dj for di in range(-r, r + 1) for dj in range(-r, r + 1))
+        if all(n in self.cells for n in ring(URBAN_RING)):
             return URBAN_KMH
-        if not any(n in self.cells for n in near(self.rural)):
+        if highway in RURAL_CLASSES and not oneway and not any(n in self.cells for n in ring(RURAL_RING)):
             return RURAL_KMH
         return None
 
+    def along(self, coords, highway, oneway):
+        return smooth([self.default(lat, lon, highway, oneway) for lat, lon in coords], coords)
+
 
 class LimitCheck:
-    """How the default of the place compares with tagged limits, per variant of the built-up grid.
+    """The default of the place against tagged limits: for each two-way road of AREA_CLASSES with
+    one tagged limit, the default is worked out along it as for an untagged road."""
 
-    For each two-way road of AREA_CLASSES with one tagged limit, the default is guessed along it as
-    for an untagged road, and its length counted under (guess, tagged limit)."""
+    def __init__(self, place):
+        self.place = place
+        self.length = {}  # (class, guess, tagged) -> m
 
-    def __init__(self, variants, confident=None):
-        self.variants = variants  # name -> BuiltUp
-        self.confident = confident or {}  # name -> Confident
-        self.length = {name: {} for name in list(variants) + list(self.confident)}
-
-    def add(self, limit, coords):
-        if limit not in (30, 50, 70, 80, 90):
-            return
-        lengths = [math.dist((a * 111_000, b * 78_000), (c * 111_000, d * 78_000)) for (a, b), (c, d) in zip(coords, coords[1:])]
-        for name, grid in self.variants.items():
-            flags = smooth([grid.covers(*c) for c in coords], coords)
-            counts = self.length[name]
-            for k, m in enumerate(lengths):
-                guess = URBAN_KMH if flags[k] else RURAL_KMH
-                counts[(guess, limit)] = counts.get((guess, limit), 0) + m
-        for name, grid in self.confident.items():
-            states = [grid.state(*c) for c in coords]
-            counts = self.length[name]
-            for k, m in enumerate(lengths):
-                counts[(states[k], limit)] = counts.get((states[k], limit), 0) + m
+    def add(self, highway, limit, coords):
+        guesses = self.place.along(coords, highway, False)
+        for k, ((a, b), (c, d)) in enumerate(zip(coords, coords[1:])):
+            key = (highway, guesses[k], limit)
+            self.length[key] = self.length.get(key, 0) + math.dist((a * 111_000, b * 78_000), (c * 111_000, d * 78_000))
 
     def report(self):
         print("Contrôle de la limite par défaut du lieu (routes à double sens dont la limite est connue) :")
-        for name, counts in self.length.items():
-            if name in self.confident:
-                total = sum(counts.values()) or 1
-                guessed = sum(v for (g, _), v in counts.items() if g is not None) or 1
-                right = sum(v for (g, t), v in counts.items() if g == t)
-                urban = sum(v for (g, _), v in counts.items() if g == URBAN_KMH) or 1
-                rural = sum(v for (g, _), v in counts.items() if g == RURAL_KMH) or 1
-                urban_ok = sum(v for (g, t), v in counts.items() if g == URBAN_KMH and t <= 50)
-                rural_ok = sum(v for (g, t), v in counts.items() if g == RURAL_KMH and t >= 70)
-                print(f"  {name:28} devine {guessed / total:6.1%}  juste {right / guessed:6.1%}  "
-                      f"50 : {urban_ok / urban:6.1%} ≤ 50 ({urban / total:5.1%})  80 : {rural_ok / rural:6.1%} ≥ 70 ({rural / total:5.1%})"
-                      f"  80 exact {counts.get((RURAL_KMH, 80), 0) / rural:6.1%}")
-                continue
-            total = sum(counts.values()) or 1
-            right = sum(v for (g, t), v in counts.items() if g == t)
-            # Built-up guessed where the road is tagged as outside (70 and up), and the reverse.
-            urban_wrong = sum(v for (g, t), v in counts.items() if g == URBAN_KMH and t >= 70)
-            rural_wrong = sum(v for (g, t), v in counts.items() if g == RURAL_KMH and t <= 50)
-            print(f"  {name:28} juste {right / total:6.1%}  50 au lieu de 70+ {urban_wrong / total:6.1%}  "
-                  f"80 au lieu de 50- {rural_wrong / total:6.1%}  ({total / 1000:,.0f} km)")
-            by_truth = {}
-            for (g, t), v in counts.items():
-                by_truth.setdefault(t, {})[g] = v
-            print("      " + "  ".join(f"vrai {t}: " + "/".join(f"{g}={v / sum(gs.values()):.0%}" for g, v in sorted(gs.items()))
-                                     for t, gs in sorted(by_truth.items())))
+        for highway in sorted({h for h, _, _ in self.length}, key=CLASSES.index):
+            rows = {(g, t): v for (h, g, t), v in self.length.items() if h == highway}
+            total = sum(rows.values()) or 1
+            guessed = sum(v for (g, _), v in rows.items() if g is not None)
+            right = sum(v for (g, t), v in rows.items() if g is not None and g == t)
+            print(f"  {highway:13} {total / 1000:9,.0f} km  limite devinée {guessed / total:6.1%}  "
+                  f"juste {right / (guessed or 1):6.1%}  "
+                  + "  ".join(f"{g}→vrai {t} {v / (guessed or 1):5.1%}" for (g, t), v in sorted(rows.items(), key=str)
+                              if g is not None and g != t and v / (guessed or 1) >= 0.01))
 
 
 class JunctionCounter(osmium.SimpleHandler):
@@ -336,10 +293,10 @@ class TileWriter:
 class SegmentBuilder(osmium.SimpleHandler):
     """Pass 2: splits ways at junctions (and built-up edges) and writes segments to tiles."""
 
-    def __init__(self, junction, builtup, writer, check=None):
+    def __init__(self, junction, place, writer, check=None):
         super().__init__()
         self.junction = junction
-        self.builtup = builtup
+        self.place = place
         self.writer = writer
         self.check = check
         self.area_segments = 0
@@ -357,7 +314,7 @@ class SegmentBuilder(osmium.SimpleHandler):
         fwd, bwd, src = limits(tags, highway)
         oneway = oneway_of(tags, highway)
         if self.check is not None and src == SRC_EXPLICIT and fwd == bwd and oneway == 0 and highway in AREA_CLASSES:
-            self.check.add(fwd, [(loc.lat, loc.lon) for _, loc in nodes])
+            self.check.add(highway, fwd, [(loc.lat, loc.lon) for _, loc in nodes])
         if self.writer is None:
             return
         if oneway == -1:
@@ -365,11 +322,10 @@ class SegmentBuilder(osmium.SimpleHandler):
             fwd, bwd = bwd, fwd
             oneway = 1
         name = tags.get("ref") or tags.get("name")
-        # No limit at all: default of the place, 50 built-up, 80 outside on a two-way road.
+        # No limit at all: default of the place where it is clear (Place), else none.
         flags = None
         if fwd is None and bwd is None and highway in AREA_CLASSES:
-            coords = [(loc.lat, loc.lon) for _, loc in nodes]
-            flags = smooth([self.builtup.covers(*c) for c in coords], coords)
+            flags = self.place.along([(loc.lat, loc.lon) for _, loc in nodes], highway, oneway)
         start = 0
         piece = 0
         for k in range(1, len(nodes)):
@@ -381,7 +337,7 @@ class SegmentBuilder(osmium.SimpleHandler):
                     coords += [round(loc.lat, 6), round(loc.lon, 6)]
                 seg_fwd, seg_bwd, seg_src = fwd, bwd, src
                 if flags is not None:
-                    seg_fwd = seg_bwd = URBAN_KMH if flags[start] else (RURAL_KMH if not oneway else None)
+                    seg_fwd = seg_bwd = flags[start]
                     seg_src = SRC_AREA if seg_fwd else None
                     self.area_segments += seg_fwd is not None
                 seg_id = w.id * 1000 + piece
@@ -398,30 +354,18 @@ def main():
     only_check = "--check" in sys.argv[3:]
     counter = JunctionCounter()
     counter.apply_file(pbf, locations=True, idx="flex_mem")
-    raw_cells = counter.cells
-    cells = set(raw_cells)
+    cells = counter.cells | street_blocks(counter.streets, STREET_CELLS)
+    del counter.streets
+    raw = len(cells)
     drop_small_patches(cells, MIN_PATCH_CELLS)
-    print(f"zones bâties : {len(cells)} cellules de ~110 m ({len(raw_cells) - len(cells)} isolées retirées)")
-    variants = {"actuel (voisines, ≥ 4)": BuiltUp(cells), "sans voisines, ≥ 4": Neighbours(cells)}
-    for size in (12, 30, 80):
-        bigger = set(cells)
-        drop_small_patches(bigger, size)
-        variants[f"voisines, ≥ {size}"] = BuiltUp(bigger)
-        variants[f"sans voisines, ≥ {size}"] = Neighbours(bigger)
-    del raw_cells
-    print(f"rues résidentielles : {len(counter.streets)} cellules")
-    confident = {f"sûr (bâti {u}, hors bâti {r})": Confident(cells, u, r) for u, r in ((0, 2), (1, 2), (1, 3), (1, 5), (2, 4))}
-    for dense in (4, 6):
-        merged = cells | street_blocks(counter.streets, dense)
-        drop_small_patches(merged, MIN_PATCH_CELLS)
-        variants[f"+ rues ≥ {dense}/9, voisines"] = BuiltUp(merged)
-        confident[f"sûr + rues ≥ {dense}/9 (1, 3)"] = Confident(merged, 1, 3)
-        confident[f"sûr + rues ≥ {dense}/9 (0, 3)"] = Confident(merged, 0, 3)
-    check = LimitCheck(variants, confident)
-    writer = None if only_check else TileWriter(out_dir)
-    if writer:
+    print(f"zones bâties : {len(cells)} cellules de ~110 m ({raw - len(cells)} isolées retirées)")
+    place = Place(cells)
+    check = LimitCheck(place)
+    writer = None
+    if not only_check:
         os.makedirs(out_dir, exist_ok=True)
-    builder = SegmentBuilder(counter.junction, BuiltUp(cells), writer, check)
+        writer = TileWriter(out_dir)
+    builder = SegmentBuilder(counter.junction, place, writer, check)
     builder.apply_file(pbf, locations=True, idx="flex_mem")
     if writer:
         writer.close()

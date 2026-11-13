@@ -3,7 +3,8 @@ name: data
 # Weekly: rebuilds the speed-limit road tiles and the OSM radar extract from the France OSM
 # extract, then radars.json. Everything is an asset of the "data" release (never marked latest,
 # so the APK link keeps pointing to the app release). radars.yml refreshes radars.json daily.
-# Built-up areas (landuse) are kept in the extract: roads without a limit get 50 / 80 from them.
+# Built-up areas (landuse) are kept in the extract: roads without a limit get 50 / 80 from them
+# where it is clear (see build_roads.py), and the log checks that rule against the tagged roads.
 on:
   schedule:
     - cron: "0 3 * * 1"
