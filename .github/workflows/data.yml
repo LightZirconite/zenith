@@ -103,5 +103,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          busy=$(gh run list --workflow radars.yml --limit 10 --json status -q '[.[] | select(.status != "completed")] | length')
+          # A run left "queued" for ever by GitHub, without any job, does not count (see radars.yml).
+          alive='select(.status != "completed") | select(.status == "in_progress" or ((.createdAt | fromdateiso8601) > (now - 10800)))'
+          busy=$(gh run list --workflow radars.yml --limit 10 --json status,createdAt -q "[.[] | $alive] | length")
           if [ "$busy" = "0" ]; then echo "Chaîne radars arrêtée : relancée."; gh workflow run radars.yml --ref main -f chained=true; fi

@@ -120,14 +120,17 @@ jobs:
           # that hands the chain over below still does it.
           generated=$(gh release download data -p manifest.json -O - 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin)['generated'])" || echo 1970-01-01T00:00:00+00:00)
           age=$(( $(date +%s) - $(date -d "$generated" +%s) ))
-          busy=$(gh run list --workflow data.yml --limit 5 --json status -q '[.[] | select(.status != "completed")] | length')
+          # Not completed and alive: running, or waiting for less than 3 h. GitHub sometimes leaves a
+          # run "queued" forever without any job (11/2026): it must not count as busy for ever.
+          alive='select(.status != "completed") | select(.status == "in_progress" or ((.createdAt | fromdateiso8601) > (now - 10800)))'
+          busy=$(gh run list --workflow data.yml --limit 5 --json status,createdAt -q "[.[] | $alive] | length")
           if [ "$age" -gt $((7 * 86400)) ] && [ "$busy" = "0" ]; then
             echo "Données OSM vieilles de $((age / 86400)) jours : data.yml relancé."
             gh workflow run data.yml --ref main
           fi
           # A newer run (manual, push) carries its own chain: this one stops, so chains never multiply.
-          newer=$(gh run list --workflow radars.yml --limit 20 --json databaseId,status \
-            -q "[.[] | select(.databaseId > ${{ github.run_id }} and .status != \"completed\")] | length")
+          newer=$(gh run list --workflow radars.yml --limit 20 --json databaseId,status,createdAt \
+            -q "[.[] | select(.databaseId > ${{ github.run_id }}) | $alive] | length")
           if [ "$newer" != "0" ]; then echo "Une exécution plus récente prend le relais."; exit 0; fi
           # A failed call would end the chain: retried, a few minutes apart.
           for attempt in 1 2 3 4 5; do

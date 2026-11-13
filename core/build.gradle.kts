@@ -52,7 +52,7 @@ tasks.register<JavaExec>("audit") {
     workingDir = rootDir
 }
 
-// ./gradlew :core:limits --args="dossier_des_tuiles [trajets] [graine]"
+// ./gradlew :core:limits --args="dossier_des_tuiles [trajets] [graine] [tot]"
 tasks.register<JavaExec>("limits") {
     group = "zenith"
     description = "Trajets simulés à la limite sur les vraies routes : limite affichée fausse, « Limite X » dit à tort."

@@ -60,7 +60,7 @@ Waze est fait pour te guider ; Zenith est fait pour te prévenir. Les deux tourn
 
 - **Les radars d'abord** : Zenith rassemble chaque jour toutes les sources gratuites (liste officielle, carte de la Sécurité routière, OpenStreetMap, Lufop), les fusionne et retire les doublons. Pas besoin d'attendre qu'un autre conducteur signale un radar.
 - **Seulement ta route** : un radar sur une route parallèle ou une sortie que tu ne prends pas ne sonne pas. Garé ou à la maison, rien ne sonne.
-- **Des alertes faites pour ça** : voix courte, bips qui s'accélèrent si tu es trop vite, « Ralentis » quand il est temps de freiner, moyenne en direct sur les tronçons.
+- **Des alertes faites pour ça** : voix courte, bips qui s'accélèrent si tu es trop vite, « Ralentis » quand il est temps de freiner, moyenne en direct sur les tronçons. Elle ne parle que quand c'est utile (vraiment trop vite, sur une limite sûre), et tu peux ne garder que les radars.
 - **Libre et sans rien en échange** : code ouvert, aucune publicité, aucun compte, ta position ne quitte jamais le téléphone.
 - **Une app soignée** : décollage dans les étoiles, verre, transitions et sons pensés pour la route.
 
@@ -70,6 +70,7 @@ Waze est fait pour te guider ; Zenith est fait pour te prévenir. Les deux tourn
 - Radars fixes, feux rouges, tronçons et itinéraires de contrôle, uniquement sur ta route
 - Alertes vocales en français et bips qui s'accélèrent si tu roules trop vite ; la musique baisse en douceur, sans s'arrêter
 - Moyenne en direct sur les radars tronçons
+- Tu choisis ce qui est annoncé : les radars toujours, le reste à la carte (excès de vitesse, bips de danger, résultat au passage, itinéraires de contrôle) ; « trop vite » à partir de la vitesse où un radar flashe, marge déduite (ou dès 3 km/h si tu préfères)
 - Petite carte pour te situer, et un décollage dans les étoiles vers la Terre le temps de trouver le GPS
 - Petite fenêtre par-dessus Waze ou Maps ; sur iPhone aussi l'Activité en direct (écran verrouillé, Dynamic Island)
 - Musique à l'écran (Android : Spotify, YouTube, Deezer… ; iPhone : Spotify et Apple Music), avec le Canvas Spotify qui prend plus de place à l'arrêt ; glisse pour changer de titre

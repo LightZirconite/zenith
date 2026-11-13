@@ -11,7 +11,7 @@ import kotlin.random.Random
  * Speed-limit bench on the real road tiles: random drives at exactly the limit of the road driven
  * (slowing down before a lower limit, as a driver who reads the signs), with GPS noise and a steady
  * sideways bias (lane, multipath), through the full pipeline.
- * `./gradlew :core:limits --args="dossier_des_tuiles [trajets] [graine]"`.
+ * `./gradlew :core:limits --args="dossier_des_tuiles [trajets] [graine] [tot]"` (tot : « Prévenir dès 3 km/h »).
  * - shown limit compared with the limit of the road really driven, away from the 40 m after a
  *   change (where a short lag is expected) and right at it;
  * - spoken "Limite X" and danger state: the car never goes over the limit, so every one is false.
@@ -34,7 +34,7 @@ object LimitAudit {
         val examples: List<String>,
     )
 
-    fun run(network: RoadNetwork, drives: Int, seed: Int): Report {
+    fun run(network: RoadNetwork, drives: Int, seed: Int, early: Boolean = false): Report {
         val rnd = Random(seed)
         val starts = network.segments.filter { it.roadClass in FieldAudit.DRIVEN && it.lengthM > 50 }
         var instants = 0
@@ -86,7 +86,7 @@ object LimitAudit {
                 d += v
                 t++
             }
-            val session = DrivingSession(network, emptyList())
+            val session = DrivingSession(network, emptyList(), DriverProfile(earlySpeeding = early))
             for ((n, s) in DrivingSession.replay(fixes, session).withIndex()) {
                 for (e in s.events) if (e is AlertEvent.Overspeed && e.level == OverspeedLevel.WARN) {
                     falseWarnings++
@@ -121,11 +121,11 @@ object LimitAudit {
 
 fun limitAuditMain(args: Array<String>) {
     if (args.isEmpty()) {
-        println("Usage : limits <dossier des tuiles> [trajets] [graine]")
+        println("Usage : limits <dossier des tuiles> [trajets] [graine] [tot]")
         return
     }
     val network = FieldAudit.loadTiles(File(args[0]))
-    val r = LimitAudit.run(network, args.getOrNull(1)?.toInt() ?: 200, args.getOrNull(2)?.toInt() ?: 1)
+    val r = LimitAudit.run(network, args.getOrNull(1)?.toInt() ?: 200, args.getOrNull(2)?.toInt() ?: 1, early = args.getOrNull(3) == "tot")
     fun pct(x: Int, n: Int) = if (n == 0) "-" else "${(1000.0 * x / n).roundToInt() / 10.0} %"
     println("${r.drives} trajets, ${network.segments.size} segments, ${r.instants} instants")
     println("Limite juste : ${pct(r.right, r.instants - r.atChange)}, fausse : ${r.wrong} (${pct(r.wrong, r.instants - r.atChange)}, dont trop basse ${r.wrongLower})")
