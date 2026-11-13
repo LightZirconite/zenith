@@ -1,5 +1,4 @@
 import Foundation
-import UIKit
 import ZenithCore
 
 /**
@@ -19,10 +18,9 @@ enum SpotifyRemoteDuck {
             guard ducked == nil, let found = await activeDevice(), let id = found.1.id, let volume = found.1.volumePercent else { return }
             let (player, device) = found
             let premium: Int32 = SpotifyAuth.shared.premium.map { $0 ? 1 : 0 } ?? -1
-            let names = ["iPhone", UIDevice.current.name, UIDevice.current.model]
             guard Bridge.shared.spotifyShouldDuck(
-                deviceType: device.type, deviceName: device.name, supportsVolume: device.supportsVolume ?? false,
-                playing: player.isPlaying ?? false, premium: premium, phoneNames: names
+                deviceType: device.type, supportsVolume: device.supportsVolume ?? false,
+                playing: player.isPlaying ?? false, premium: premium
             ) else { return }
             let to = Bridge.shared.spotifyDuckedVolume(current: Int32(volume))
             guard to < volume, let answer = await setVolume(to, id) else { return }
@@ -68,13 +66,12 @@ enum SpotifyRemoteDuck {
     private struct PlayerState: Decodable {
         struct Device: Decodable {
             let id: String?
-            let name: String?
             let type: String?
             let volumePercent: Int?
             let supportsVolume: Bool?
 
             enum CodingKeys: String, CodingKey {
-                case id, name, type
+                case id, type
                 case volumePercent = "volume_percent"
                 case supportsVolume = "supports_volume"
             }

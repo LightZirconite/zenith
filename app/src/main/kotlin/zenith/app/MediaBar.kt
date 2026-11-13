@@ -96,8 +96,8 @@ fun MusicBackdrop(media: MediaInfo, canvas: Boolean, calm: Boolean, focus: Float
     val video = rememberCanvas(media, canvas)
     var videoShown by remember(video) { mutableStateOf(false) }
     var videoFailed by remember(video) { mutableStateOf(false) }
-    val videoAlpha by animateFloatAsState(if (!videoShown) 0f else if (calm) 0.35f else 0.85f, tween(900), label = "canvas")
-    val artAlpha by animateFloatAsState(if (calm) 0.25f else 0.5f, tween(600), label = "backdrop")
+    val videoAlpha by animateFloatAsState(if (!videoShown) 0f else if (calm) 0.45f else 1f, tween(900), label = "canvas")
+    val artAlpha by animateFloatAsState(if (calm) 0.3f else 0.62f, tween(600), label = "backdrop")
     val backdrop = remember(media.art) { media.art?.let(::tiny) }
     // The top fades to transparent (a mask, not a black band): faint high up, whole where the map has gone.
     // In landscape it comes in from the right instead, under the speed column, beside the map.
@@ -125,13 +125,14 @@ fun MusicBackdrop(media: MediaInfo, canvas: Boolean, calm: Boolean, focus: Float
                 },
             )
         }
-        // Darkening for the speed and the buttons to stay readable, stronger at the bottom; lighter in music mode.
+        // Darkening for the speed and the buttons to stay readable, stronger at the bottom; lighter in
+        // music mode. Kept light (13/11/2026, the author: "le Canvas n'est pas assez visible").
         Box(
             Modifier.fillMaxSize().background(
                 Brush.verticalGradient(
-                    0f to Color.Black.copy(alpha = 0.35f - 0.2f * focus),
-                    0.5f to Color.Black.copy(alpha = 0.45f - 0.2f * focus),
-                    1f to Color.Black.copy(alpha = 0.75f - 0.05f * focus),
+                    0f to Color.Black.copy(alpha = 0.12f - 0.08f * focus),
+                    0.5f to Color.Black.copy(alpha = 0.24f - 0.12f * focus),
+                    1f to Color.Black.copy(alpha = 0.58f - 0.08f * focus),
                 ),
             ),
         )

@@ -269,14 +269,8 @@ object Bridge {
         }.getOrNull()
 
     /** Spotify playing on another device (car, speaker) to lower while Zenith speaks; [premium] -1 unknown. */
-    fun spotifyShouldDuck(
-        deviceType: String?,
-        deviceName: String?,
-        supportsVolume: Boolean,
-        playing: Boolean,
-        premium: Int,
-        phoneNames: List<String>,
-    ): Boolean = SpotifyDuck.shouldDuck(deviceType, deviceName, supportsVolume, playing, premium.toChoice(), phoneNames)
+    fun spotifyShouldDuck(deviceType: String?, supportsVolume: Boolean, playing: Boolean, premium: Int): Boolean =
+        SpotifyDuck.shouldDuck(deviceType, supportsVolume, playing, premium.toChoice())
 
     fun spotifyDuckedVolume(current: Int): Int = SpotifyDuck.duckedVolume(current)
 

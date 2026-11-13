@@ -18,26 +18,15 @@ object SpotifyDuck {
     const val FLOOR = 10
 
     /**
-     * Whether to lower the active device: it is not this phone ([deviceType] not "Smartphone", or
-     * a smartphone whose [deviceName] is none of [phoneNames]), it takes volume commands, music
-     * plays, and the account may have Premium ([premium] null: unknown yet, Spotify's answer will
-     * tell). The phone itself is ducked by Android already.
+     * Whether to lower the active device: not a phone ([deviceType] not "Smartphone": the car, a
+     * speaker, a computer), it takes volume commands, music plays, and the account may have
+     * Premium ([premium] null: unknown yet, Spotify's answer will tell). A phone is never lowered:
+     * it is this one, which the system's own ducking already lowers. Telling this phone from
+     * another one by its name failed (iOS 16+ only gives apps "iPhone", Spotify says
+     * "iPhone de …"): the music went down twice and came back seconds late (13/11/2026).
      */
-    fun shouldDuck(
-        deviceType: String?,
-        deviceName: String?,
-        supportsVolume: Boolean,
-        playing: Boolean,
-        premium: Boolean?,
-        phoneNames: Collection<String>,
-    ): Boolean {
-        if (!supportsVolume || !playing || premium == false) return false
-        val phone = deviceType.equals(SMARTPHONE, ignoreCase = true)
-        if (!phone) return true
-        // A smartphone without a name could be this one: left alone rather than ducked twice.
-        val name = deviceName?.trim()?.takeIf { it.isNotEmpty() } ?: return false
-        return phoneNames.none { it.trim().equals(name, ignoreCase = true) }
-    }
+    fun shouldDuck(deviceType: String?, supportsVolume: Boolean, playing: Boolean, premium: Boolean?): Boolean =
+        supportsVolume && playing && premium != false && !deviceType.equals(SMARTPHONE, ignoreCase = true)
 
     /** The volume (percent) while Zenith speaks: about a quarter of [current], at least [FLOOR], never louder. */
     fun duckedVolume(current: Int): Int {

@@ -306,8 +306,8 @@ struct MusicBackdrop: View {
     var body: some View {
         let file = canvas ? MusicCenter.shared.canvasFile : nil
         let videoUp = file != nil && shownFile == file
-        let videoAlpha = videoUp ? min(1, (calm ? 0.35 : 0.85) + 0.15 * focus) : 0
-        let artAlpha = min(1, (calm ? 0.25 : 0.5) + 0.3 * focus)
+        let videoAlpha = videoUp ? min(1, (calm ? 0.45 : 1) + 0.15 * focus) : 0
+        let artAlpha = min(1, (calm ? 0.3 : 0.62) + 0.3 * focus)
         ZStack {
             if let art = media.art {
                 // A tiny copy upscaled is already soft; the blur smooths it out.
@@ -330,9 +330,10 @@ struct MusicBackdrop: View {
             // Darkening for the speed and the buttons to stay readable, stronger at the bottom; lighter in music mode.
             LinearGradient(
                 stops: [
-                    .init(color: .black.opacity(0.35 - 0.2 * focus), location: 0),
-                    .init(color: .black.opacity(0.45 - 0.2 * focus), location: 0.5),
-                    .init(color: .black.opacity(0.75 - 0.05 * focus), location: 1),
+                    // Kept light (13/11/2026, the author: "le Canvas n'est pas assez visible").
+                    .init(color: .black.opacity(0.12 - 0.08 * focus), location: 0),
+                    .init(color: .black.opacity(0.24 - 0.12 * focus), location: 0.5),
+                    .init(color: .black.opacity(0.58 - 0.08 * focus), location: 1),
                 ],
                 startPoint: .top,
                 endPoint: .bottom

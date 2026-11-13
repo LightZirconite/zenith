@@ -560,7 +560,7 @@ fun DriveScreen(
                 )
             }
         }
-        // Too fast near a radar: the edges of the screen pulse red.
+        // Too fast near a radar: a soft red light breathes out of the alert island.
         DangerGlow(on = landed && snapshot?.alerts?.firstOrNull()?.overLimit == true, modifier = Modifier.fillMaxSize())
         RadarPassWave(pass.value, passFlash, Modifier.fillMaxSize())
         // Home, flight and speed swap with a zoom: the flight's caption rushes past the viewer as the

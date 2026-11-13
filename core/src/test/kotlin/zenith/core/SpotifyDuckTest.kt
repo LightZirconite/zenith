@@ -7,33 +7,24 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class SpotifyDuckTest {
-    private val phone = listOf("Pixel 8", "Téléphone de Lucas")
-
     private fun duck(
         type: String? = "Automobile",
-        name: String? = "Peugeot 208",
         volume: Boolean = true,
         playing: Boolean = true,
         premium: Boolean? = true,
-    ) = SpotifyDuck.shouldDuck(type, name, volume, playing, premium, phone)
+    ) = SpotifyDuck.shouldDuck(type, volume, playing, premium)
 
     @Test
     fun `music on the car or a speaker is lowered`() {
         assertTrue(duck())
-        assertTrue(duck(type = "Speaker", name = "Salon"))
-        assertTrue(duck(type = null, name = null))
+        assertTrue(duck(type = "Speaker"))
+        assertTrue(duck(type = null))
     }
 
     @Test
-    fun `this phone is left to Android's own ducking`() {
-        assertFalse(duck(type = "Smartphone", name = "Pixel 8"))
-        assertFalse(duck(type = "smartphone", name = " téléphone de lucas "))
-        assertFalse(duck(type = "Smartphone", name = null))
-    }
-
-    @Test
-    fun `another phone is lowered`() {
-        assertTrue(duck(type = "Smartphone", name = "iPhone de Marie"))
+    fun `a phone is left to the system's own ducking, whatever its name`() {
+        assertFalse(duck(type = "Smartphone"))
+        assertFalse(duck(type = "smartphone"))
     }
 
     @Test

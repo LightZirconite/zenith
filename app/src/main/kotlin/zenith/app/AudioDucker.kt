@@ -7,9 +7,7 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
-import android.os.Build
 import android.os.SystemClock
-import android.provider.Settings
 
 /**
  * Makes room for Zenith's sounds, like a navigation app. The music ducks under the beeps and the
@@ -38,12 +36,6 @@ class AudioDucker(context: Context) {
     private var duckedAtMs = 0L
     /** Spotify on another device was asked to go down: it comes back with the focus. */
     private var remoteDucked = false
-
-    init {
-        // How Spotify may name this phone, so it is never lowered twice (Android ducks it already).
-        val deviceName = runCatching { Settings.Global.getString(context.contentResolver, Settings.Global.DEVICE_NAME) }.getOrNull()
-        SpotifyPlayer.phoneNames = listOfNotNull(Build.MODEL, "${Build.MANUFACTURER} ${Build.MODEL}", deviceName).distinct()
-    }
 
     /** [pause]: the music must stop rather than duck (spoken alerts, setting; the start of a drive). */
     @Synchronized

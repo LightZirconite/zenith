@@ -2,7 +2,6 @@ package zenith.app
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.os.Build
 import android.os.SystemClock
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
@@ -86,8 +85,6 @@ object SpotifyPlayer {
     private var ducked: Ducked? = null
     /** Lowering and putting back run in the order asked, never crossing. */
     private val duckOrder = Mutex()
-    /** Names Spotify may give this phone: its model, or the name set in Android's settings. */
-    var phoneNames: List<String> = listOf(Build.MODEL)
 
     /** Follows the player until [stop]; idempotent, nothing without a client id. */
     fun start() {
@@ -167,11 +164,7 @@ object SpotifyPlayer {
             duckOrder.withLock {
                 if (ducked != null || !SpotifyAuth.state.value.connected) return@withLock
                 val device = activeDevice() ?: return@withLock
-                if (!SpotifyDuck.shouldDuck(
-                        device.type, device.name, device.supportsVolume, device.playing,
-                        SpotifyAuth.state.value.premium, phoneNames,
-                    )
-                ) return@withLock
+                if (!SpotifyDuck.shouldDuck(device.type, device.supportsVolume, device.playing, SpotifyAuth.state.value.premium)) return@withLock
                 val before = device.volume ?: return@withLock
                 val to = SpotifyDuck.duckedVolume(before)
                 if (to >= before) return@withLock
@@ -194,7 +187,7 @@ object SpotifyPlayer {
     }
 
     /** The device Spotify plays on (`GET /v1/me/player`). */
-    private data class Device(val id: String, val name: String?, val type: String?, val volume: Int?, val supportsVolume: Boolean, val playing: Boolean)
+    private data class Device(val id: String, val type: String?, val volume: Int?, val supportsVolume: Boolean, val playing: Boolean)
 
     private suspend fun activeDevice(): Device? {
         val answer = SpotifyAuth.request("GET", "/v1/me/player") ?: return null
@@ -206,7 +199,6 @@ object SpotifyPlayer {
             if (!device.optBoolean("is_active", true)) return@runCatching null
             Device(
                 id = id,
-                name = device.text("name"),
                 type = device.text("type"),
                 volume = if (device.isNull("volume_percent")) null else device.optInt("volume_percent"),
                 supportsVolume = device.optBoolean("supports_volume", false),
