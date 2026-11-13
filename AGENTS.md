@@ -73,7 +73,7 @@ pipeline/  Python : build_roads.py (tuiles de limitations, zones bâties), build
   radars.yml     chaîne qui se relance seule toutes les 3 à 5 h (+ 6 crons jamais déclenchés) → récolte Lufop (≤150 requêtes
                  sur 24 h glissantes) + fusion → radars.json, official.json, lufop.json.enc
 ```
-data.yml et radars.yml partagent le groupe de concurrence `data-release` (ils publient les mêmes fichiers).
+data.yml (sa tâche `radars`, la fusion) et radars.yml (sa tâche `radars`) partagent le groupe de concurrence `data-release` (ils publient les mêmes fichiers). Rien d'autre n'y attend ni n'y dort : GitHub ne garde qu'**une** exécution en attente par groupe et annule l'ancienne (13/11/2026 : la reconstruction des tuiles, en attente derrière un passage radars qui dormait 45 min dans le groupe, a été annulée par le passage suivant). D'où la construction des tuiles hors du groupe (`data-tiles`) et l'attente aléatoire de radars.yml dans sa propre tâche `delay`.
 
 ### Release `data` (la « base de données »)
 

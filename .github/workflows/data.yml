@@ -14,15 +14,16 @@ permissions:
   contents: write
   actions: write
 
-# Shared with radars.yml: both publish radars.json and official.json.
-concurrency:
-  group: data-release
-  cancel-in-progress: false
-
 jobs:
+  # Road tiles and OSM radars: only this workflow publishes them, so no shared group. In the
+  # data-release group, a run waiting behind radars.yml was cancelled by its next run (GitHub keeps
+  # a single waiting run per group, 13/11/2026), and the week's tiles were lost.
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 180
+    concurrency:
+      group: data-tiles
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -63,19 +64,6 @@ jobs:
           print(len(tiles), "tiles,", sum(manifest["tiles"].values()) // 1_000_000, "MB")
           PY
 
-      # After the tiles: a merge without any official source must not cost the week's road tiles.
-      - name: Radars
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-          LUFOP_DB_KEY: ${{ secrets.LUFOP_DB_KEY }}
-        run: |
-          assets=$(gh release view data --json assets -q '.assets[].name' 2>/dev/null || true)
-          if grep -qx radars.json <<< "$assets"; then gh release download data -p radars.json -O out/previous_radars.json; fi
-          if grep -qx official.json <<< "$assets"; then gh release download data -p official.json -D out; fi
-          pipeline/lufop_db.sh fetch out/lufop.json
-          python pipeline/build_radars.py merge out/osm_radars.json out/lufop.json out/radars.json out/official.json --france out/manifest.json --abroad out/radars_abroad.json
-
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
@@ -88,7 +76,34 @@ jobs:
           ls out/tiles/*.json.gz | xargs -n 50 gh release upload data --clobber
           gh release upload data out/manifest.json --clobber
 
-      # Last, so a refused radars.json never blocks the road tiles.
+  # After the tiles, from what they published: a merge without any official source must not cost
+  # the week's road tiles. Shared with radars.yml (both publish radars.json and official.json); if
+  # a radars run replaces this one while it waits, that run merges the new OSM radars itself.
+  radars:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    concurrency:
+      group: data-release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Radars
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LUFOP_DB_KEY: ${{ secrets.LUFOP_DB_KEY }}
+        run: |
+          mkdir -p out
+          assets=$(gh release view data --json assets -q '.assets[].name' 2>/dev/null || true)
+          gh release download data -p osm_radars.json -p manifest.json -D out
+          if grep -qx radars.json <<< "$assets"; then gh release download data -p radars.json -O out/previous_radars.json; fi
+          if grep -qx official.json <<< "$assets"; then gh release download data -p official.json -D out; fi
+          pipeline/lufop_db.sh fetch out/lufop.json
+          python pipeline/build_radars.py merge out/osm_radars.json out/lufop.json out/radars.json out/official.json --france out/manifest.json --abroad out/radars_abroad.json
+
       - name: Publish radars
         if: hashFiles('out/radars.json') != ''
         env:
@@ -97,9 +112,14 @@ jobs:
           python pipeline/build_radars.py check out/previous_radars.json out/radars.json --france out/manifest.json
           gh release upload data out/radars.json out/official.json $(ls out/radars_abroad.json 2>/dev/null) --clobber
 
-      # Revives the radars chain (radars.yml starts itself again every few hours) if it ever stopped.
+  # Revives the radars chain (radars.yml starts itself again every few hours) if it ever stopped,
+  # whatever came of the jobs above.
+  alive:
+    needs: [build, radars]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
       - name: Radars chain alive
-        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}

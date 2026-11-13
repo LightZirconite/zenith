@@ -33,7 +33,18 @@ permissions:
   actions: write
 
 jobs:
+  # Outside the data-release group: sleeping inside it would hold it, and GitHub keeps a single
+  # waiting run per group (a data.yml waiting behind it was cancelled by the next one, 13/11/2026).
+  delay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Random delay
+        if: github.event_name == 'schedule'
+        run: sleep $((RANDOM % 2700))
+
   radars:
+    needs: delay
     runs-on: ubuntu-latest
     timeout-minutes: 120
     # Shared with data.yml: both publish radars.json and official.json.
@@ -41,10 +52,6 @@ jobs:
       group: data-release
       cancel-in-progress: false
     steps:
-      - name: Random delay
-        if: github.event_name == 'schedule'
-        run: sleep $((RANDOM % 2700))
-
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
