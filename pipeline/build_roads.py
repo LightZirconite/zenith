@@ -162,7 +162,7 @@ class BuiltUp:
 
 
 def smooth(flags, coords):
-    """Flips in/out runs shorter than MIN_RUN_M between two runs of the other state."""
+    """A run shorter than MIN_RUN_M between two runs of one same other state takes that state."""
     runs, start = [], 0
     for k in range(1, len(flags) + 1):
         if k == len(flags) or flags[k] != flags[start]:
@@ -172,8 +172,9 @@ def smooth(flags, coords):
     for a, b in runs[1:-1]:
         length = sum(math.dist((coords[k][0] * 111_000, coords[k][1] * 78_000), (coords[k + 1][0] * 111_000, coords[k + 1][1] * 78_000))
                      for k in range(max(a - 1, 0), b))
-        if length < MIN_RUN_M:
-            out[a:b] = [not flags[a]] * (b - a)
+        before, after = flags[a - 1], flags[b] if b < len(flags) else None
+        if length < MIN_RUN_M and before == after:
+            out[a:b] = [before] * (b - a)
     return out
 
 
