@@ -6,13 +6,13 @@ Each drivable OSM way is split at junction nodes into segments carrying their sp
 to 0.5° tiles: roads_<i>_<j>.json.gz with i = floor(lat * 2), j = floor(lon * 2). A segment
 crossing a tile edge is written to every tile it touches (same id), so tiles stand alone.
 
-Roads with no limit at all get the French default of where they are, only where it is clear:
-50 deep inside a built-up area (the road's cell and the 8 around it built up), 80 on a two-way
-communal road (unclassified) with no built-up cell within ~330 m. Elsewhere they stay without a
-limit: measured on France (13/11/2026) against the tagged roads, guessing everywhere was right
-only 60 % of the time (50 roads taken for 80, departmental roads back at 90). Built-up areas come
-from landuse polygons and from blocks of residential streets, on a ~110 m grid; small isolated
-patches are dropped. Such roads are cut where the default changes.
+Roads with no limit at all get 50 deep inside a built-up area (the road's cell and the 8 around
+it built up), and no limit elsewhere. Measured on France (13/11/2026) against the tagged roads:
+guessing 50 built-up / 80 outside everywhere was right only 60 % of the time; even restricted to
+communal roads far from any built-up area, 80 was wrong 4 times in 10 (villages without mapped
+landuse, departmental roads back at 90), and 50 on a trunk road in town was nearly always wrong.
+Built-up areas come from landuse polygons and from blocks of residential streets, on a ~110 m
+grid; small isolated patches are dropped. Such roads are cut where the default changes.
 
 Each run checks that rule against the roads whose limit is tagged (two-way roads of the same
 classes), by road class ("--check" prints only that, without writing tiles).
@@ -44,14 +44,13 @@ SRC_EXPLICIT, SRC_IMPLICIT, SRC_INFERRED, SRC_AREA = 0, 1, 2, 3
 
 # Built-up areas (see module doc).
 BUILTUP_LANDUSE = {"residential", "retail", "commercial"}
-AREA_CLASSES = {"trunk", "primary", "secondary", "tertiary", "unclassified"}
+AREA_CLASSES = {"primary", "secondary", "tertiary", "unclassified"}
 CELL_LAT, CELL_LON = 1 / 1000, 1 / 700  # ~110 m both ways across France
 MIN_PATCH_CELLS = 4  # ~5 ha
 STREET_CELLS = 4  # a 3 × 3 block with residential streets in this many cells is built up
-URBAN_RING, RURAL_RING = 1, 3  # cells around the road: all built up for 50, none for 80
-RURAL_CLASSES = {"unclassified"}  # departmental roads are too often back at 90 for a guessed 80
+URBAN_RING = 1  # cells around the road that must all be built up for 50
 MIN_RUN_M = 100  # shorter in/out runs inside a way are noise along a boundary
-URBAN_KMH, RURAL_KMH = 50, 80
+URBAN_KMH = 50
 ROW = 1_000_000  # cell key = row * ROW + column
 
 
@@ -177,17 +176,13 @@ class Place:
     def __init__(self, cells):
         self.cells = cells
 
-    def default(self, lat, lon, highway, oneway):
+    def default(self, lat, lon):
         k = cell_key(lat, lon)
-        ring = lambda r: (k + di * ROW + dj for di in range(-r, r + 1) for dj in range(-r, r + 1))
-        if all(n in self.cells for n in ring(URBAN_RING)):
-            return URBAN_KMH
-        if highway in RURAL_CLASSES and not oneway and not any(n in self.cells for n in ring(RURAL_RING)):
-            return RURAL_KMH
-        return None
+        r = URBAN_RING
+        return URBAN_KMH if all(k + di * ROW + dj in self.cells for di in range(-r, r + 1) for dj in range(-r, r + 1)) else None
 
-    def along(self, coords, highway, oneway):
-        return smooth([self.default(lat, lon, highway, oneway) for lat, lon in coords], coords)
+    def along(self, coords):
+        return smooth([self.default(lat, lon) for lat, lon in coords], coords)
 
 
 class LimitCheck:
@@ -199,7 +194,7 @@ class LimitCheck:
         self.length = {}  # (class, guess, tagged) -> m
 
     def add(self, highway, limit, coords):
-        guesses = self.place.along(coords, highway, False)
+        guesses = self.place.along(coords)
         for k, ((a, b), (c, d)) in enumerate(zip(coords, coords[1:])):
             key = (highway, guesses[k], limit)
             self.length[key] = self.length.get(key, 0) + math.dist((a * 111_000, b * 78_000), (c * 111_000, d * 78_000))
@@ -325,7 +320,7 @@ class SegmentBuilder(osmium.SimpleHandler):
         # No limit at all: default of the place where it is clear (Place), else none.
         flags = None
         if fwd is None and bwd is None and highway in AREA_CLASSES:
-            flags = self.place.along([(loc.lat, loc.lon) for _, loc in nodes], highway, oneway)
+            flags = self.place.along([(loc.lat, loc.lon) for _, loc in nodes])
         start = 0
         piece = 0
         for k in range(1, len(nodes)):
