@@ -11,7 +11,11 @@ Roads with no limit at all get the French default of where they are: 50 in a bui
 on a ~100 m grid; small isolated patches (farms, hamlets without entry signs) are dropped. Such
 roads are also cut where they enter or leave a built-up area.
 
-Usage: build_roads.py <extract.osm.pbf> <out_dir>
+Each run also checks that guess against the roads whose limit is tagged (two-way roads of the
+same classes): how often 50 / 80 from the place would have been their real limit, for a few
+variants of the built-up grid ("--check" prints only that, without writing tiles).
+
+Usage: build_roads.py <extract.osm.pbf> <out_dir> [--check]
 """
 import gzip
 import json
@@ -30,7 +34,10 @@ CLASSES = [
     "living_street", "motorway_link", "trunk_link", "primary_link", "secondary_link", "tertiary_link",
 ]
 CLASS_INDEX = {c: i for i, c in enumerate(CLASSES)}
-IMPLICIT = {"FR:urban": 50, "FR:rural": 80, "FR:motorway": 130, "FR:zone30": 30, "FR:walk": 6}
+IMPLICIT = {
+    "FR:urban": 50, "FR:rural": 80, "FR:motorway": 130, "FR:zone30": 30, "FR:zone20": 20, "FR:living_street": 20,
+    "FR:walk": 6,
+}
 SRC_EXPLICIT, SRC_IMPLICIT, SRC_INFERRED, SRC_AREA = 0, 1, 2, 3
 
 # Built-up areas (see module doc).
@@ -68,7 +75,7 @@ def limits(tags, highway):
     if b2:
         bwd, src = b2, src or s3
     if fwd is None and bwd is None:
-        for key in ("maxspeed:type", "source:maxspeed", "zone:maxspeed"):
+        for key in ("maxspeed:type", "source:maxspeed", "zone:maxspeed", "zone:traffic"):
             v, _ = parse_speed(tags.get(key))
             if v:
                 return v, v, SRC_IMPLICIT
@@ -158,6 +165,52 @@ def smooth(flags, coords):
     return out
 
 
+class Neighbours(BuiltUp):
+    """Built-up grid that only counts the cell itself, no neighbour (variant of the check)."""
+
+    def covers(self, lat, lon):
+        return cell_key(lat, lon) in self.cells
+
+
+class LimitCheck:
+    """How the default of the place compares with tagged limits, per variant of the built-up grid.
+
+    For each two-way road of AREA_CLASSES with one tagged limit, the default is guessed along it as
+    for an untagged road, and its length counted under (guess, tagged limit)."""
+
+    def __init__(self, variants):
+        self.variants = variants  # name -> BuiltUp
+        self.length = {name: {} for name in variants}
+
+    def add(self, limit, coords):
+        if limit not in (30, 50, 70, 80, 90):
+            return
+        for name, grid in self.variants.items():
+            flags = smooth([grid.covers(*c) for c in coords], coords)
+            counts = self.length[name]
+            for k in range(len(coords) - 1):
+                (a, b), (c, d) = coords[k], coords[k + 1]
+                m = math.dist((a * 111_000, b * 78_000), (c * 111_000, d * 78_000))
+                guess = URBAN_KMH if flags[k] else RURAL_KMH
+                counts[(guess, limit)] = counts.get((guess, limit), 0) + m
+
+    def report(self):
+        print("Contrôle de la limite par défaut du lieu (routes à double sens dont la limite est connue) :")
+        for name, counts in self.length.items():
+            total = sum(counts.values()) or 1
+            right = sum(v for (g, t), v in counts.items() if g == t)
+            # Built-up guessed where the road is tagged as outside (70 and up), and the reverse.
+            urban_wrong = sum(v for (g, t), v in counts.items() if g == URBAN_KMH and t >= 70)
+            rural_wrong = sum(v for (g, t), v in counts.items() if g == RURAL_KMH and t <= 50)
+            print(f"  {name:28} juste {right / total:6.1%}  50 au lieu de 70+ {urban_wrong / total:6.1%}  "
+                  f"80 au lieu de 50- {rural_wrong / total:6.1%}  ({total / 1000:,.0f} km)")
+            by_truth = {}
+            for (g, t), v in counts.items():
+                by_truth.setdefault(t, {})[g] = v
+            print("      " + "  ".join(f"vrai {t}: " + "/".join(f"{g}={v / sum(gs.values()):.0%}" for g, v in sorted(gs.items()))
+                                     for t, gs in sorted(by_truth.items())))
+
+
 class JunctionCounter(osmium.SimpleHandler):
     """Pass 1: finds nodes used more than once by drivable ways, and the built-up areas."""
 
@@ -228,11 +281,12 @@ class TileWriter:
 class SegmentBuilder(osmium.SimpleHandler):
     """Pass 2: splits ways at junctions (and built-up edges) and writes segments to tiles."""
 
-    def __init__(self, junction, builtup, writer):
+    def __init__(self, junction, builtup, writer, check=None):
         super().__init__()
         self.junction = junction
         self.builtup = builtup
         self.writer = writer
+        self.check = check
         self.area_segments = 0
 
     def way(self, w):
@@ -247,6 +301,10 @@ class SegmentBuilder(osmium.SimpleHandler):
             return
         fwd, bwd, src = limits(tags, highway)
         oneway = oneway_of(tags, highway)
+        if self.check is not None and src == SRC_EXPLICIT and fwd == bwd and oneway == 0 and highway in AREA_CLASSES:
+            self.check.add(fwd, [(loc.lat, loc.lon) for _, loc in nodes])
+        if self.writer is None:
+            return
         if oneway == -1:
             nodes.reverse()
             fwd, bwd = bwd, fwd
@@ -282,18 +340,30 @@ class SegmentBuilder(osmium.SimpleHandler):
 
 def main():
     pbf, out_dir = sys.argv[1], sys.argv[2]
-    os.makedirs(out_dir, exist_ok=True)
+    only_check = "--check" in sys.argv[3:]
     counter = JunctionCounter()
     counter.apply_file(pbf, locations=True, idx="flex_mem")
-    cells = counter.cells
-    raw = len(cells)
+    raw_cells = counter.cells
+    cells = set(raw_cells)
     drop_small_patches(cells, MIN_PATCH_CELLS)
-    print(f"zones bâties : {len(cells)} cellules de ~110 m ({raw - len(cells)} isolées retirées)")
-    writer = TileWriter(out_dir)
-    builder = SegmentBuilder(counter.junction, BuiltUp(cells), writer)
+    print(f"zones bâties : {len(cells)} cellules de ~110 m ({len(raw_cells) - len(cells)} isolées retirées)")
+    variants = {"actuel (voisines, ≥ 4)": BuiltUp(cells), "sans voisines, ≥ 4": Neighbours(cells)}
+    for size in (12, 30, 80):
+        bigger = set(cells)
+        drop_small_patches(bigger, size)
+        variants[f"voisines, ≥ {size}"] = BuiltUp(bigger)
+        variants[f"sans voisines, ≥ {size}"] = Neighbours(bigger)
+    del raw_cells
+    check = LimitCheck(variants)
+    writer = None if only_check else TileWriter(out_dir)
+    if writer:
+        os.makedirs(out_dir, exist_ok=True)
+    builder = SegmentBuilder(counter.junction, BuiltUp(cells), writer, check)
     builder.apply_file(pbf, locations=True, idx="flex_mem")
-    writer.close()
-    print(f"{writer.count} segments ({builder.area_segments} avec la limite par défaut du lieu), {len(writer.files)} tiles")
+    if writer:
+        writer.close()
+        print(f"{writer.count} segments ({builder.area_segments} avec la limite par défaut du lieu), {len(writer.files)} tiles")
+    check.report()
 
 
 if __name__ == "__main__":
