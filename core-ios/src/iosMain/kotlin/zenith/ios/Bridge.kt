@@ -1,5 +1,6 @@
 package zenith.ios
 
+import zenith.core.AnnouncePrefs
 import zenith.core.BBox
 import zenith.core.CanvasAnswer
 import zenith.core.CanvasSearch
@@ -43,6 +44,15 @@ import zenith.core.TripStats
 object Bridge {
     // ---- Drive ----
 
+    /** What the driver chose to hear (Réglages); read when a snapshot is made, set from the main thread. */
+    @kotlin.concurrent.Volatile
+    private var prefs = AnnouncePrefs()
+
+    /** Radars are always announced; each of these can be turned off (see AnnouncePrefs). */
+    fun setAnnounce(speeding: Boolean, passResult: Boolean, zones: Boolean) {
+        prefs = AnnouncePrefs(speeding, passResult, zones)
+    }
+
     /** A CoreLocation fix: a negative accuracy, speed or course means unknown. */
     fun fix(timeMs: Long, lat: Double, lon: Double, accuracyM: Double, speedMps: Double, courseDeg: Double): GpsFix =
         GpsFix(timeMs, LatLon(lat, lon), accuracyM.takeIf { it >= 0 }, speedMps.takeIf { it >= 0 }, courseDeg.takeIf { it >= 0 })
@@ -56,14 +66,15 @@ object Bridge {
     fun liveSession(network: () -> RoadNetwork?): DrivingSession = DrivingSession(network, emptyList())
 
     fun process(session: DrivingSession, fix: GpsFix): CoreSnapshot? =
-        runCatching { session.process(fix)?.let(CoreSnapshot::of) }.getOrNull()
+        runCatching { session.process(fix)?.let { CoreSnapshot.of(it, prefs) } }.getOrNull()
 
     /** GPS lost (tunnel): the car moves on along the road; nil when there is nothing to follow. */
     fun coast(session: DrivingSession, nowMs: Long): CoreSnapshot? =
-        runCatching { session.coast(nowMs)?.let(CoreSnapshot::of) }.getOrNull()
+        runCatching { session.coast(nowMs)?.let { CoreSnapshot.of(it, prefs) } }.getOrNull()
 
-    fun setProfile(session: DrivingSession, probationary: Boolean, raining: Boolean) {
-        session.profile = DriverProfile(probationary, raining)
+    /** [earlySpeeding]: too fast from 3 km/h over the limit, instead of from the radar's flash speed. */
+    fun setProfile(session: DrivingSession, probationary: Boolean, raining: Boolean, earlySpeeding: Boolean) {
+        session.profile = DriverProfile(probationary, raining, earlySpeeding)
     }
 
     fun setRadars(session: DrivingSession, data: RadarData) {

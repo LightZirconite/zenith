@@ -34,7 +34,7 @@ final class DriveEngine: NSObject, CLLocationManagerDelegate {
     private var ending = false
     private var generation = 0
     private var vehicleLeftAt: Date?
-    private var appliedProfile: (Bool, Bool)?
+    private var appliedProfile: (Bool, Bool, Bool)?
     /** The drive added up (distance, time, top speed, radars passed), for its summary back home. */
     private var trip: TripStats?
 
@@ -365,13 +365,14 @@ final class DriveEngine: NSObject, CLLocationManagerDelegate {
         model.setSatellites(used: best, visible: max(model.gps.visible, best + 3))
     }
 
-    /** Licence and rain rules follow the settings during the drive. */
+    /** Licence, rain and "too fast" rules, and what is announced, follow the settings during the drive. */
     private func applyProfile() {
-        let p = (settings.probationary, settings.raining)
+        Bridge.shared.setAnnounce(speeding: settings.speeding, passResult: settings.passResult, zones: settings.zones)
+        let p = (settings.probationary, settings.raining, settings.earlySpeeding)
         if let a = appliedProfile, a == p { return }
         appliedProfile = p
         queue.async { [self] in
-            if let session { Bridge.shared.setProfile(session: session, probationary: p.0, raining: p.1) }
+            if let session { Bridge.shared.setProfile(session: session, probationary: p.0, raining: p.1, earlySpeeding: p.2) }
         }
     }
 
@@ -411,30 +412,22 @@ final class DriveEngine: NSObject, CLLocationManagerDelegate {
 
     // MARK: - Sounds
 
-    /** Tone first, then the spoken text right after it. Main thread. */
+    /**
+     * Tone first, then the spoken text right after it. What is heard is the driver's choice, decided
+     * by the core (Announcer.plan, through Bridge.setAnnounce). Main thread.
+     */
     private func announce(_ e: DriveEvent) {
-        guard let tones else { return }
-        let tone: Tone?
-        switch e.kind {
-        case .approach: tone = (e.radar?.measuresSpeed ?? true) ? .approach : .chime
-        case .sectionStarted: tone = .approach
-        case .brake: tone = .brake
-        case .overspeed: tone = e.level == .warn ? .overspeed : nil
-        case .passed: tone = e.wouldFlash ? .passed : nil
-        case .sectionEnded: tone = .passed
-        case .limitChanged, .zoneLeft: tone = nil
-        case .zoneEntered: tone = .chime
-        }
+        guard let tones, let cue = e.cue else { return }
+        let tone = Tone(cue: cue)
         if let tone { tones.play(tone) }
         guard settings.voice, let text = e.text else { return }
         // What changes the driver's speed now goes first, dropping older announcements still queued.
-        let urgent = e.kind == .brake || (e.kind == .overspeed && e.level == .warn) || (e.kind == .passed && e.wouldFlash)
-        speaker?.say(text, delayMs: tone.map { tones.durationMs($0) + 80 } ?? 0, urgent: urgent, pauseMusic: settings.pauseMusic)
+        speaker?.say(text, delayMs: tone.map { tones.durationMs($0) + 80 } ?? 0, urgent: e.urgent, pauseMusic: settings.pauseMusic)
     }
 
     /** Like Coyote: while over the limit near a radar, beeps get faster as it gets closer. */
     private func dangerBeep(_ s: Snapshot) {
-        guard let alert = s.alerts.first(where: { $0.overLimit }), let tones else { return }
+        guard settings.dangerBeeps, let alert = s.alerts.first(where: { $0.overLimit }), let tones else { return }
         if speaker?.speaking == true { return } // never over the voice
         let interval: Int64 = alert.distanceM < 200 ? 500 : alert.distanceM < 500 ? 1_000 : 2_000
         if s.timeMs - lastDangerBeepMs >= interval {

@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import org.json.JSONArray
 import org.json.JSONObject
+import zenith.core.AnnouncePrefs
 import zenith.core.AutoStartPause
 import zenith.core.DriverProfile
 
@@ -18,6 +19,16 @@ data class SettingsState(
     val raining: Boolean = false,
     /** False: alert tones only, no voice. */
     val voice: Boolean = true,
+    /** "Limite 80" when too fast for the road; off: the radars only. */
+    val speeding: Boolean = true,
+    /** Too fast from 3 km/h over the limit, instead of from the speed a radar flashes at. */
+    val earlySpeeding: Boolean = false,
+    /** After a radar or a section: "flash probable", the average. */
+    val passResult: Boolean = true,
+    /** Control itineraries announced on entry. */
+    val zones: Boolean = true,
+    /** Beeps getting faster while too fast near a radar. */
+    val dangerBeeps: Boolean = true,
     /** The music pauses while the voice speaks (else it slides down and back up). */
     val pauseMusic: Boolean = false,
     /** The media volume (alerts and voice) raised to 60 % for a drive when lower, put back after. */
@@ -39,7 +50,9 @@ data class SettingsState(
     /** Soft sounds under the finger on every button ([UiSound]); the alerts are not concerned. */
     val uiSounds: Boolean = true,
 ) {
-    val profile: DriverProfile get() = DriverProfile(probationary = probationary, raining = raining)
+    val profile: DriverProfile get() = DriverProfile(probationary = probationary, raining = raining, earlySpeeding = earlySpeeding)
+
+    val announce: AnnouncePrefs get() = AnnouncePrefs(speeding = speeding, passResult = passResult, zones = zones)
 
     /** The start by activity recognition is wanted: its own switch and the master one. */
     val motionWanted: Boolean get() = autoStart && motionStart
@@ -62,6 +75,11 @@ object UserSettings {
             // Set by the weather during a drive, never kept from one drive to the next.
             raining = false,
             voice = p.getBoolean("voice", true),
+            speeding = p.getBoolean("say_speeding", true),
+            earlySpeeding = p.getBoolean("early_speeding", false),
+            passResult = p.getBoolean("say_pass", true),
+            zones = p.getBoolean("say_zones", true),
+            dangerBeeps = p.getBoolean("danger_beeps", true),
             // New key: the voice now lowers the music by default, the old "pause" choice is not kept.
             pauseMusic = p.getBoolean("voice_pause", false),
             autoStop = p.getBoolean("auto_stop", true),
@@ -87,6 +105,11 @@ object UserSettings {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
             putBoolean("probationary", next.probationary)
             putBoolean("voice", next.voice)
+            putBoolean("say_speeding", next.speeding)
+            putBoolean("early_speeding", next.earlySpeeding)
+            putBoolean("say_pass", next.passResult)
+            putBoolean("say_zones", next.zones)
+            putBoolean("danger_beeps", next.dangerBeeps)
             putBoolean("voice_pause", next.pauseMusic)
             putBoolean("auto_stop", next.autoStop)
             putBoolean("raise_volume", next.raiseVolume)

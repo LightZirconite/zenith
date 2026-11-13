@@ -115,6 +115,33 @@ fun SettingsScreen(
             }
         }
         Section(
+            "Ce qui est annoncé",
+            order++,
+            footer = "Les radars sont toujours annoncés ; pour n'entendre qu'eux, désactive le reste. Trop vite : à partir de la " +
+                "vitesse où un radar flashe, sa marge déduite (56 pour 50, 96 pour 90, 138 pour 130), sur une limite sûre et " +
+                "quelques secondes après le panneau.",
+        ) {
+            ToggleRow("Excès de vitesse", "« Limite 80 » quand tu roules trop vite", settings.speeding, icon = Glyphs.gauge, tint = Color(0xFFFF453A)) { on ->
+                onChange { it.copy(speeding = on) }
+            }
+            Divider()
+            ToggleRow("Prévenir dès 3 km/h au-dessus", "Plus tôt que la marge des radars", settings.earlySpeeding, icon = Glyphs.bell, tint = Color(0xFFFF9F0A)) { on ->
+                onChange { it.copy(earlySpeeding = on) }
+            }
+            Divider()
+            ToggleRow("Bips de danger", "De plus en plus rapides, trop vite près d'un radar", settings.dangerBeeps, icon = Glyphs.sound, tint = Color(0xFFFF375F)) { on ->
+                onChange { it.copy(dangerBeeps = on) }
+            }
+            Divider()
+            ToggleRow("Résultat au passage", "« Flash probable », moyenne du tronçon", settings.passResult, icon = Glyphs.check, tint = Color(0xFF30D158)) { on ->
+                onChange { it.copy(passResult = on) }
+            }
+            Divider()
+            ToggleRow("Itinéraires de contrôle", "« Radar possible » à l'entrée", settings.zones, icon = Glyphs.trip, tint = Color(0xFFFF9F0A)) { on ->
+                onChange { it.copy(zones = on) }
+            }
+        }
+        Section(
             "En voiture",
             order++,
             footer = "Pas toi au volant ? Touche « Arrêter » : Zenith ne redémarre plus seul avant la fin du trajet " +

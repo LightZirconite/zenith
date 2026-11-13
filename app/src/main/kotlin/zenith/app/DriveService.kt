@@ -39,7 +39,6 @@ import zenith.core.DriveVolume
 import zenith.core.DrivingSession
 import zenith.core.GpsFix
 import zenith.core.LatLon
-import zenith.core.OverspeedLevel
 import zenith.core.ParkDetector
 import zenith.core.RadarIndex
 import zenith.core.RainDetector
@@ -389,32 +388,21 @@ class DriveService : Service(), LocationListener {
         refreshNotification(snapshot)
     }
 
-    /** Tone first, then the spoken text right after it. */
+    /** Tone first, then the spoken text right after it; what is heard is the driver's choice (core [Announcer.plan]). */
     private fun announce(event: AlertEvent) {
-        val tone = when (event) {
-            is AlertEvent.Approach -> if (event.radar.type.measuresSpeed) Tone.APPROACH else Tone.CHIME
-            is AlertEvent.SectionStarted -> Tone.APPROACH
-            is AlertEvent.Brake -> Tone.BRAKE
-            is AlertEvent.Overspeed -> Tone.OVERSPEED.takeIf { event.level == OverspeedLevel.WARN }
-            is AlertEvent.Passed -> Tone.PASSED.takeIf { event.wouldFlash }
-            is AlertEvent.SectionEnded -> Tone.PASSED
-            is AlertEvent.LimitChanged -> null
-            is AlertEvent.ZoneEntered -> Tone.CHIME
-            is AlertEvent.ZoneLeft -> null
-        }
-        tone?.let(tones::play)
         val settings = UserSettings.state.value
+        val plan = Announcer.plan(event, settings.announce) ?: return
+        val tone = plan.cue?.let { Tone.valueOf(it.name) }
+        tone?.let(tones::play)
         if (!settings.voice) return
-        // What changes the driver's speed now goes first, dropping older announcements still queued.
-        val urgent = event is AlertEvent.Brake || (event is AlertEvent.Overspeed && event.level == OverspeedLevel.WARN) ||
-            (event is AlertEvent.Passed && event.wouldFlash)
-        Announcer.text(event)?.let {
-            speaker.say(it, delayMs = tone?.let { t -> tones.durationMs(t) + 80 } ?: 0, urgent = urgent, pauseMusic = settings.pauseMusic)
+        plan.text?.let {
+            speaker.say(it, delayMs = tone?.let { t -> tones.durationMs(t) + 80 } ?: 0, urgent = plan.urgent, pauseMusic = settings.pauseMusic)
         }
     }
 
     /** Like Coyote: while over the limit near a radar, beeps get faster as it gets closer. */
     private fun dangerBeep(s: DriveSnapshot) {
+        if (!UserSettings.state.value.dangerBeeps) return
         val alert = s.alerts.firstOrNull { it.overLimit } ?: return
         if (speaker.speaking) return // never over the voice
         val interval = when {

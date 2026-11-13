@@ -38,11 +38,12 @@ struct SettingsView: View {
         LargeTitlePage(title: "Réglages", leading: { SettingsBackButton(action: onBack) }) {
             status.cascade(0)
             alerts.cascade(1)
-            car.cascade(2)
-            music.cascade(3)
-            smallWindow.cascade(4)
-            application.cascade(5)
-            footer.cascade(6)
+            announced.cascade(2)
+            car.cascade(3)
+            music.cascade(4)
+            smallWindow.cascade(5)
+            application.cascade(6)
+            footer.cascade(7)
         }
         // Rows coming and going (a permission granted, an account connected): the groups resize on a spring.
         .animation(.spring(response: 0.31, dampingFraction: 0.85), value: layout)
@@ -86,6 +87,46 @@ struct SettingsView: View {
         .glass(RoundedRectangle(cornerRadius: 22, style: .continuous), color: Color.white.opacity(0.06))
         .padding(.top, 18)
         .animation(.spring(response: 0.31, dampingFraction: 0.7), value: updatePill?.text)
+    }
+
+    /** What is said besides the radars: each can be turned off, for those who want the radars only. */
+    private var announced: some View {
+        SettingsGroup("Ce qui est annoncé", footer: announcedFooter) {
+            SettingsToggleRow(
+                icon: .speeding,
+                title: "Excès de vitesse",
+                text: "« Limite 80 » quand tu roules trop vite",
+                on: settings.speeding
+            ) { settings.speeding = $0 }
+            SettingsSeparator()
+            SettingsToggleRow(
+                icon: .early,
+                title: "Prévenir dès 3 km/h au-dessus",
+                text: "Plus tôt que la marge des radars",
+                on: settings.earlySpeeding
+            ) { settings.earlySpeeding = $0 }
+            SettingsSeparator()
+            SettingsToggleRow(
+                icon: .danger,
+                title: "Bips de danger",
+                text: "Plus rapides, trop vite près d'un radar",
+                on: settings.dangerBeeps
+            ) { settings.dangerBeeps = $0 }
+            SettingsSeparator()
+            SettingsToggleRow(
+                icon: .passResult,
+                title: "Résultat au passage",
+                text: "« Flash probable », moyenne du tronçon",
+                on: settings.passResult
+            ) { settings.passResult = $0 }
+            SettingsSeparator()
+            SettingsToggleRow(
+                icon: .zones,
+                title: "Itinéraires de contrôle",
+                text: "« Radar possible » à l'entrée",
+                on: settings.zones
+            ) { settings.zones = $0 }
+        }
     }
 
     private var alerts: some View {
@@ -288,6 +329,12 @@ struct SettingsView: View {
         return parts.joined(separator: "\n\n")
     }
 
+    private var announcedFooter: String {
+        "Les radars sont toujours annoncés ; pour n'entendre qu'eux, désactive le reste. Trop vite : à partir de la vitesse " +
+            "où un radar flashe, sa marge déduite (56 pour 50, 96 pour 90, 138 pour 130), sur une limite sûre et quelques " +
+            "secondes après le panneau."
+    }
+
     private var carFooter: String {
         guard settings.autoStart else {
             return "Zenith ne démarre jamais seul, seulement quand tu touches « Démarrer ». Les automatisations Raccourcis " +
@@ -470,6 +517,11 @@ private struct SettingsIcon {
     static let pause = SettingsIcon(symbol: "pause.fill", rgb: 0xFF375F)
     static let learner = SettingsIcon(symbol: "graduationcap.fill", rgb: 0x30B0C7)
     static let rain = SettingsIcon(symbol: "cloud.rain.fill", rgb: 0x0A84FF)
+    static let speeding = SettingsIcon(symbol: "gauge.with.dots.needle.67percent", rgb: 0xFF453A)
+    static let early = SettingsIcon(symbol: "bell.fill", rgb: 0xFF9F0A)
+    static let danger = SettingsIcon(symbol: "waveform", rgb: 0xFF375F)
+    static let passResult = SettingsIcon(symbol: "checkmark", rgb: 0x30D158)
+    static let zones = SettingsIcon(symbol: "road.lanes", rgb: 0xFF9F0A)
     static let autoStart = SettingsIcon(symbol: "power", rgb: 0x32D74B)
     static let moving = SettingsIcon(symbol: "car.fill", rgb: 0x34C759)
     static let autoStop = SettingsIcon(symbol: "parkingsign", rgb: 0x8E8E93)

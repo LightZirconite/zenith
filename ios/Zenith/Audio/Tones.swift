@@ -9,6 +9,18 @@ struct Note {
 
 /** Alert sounds, synthesized once (no audio assets), the same as on Android. */
 enum Tone: CaseIterable {
+    /** The tone of a core Cue name (APPROACH, CHIME, BRAKE, OVERSPEED, PASSED). */
+    init?(cue: String) {
+        switch cue {
+        case "APPROACH": self = .approach
+        case "CHIME": self = .chime
+        case "BRAKE": self = .brake
+        case "OVERSPEED": self = .overspeed
+        case "PASSED": self = .passed
+        default: return nil
+        }
+    }
+
     /** Radar ahead: bright two-note rising chime. */
     case approach
     /** Repeated while over the limit near a radar, faster as it gets closer. */

@@ -2,6 +2,7 @@ package zenith.ios
 
 import zenith.core.ActiveAlert
 import zenith.core.AlertEvent
+import zenith.core.AnnouncePrefs
 import zenith.core.Announcer
 import zenith.core.ControlZone
 import zenith.core.DriveSnapshot
@@ -74,7 +75,9 @@ class CoreZone(val zoneId: String, val points: List<Double>, val lengthM: Double
 
 /**
  * One alert event. [kind]: approach, brake, passed, sectionStarted, sectionEnded, overspeed,
- * limitChanged, zoneEntered, zoneLeft. [text]: what the voice says, nil for silent events.
+ * limitChanged, zoneEntered, zoneLeft. [cue]: tone played (Cue name: APPROACH, CHIME, BRAKE,
+ * OVERSPEED, PASSED), nil when nothing is heard; [text]: what the voice says then, nil for none;
+ * both as the driver chose (AnnouncePrefs). [urgent]: said first, older queued texts dropped.
  * [level]: overspeed level name (NONE, OVER, WARN).
  */
 class CoreEvent(
@@ -92,10 +95,12 @@ class CoreEvent(
     val fromKmh: Int,
     val toKmh: Int,
     val text: String?,
+    val cue: String?,
+    val urgent: Boolean,
 ) {
     internal companion object {
-        fun of(e: AlertEvent): CoreEvent {
-            val text = runCatching { Announcer.text(e) }.getOrNull()
+        fun of(e: AlertEvent, prefs: AnnouncePrefs): CoreEvent {
+            val plan = runCatching { Announcer.plan(e, prefs) }.getOrNull()
             fun v(
                 kind: String,
                 radar: Radar? = null,
@@ -111,7 +116,7 @@ class CoreEvent(
                 toKmh: Int? = null,
             ) = CoreEvent(
                 kind, e.timeMs, radar?.let(CoreRadar::of), distanceM, limitKmh ?: -1, speedKmh, wouldFlash, points,
-                averageKmh, level.name, resumed, fromKmh ?: -1, toKmh ?: -1, text,
+                averageKmh, level.name, resumed, fromKmh ?: -1, toKmh ?: -1, plan?.text, plan?.cue?.name, plan?.urgent == true,
             )
             return when (e) {
                 is AlertEvent.Approach -> v("approach", e.radar, e.distanceM, e.limitKmh)
@@ -154,7 +159,7 @@ class CoreSnapshot(
     val drivenZone: CoreZone?,
 ) {
     internal companion object {
-        fun of(s: DriveSnapshot) = CoreSnapshot(
+        fun of(s: DriveSnapshot, prefs: AnnouncePrefs) = CoreSnapshot(
             timeMs = s.timeMs,
             lat = s.position.lat,
             lon = s.position.lon,
@@ -171,7 +176,7 @@ class CoreSnapshot(
             limitAheadKmh = s.limitAhead?.limitKmh ?: -1,
             limitAheadM = s.limitAhead?.distanceM ?: -1.0,
             ahead = s.ahead.flatMap { listOf(it.lat, it.lon) },
-            events = s.events.map(CoreEvent::of),
+            events = s.events.map { CoreEvent.of(it, prefs) },
             estimated = s.estimated,
             drivenZone = s.zone?.let { CoreZone.of(it.zone, it.remainingM) },
         )

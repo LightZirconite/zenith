@@ -16,6 +16,16 @@ final class SettingsStore {
     var raining = false
     /** False: alert tones only, no voice. */
     var voice: Bool { didSet { defaults.set(voice, forKey: "voice") } }
+    /** "Limite 80" when too fast for the road; off: the radars only. */
+    var speeding: Bool { didSet { defaults.set(speeding, forKey: "say_speeding") } }
+    /** Too fast from 3 km/h over the limit, instead of from the speed a radar flashes at. */
+    var earlySpeeding: Bool { didSet { defaults.set(earlySpeeding, forKey: "early_speeding") } }
+    /** After a radar or a section: "flash probable", the average. */
+    var passResult: Bool { didSet { defaults.set(passResult, forKey: "say_pass") } }
+    /** Control itineraries announced on entry. */
+    var zones: Bool { didSet { defaults.set(zones, forKey: "say_zones") } }
+    /** Beeps getting faster while too fast near a radar. */
+    var dangerBeeps: Bool { didSet { defaults.set(dangerBeeps, forKey: "danger_beeps") } }
     /** The music pauses while the voice speaks (else it slides down and back up). */
     var pauseMusic: Bool { didSet { defaults.set(pauseMusic, forKey: "voice_pause") } }
     /** The media volume raised to 60 % for a drive when lower, put back after. */
@@ -55,6 +65,11 @@ final class SettingsStore {
         }
         probationary = bool("probationary", false)
         voice = bool("voice", true)
+        speeding = bool("say_speeding", true)
+        earlySpeeding = bool("early_speeding", false)
+        passResult = bool("say_pass", true)
+        zones = bool("say_zones", true)
+        dangerBeeps = bool("danger_beeps", true)
         pauseMusic = bool("voice_pause", false)
         raiseVolume = bool("raise_volume", true)
         autoStop = bool("auto_stop", true)

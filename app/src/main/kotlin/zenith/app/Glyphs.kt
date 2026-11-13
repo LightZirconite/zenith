@@ -62,6 +62,7 @@ object Glyphs {
     val update by lazy { line("update", "M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5") }
     val trip by lazy { line("trip", "M5 19c4-1 2-6 7-7s3-6 7-7M5 17.5a1.5 1.5 0 1 0 0 3a1.5 1.5 0 1 0 0-3M19 3.5a1.5 1.5 0 1 0 0 3a1.5 1.5 0 1 0 0-3") }
     val sound by lazy { line("sound", "M3 12h2M7 8v8M11 5v14M15 8v8M19 11v2") }
+    val gauge by lazy { line("gauge", "M4 17a8 8 0 1 1 16 0M12 17l4-5") }
     val bell by lazy { line("bell", "M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0") }
 }
 

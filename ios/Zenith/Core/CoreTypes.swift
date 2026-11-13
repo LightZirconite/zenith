@@ -125,8 +125,12 @@ struct DriveEvent: Equatable {
     let resumed: Bool
     let fromKmh: Int?
     let toKmh: Int?
-    /** What the voice says; nil for silent events. */
+    /** What the voice says, as the driver chose; nil for none. */
     let text: String?
+    /** Tone played first (core Cue name), nil when nothing is heard. */
+    let cue: String?
+    /** Said first, dropping older announcements still queued. */
+    let urgent: Bool
 }
 
 /** Everything the screens need after one fix. */
@@ -215,7 +219,9 @@ extension DriveEvent {
             resumed: e.resumed,
             fromKmh: optInt(e.fromKmh),
             toKmh: optInt(e.toKmh),
-            text: e.text
+            text: e.text,
+            cue: e.cue,
+            urgent: e.urgent
         )
     }
 }
