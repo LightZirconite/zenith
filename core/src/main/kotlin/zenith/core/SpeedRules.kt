@@ -51,6 +51,10 @@ object SpeedRules {
         else -> limitKmh
     }
 
+    /** Limit shown on a radar's sign for this driver: its own limit after rain and licence rules; null without one. */
+    fun radarLimit(radar: Radar, raining: Boolean, probationary: Boolean): Int? =
+        radar.limitKmh?.takeIf { radar.type.measuresSpeed }?.let { effectiveLimit(it, raining, probationary) }
+
     /** Effective limit for a driver, applying the strictest of rain and probationary rules. */
     fun effectiveLimit(limitKmh: Int, raining: Boolean, probationary: Boolean): Int {
         var limit = limitKmh

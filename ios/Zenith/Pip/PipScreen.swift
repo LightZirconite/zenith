@@ -607,7 +607,7 @@ private struct PipMap: View {
                 with: .color(color),
                 lineWidth: ring
             )
-            if let limit = radar.limitKmh {
+            if let limit = LimitRules(raining: SettingsStore.shared.raining, probationary: SettingsStore.shared.probationary).limit(radar) {
                 let text = Text("\(limit)")
                     .font(.system(size: r * (limit >= 100 ? 0.78 : 0.92), weight: .bold))
                     .foregroundStyle(Color.black)

@@ -1,5 +1,8 @@
 package zenith.app
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
+import zenith.core.SpeedRules
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -103,8 +106,10 @@ fun DriveMap(
     // Before following: the first camera already puts the car at its place.
     LaunchedEffect(carAt) { holder.frame(carAt) }
     LaunchedEffect(snapshot) { snapshot?.let(holder::follow) }
-    LaunchedEffect(radars, snapshot?.alerts?.firstOrNull()?.radar?.id) {
-        holder.showRadars(radars, snapshot?.alerts?.map { it.radar.id }?.toSet().orEmpty())
+    // The signs on the map show the driver's limit: 110 for a 130 radar in the rain, as the alerts say.
+    val settings by UserSettings.state.collectAsState()
+    LaunchedEffect(radars, snapshot?.alerts?.firstOrNull()?.radar?.id, settings.raining, settings.probationary) {
+        holder.showRadars(radars, snapshot?.alerts?.map { it.radar.id }?.toSet().orEmpty(), settings.raining, settings.probationary)
     }
     LaunchedEffect(zones) { holder.showZones(zones) }
 
@@ -249,10 +254,11 @@ private class MapHolder {
         }
     }
 
-    fun showRadars(radars: List<Radar>, active: Set<String>) {
+    fun showRadars(radars: List<Radar>, active: Set<String>, raining: Boolean, probationary: Boolean) {
         val json = collection(
             radars.map { r ->
-                val props = """{"c":"${radarColorHex(r.type)}","l":"${r.limitKmh ?: ""}","r":${if (r.id in active) 12 else 9}}"""
+                val limit = SpeedRules.radarLimit(r, raining, probationary)
+                val props = """{"c":"${radarColorHex(r.type)}","l":"${limit ?: ""}","r":${if (r.id in active) 12 else 9}}"""
                 point(r.position, props)
             },
         )

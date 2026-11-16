@@ -103,10 +103,12 @@ struct WeatherCanvas: View {
         return Double(y & 0xFFFFFF) / 16_777_216
     }
 
-    private static func rain(_ ctx: inout GraphicsContext, _ size: CGSize, _ t: Double, _ k: Double, _ speed: Double, heavy: Bool) {
+    private static func rain(_ ctx: inout GraphicsContext, _ size: CGSize, _ t: Double, _ strength: Double, _ speed: Double, heavy: Bool) {
+        // A light rain (0.35) must still be seen at a glance: density and light follow the square root.
+        let k = strength.squareRoot()
         let w = size.width, h = size.height
         let unit = min(w, h) / 400
-        let count = max(12, Int(Double(heavy ? 150 : 110) * k))
+        let count = max(20, Int(Double(heavy ? 170 : 130) * k))
         // Faster car: the streaks lean more and fall faster, as on a windscreen.
         let fast = min(max(speed / 130, 0), 1)
         let lean = 0.12 + 0.38 * fast
@@ -120,12 +122,13 @@ struct WeatherCanvas: View {
             var path = Path()
             path.move(to: CGPoint(x: x, y: y))
             path.addLine(to: CGPoint(x: x - lean * len, y: y + len))
-            ctx.stroke(path, with: .color(rainTint.opacity((0.10 + 0.22 * depth) * k)),
-                       style: StrokeStyle(lineWidth: (0.8 + 0.9 * depth) * unit, lineCap: .round))
+            ctx.stroke(path, with: .color(rainTint.opacity((0.22 + 0.38 * depth) * k)),
+                       style: StrokeStyle(lineWidth: (1.0 + 1.1 * depth) * unit, lineCap: .round))
         }
     }
 
-    private static func snow(_ ctx: inout GraphicsContext, _ size: CGSize, _ t: Double, _ k: Double, _ speed: Double) {
+    private static func snow(_ ctx: inout GraphicsContext, _ size: CGSize, _ t: Double, _ strength: Double, _ speed: Double) {
+        let k = strength.squareRoot()
         let w = size.width, h = size.height
         let unit = min(w, h) / 400
         let count = max(14, Int(90 * k))
@@ -137,7 +140,7 @@ struct WeatherCanvas: View {
             let x = hash(i, 3) * w + sway
             let r = (1.2 + 2.6 * depth) * unit
             ctx.fill(Path(ellipseIn: CGRect(x: x - r, y: y - r, width: 2 * r, height: 2 * r)),
-                     with: .color(.white.opacity((0.25 + 0.45 * depth) * k)))
+                     with: .color(.white.opacity((0.35 + 0.5 * depth) * k)))
         }
     }
 
@@ -150,7 +153,7 @@ struct WeatherCanvas: View {
             let cx = w * (0.5 + 0.35 * drift)
             let rx = w * (0.9 + 0.2 * Double(b))
             let ry = h * 0.16
-            let a = (0.07 + 0.05 * Double(b)) * k
+            let a = (0.12 + 0.08 * Double(b)) * k
             let rect = CGRect(x: cx - rx, y: cy - ry, width: rx * 2, height: ry * 2)
             ctx.fill(Path(ellipseIn: rect), with: .radialGradient(
                 Gradient(colors: [.white.opacity(a), .clear]),

@@ -18,7 +18,9 @@ struct DriveMap: View {
     var carAt: Double = 0.45
 
     var body: some View {
-        DriveMapSurface(snapshot: snapshot, radars: radars, zones: zones, carAt: carAt)
+        // The signs on the map show the driver's limit: 110 for a 130 radar in the rain, as the alerts say.
+        let settings = SettingsStore.shared
+        DriveMapSurface(snapshot: snapshot, radars: radars, zones: zones, carAt: carAt, rules: LimitRules(raining: settings.raining, probationary: settings.probationary))
             .background(Color.black)
     }
 }
@@ -29,6 +31,7 @@ private struct DriveMapSurface: UIViewRepresentable {
     let radars: [RadarInfo]
     let zones: [ZoneInfo]
     let carAt: Double
+    let rules: LimitRules
 
     func makeCoordinator() -> DriveMapHolder { DriveMapHolder() }
 
@@ -39,7 +42,7 @@ private struct DriveMapSurface: UIViewRepresentable {
         // Before following: the first camera already puts the car at its place.
         holder.frame(carAt)
         if let snapshot { holder.show(snapshot) }
-        holder.showRadars(radars, active: Set(snapshot?.alerts.map { $0.radar.id } ?? []))
+        holder.showRadars(radars, active: Set(snapshot?.alerts.map { $0.radar.id } ?? []), rules: rules)
         holder.showZones(zones)
     }
 
@@ -88,6 +91,7 @@ private final class DriveMapHolder: NSObject, MLNMapViewDelegate, UIGestureRecog
     private var last: Snapshot?
     private var radars: [RadarInfo] = []
     private var active: Set<String> = []
+    private var rules = LimitRules(raining: false, probationary: false)
     private var zones: [ZoneInfo] = []
 
     /** The driver is looking around: the camera stops following until then. */
@@ -143,10 +147,11 @@ private final class DriveMapHolder: NSObject, MLNMapViewDelegate, UIGestureRecog
         follow(s)
     }
 
-    func showRadars(_ list: [RadarInfo], active ids: Set<String>) {
-        guard list != radars || ids != active else { return }
+    func showRadars(_ list: [RadarInfo], active ids: Set<String>, rules: LimitRules) {
+        guard list != radars || ids != active || rules != self.rules else { return }
         radars = list
         active = ids
+        self.rules = rules
         (style?.source(withIdentifier: Self.srcRadars) as? MLNShapeSource)?.shape = radarShape()
     }
 
@@ -374,7 +379,7 @@ private final class DriveMapHolder: NSObject, MLNMapViewDelegate, UIGestureRecog
         let features: [MLNShape & MLNFeature] = radars.map { r in
             Self.point(r.position, [
                 "c": radarColorHex(r.kind),
-                "l": r.limitKmh.map(String.init) ?? "",
+                "l": rules.limit(r).map(String.init) ?? "",
                 "r": active.contains(r.id) ? 12 : 9,
             ])
         }

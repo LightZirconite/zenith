@@ -30,6 +30,7 @@ import zenith.core.SkyLook
 import zenith.core.RoadNetwork
 import zenith.core.RoadSegment
 import zenith.core.RoadTiles
+import zenith.core.SpeedRules
 import zenith.core.SpeedStabilizer
 import zenith.core.SpotifyDuck
 import zenith.core.SpotifyTrack
@@ -235,6 +236,10 @@ object Bridge {
     fun gaugeFill(speedKmh: Int, limitKmh: Int): Float = Gauge.fill(speedKmh.takeIf { it >= 0 }, limitKmh.takeIf { it >= 0 })
 
     /** -1 without a limit. */
+    /** Limit after rain and licence rules. */
+    fun effectiveLimit(limitKmh: Int, raining: Boolean, probationary: Boolean): Int =
+        SpeedRules.effectiveLimit(limitKmh, raining, probationary)
+
     fun gaugeTick(limitKmh: Int): Float = Gauge.tick(limitKmh.takeIf { it >= 0 }) ?: -1f
 
     fun gaugeSweepDeg(): Float = Gauge.SWEEP_DEG

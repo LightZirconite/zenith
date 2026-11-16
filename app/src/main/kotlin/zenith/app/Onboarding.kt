@@ -538,3 +538,61 @@ private fun InviteButton(label: String, fill: Color?, textColor: Color, sound: U
         Text(label, color = textColor, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
     }
 }
+
+/**
+ * The phone refused the update (Samsung's Auto Blocker, "Blocage automatique", blocks apps from
+ * outside the stores): how to let it through for a moment, then try again.
+ */
+@Composable
+fun UpdateBlockedWindow(visible: Boolean, version: String, onSettings: () -> Unit, onRetry: () -> Unit, onLater: () -> Unit) {
+    val view = LocalView.current
+    LaunchedEffect(visible) { if (visible) UiSound.play(UiSound.Kind.OPEN, view) }
+    BackHandler(enabled = visible) {
+        UiSound.play(UiSound.Kind.CLOSE, view)
+        onLater()
+    }
+    AnimatedVisibility(visible, enter = fadeIn(tween(350)), exit = fadeOut(tween(300))) {
+        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)).pointerInput(Unit) { detectTapGestures { } })
+    }
+    Box(Modifier.fillMaxSize().systemBarsPadding().padding(16.dp), contentAlignment = Alignment.BottomCenter) {
+        AnimatedVisibility(
+            visible,
+            enter = slideInVertically(spring(dampingRatio = 0.78f, stiffness = Spring.StiffnessMediumLow)) { it / 2 } +
+                scaleIn(spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow), initialScale = 0.9f) + fadeIn(tween(250)),
+            exit = slideOutVertically(tween(300)) { it / 3 } + scaleOut(tween(300), targetScale = 0.95f) + fadeOut(tween(250)),
+        ) {
+            Column(
+                Modifier.widthIn(max = 520.dp).fillMaxWidth().glass(RoundedCornerShape(28.dp), Surface).sheen()
+                    .verticalScroll(rememberScrollState()).padding(20.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(34.dp).background(Color(0xFFFF9F0A), CircleShape), contentAlignment = Alignment.Center) {
+                        Text("!", color = Color.Black, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Text("Mise à jour bloquée", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                }
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "La version $version est prête, mais le téléphone a refusé de l'installer. Sur Samsung, c'est le " +
+                        "« Blocage automatique » : il bloque les applis venues d'ailleurs que les stores.",
+                    color = Color.White.copy(alpha = 0.8f),
+                    fontSize = 15.sp,
+                    lineHeight = 20.sp,
+                )
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "Ouvre Paramètres › Sécurité et confidentialité › Blocage automatique, désactive-le (ton code est " +
+                        "demandé ; il se réactive seul un peu plus tard), reviens ici et touche Réessayer.",
+                    color = Color.White.copy(alpha = 0.8f),
+                    fontSize = 15.sp,
+                    lineHeight = 20.sp,
+                )
+                Spacer(Modifier.height(8.dp))
+                InviteButton("Ouvrir les paramètres", Color.White, Color.Black, UiSound.Kind.OPEN, onSettings)
+                InviteButton("Réessayer", Color(0xFF30D158), Color.Black, UiSound.Kind.SUCCESS, onRetry)
+                InviteButton("Plus tard", null, Color.White.copy(alpha = 0.85f), UiSound.Kind.CLOSE, onLater)
+            }
+        }
+    }
+}

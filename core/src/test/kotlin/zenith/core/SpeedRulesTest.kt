@@ -47,4 +47,15 @@ class SpeedRulesTest {
         assertEquals(110, SpeedRules.effectiveLimit(130, raining = true, probationary = true))
         assertEquals(50, SpeedRules.effectiveLimit(50, raining = true, probationary = true))
     }
+
+    @Test
+    fun `a radar's sign follows the rain and the licence like the alerts`() {
+        val fixed = Radar("a", LatLon(0.0, 0.0), RadarType.FIXED, 130)
+        assertEquals(130, SpeedRules.radarLimit(fixed, raining = false, probationary = false))
+        assertEquals(110, SpeedRules.radarLimit(fixed, raining = true, probationary = false))
+        assertEquals(110, SpeedRules.radarLimit(fixed.copy(limitKmh = 130), raining = false, probationary = true))
+        assertEquals(80, SpeedRules.radarLimit(fixed.copy(limitKmh = 90), raining = true, probationary = false))
+        assertEquals(50, SpeedRules.radarLimit(fixed.copy(limitKmh = 50), raining = true, probationary = false))
+        assertEquals(null, SpeedRules.radarLimit(fixed.copy(type = RadarType.RED_LIGHT, limitKmh = 50), raining = true, probationary = false))
+    }
 }

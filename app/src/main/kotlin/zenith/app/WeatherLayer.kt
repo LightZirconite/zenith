@@ -24,6 +24,7 @@ import zenith.core.SkyLook
 import kotlin.math.PI
 import kotlin.math.exp
 import kotlin.math.sin
+import kotlin.math.sqrt
 import kotlinx.coroutines.delay
 import kotlin.random.Random
 
@@ -92,11 +93,13 @@ private fun hash(i: Int, c: Int): Float {
 
 private val RainTint = Color(0xFFBFD8FF)
 
-private fun DrawScope.rain(t: Float, k: Float, speedKmh: Float, heavy: Boolean) {
+private fun DrawScope.rain(t: Float, strength: Float, speedKmh: Float, heavy: Boolean) {
+    // A light rain (0.35) must still be seen at a glance: density and light follow the square root.
+    val k = sqrt(strength)
     val w = size.width
     val h = size.height
     val unit = minOf(w, h) / 400f
-    val count = ((if (heavy) 150 else 110) * k).toInt().coerceAtLeast(12)
+    val count = ((if (heavy) 170 else 130) * k).toInt().coerceAtLeast(20)
     // Faster car: the streaks lean more and fall faster, as on a windscreen.
     val lean = 0.12f + 0.38f * (speedKmh / 130f).coerceIn(0f, 1f)
     val fall = h * (1.1f + 0.9f * (speedKmh / 130f).coerceIn(0f, 1f)) * (if (heavy) 1.25f else 1f)
@@ -106,18 +109,19 @@ private fun DrawScope.rain(t: Float, k: Float, speedKmh: Float, heavy: Boolean) 
         val y = ((hash(i, 2) + t * fall * depth / h) % 1f) * (h + len) - len
         val x0 = hash(i, 3) * (w * (1f + lean)) - w * lean * 0.5f
         val x = x0 - lean * (y + len)
-        val a = (0.10f + 0.22f * depth) * k
+        val a = (0.22f + 0.38f * depth) * k
         drawLine(
             RainTint.copy(alpha = a),
             Offset(x, y),
             Offset(x - lean * len, y + len),
-            strokeWidth = (0.8f + 0.9f * depth) * unit,
+            strokeWidth = (1.0f + 1.1f * depth) * unit,
             cap = StrokeCap.Round,
         )
     }
 }
 
-private fun DrawScope.snow(t: Float, k: Float, speedKmh: Float) {
+private fun DrawScope.snow(t: Float, strength: Float, speedKmh: Float) {
+    val k = sqrt(strength)
     val w = size.width
     val h = size.height
     val unit = minOf(w, h) / 400f
@@ -129,13 +133,14 @@ private fun DrawScope.snow(t: Float, k: Float, speedKmh: Float) {
         val sway = sin(t * (0.5f + hash(i, 4)) + hash(i, 5) * 2 * PI.toFloat()) * 14f * unit * depth
         val x = hash(i, 3) * w + sway
         val r = (1.2f + 2.6f * depth) * unit
-        drawCircle(Color.White.copy(alpha = (0.25f + 0.45f * depth) * k), r, Offset(x, y))
+        drawCircle(Color.White.copy(alpha = (0.35f + 0.5f * depth) * k), r, Offset(x, y))
     }
 }
 
 private fun DrawScope.fog(t: Float, k: Float) {
     val w = size.width
     val h = size.height
+    if (w < 1f || h < 1f) return
     // Three soft banks drifting sideways, lower ones thicker, the road still seen through.
     for (b in 0 until 3) {
         val cy = h * (0.32f + 0.2f * b)
@@ -143,7 +148,7 @@ private fun DrawScope.fog(t: Float, k: Float) {
         val cx = w * (0.5f + 0.35f * drift)
         val rx = w * (0.9f + 0.2f * b)
         val ry = h * 0.16f
-        val a = (0.07f + 0.05f * b) * k
+        val a = (0.12f + 0.08f * b) * k
         drawOval(
             Brush.radialGradient(listOf(Color.White.copy(alpha = a), Color.Transparent), Offset(cx, cy), rx),
             topLeft = Offset(cx - rx, cy - ry),
@@ -158,7 +163,7 @@ private fun DrawScope.lightning(sinceMs: Long, k: Float) {
     val s = sinceMs / 1000f
     val flicker = exp(-s * 9f) + 0.6f * exp(-((s - 0.18f) * 22f).let { it * it })
     val a = (0.16f * flicker * k).coerceIn(0f, 0.2f)
-    if (a < 0.005f) return
+    if (a < 0.005f || size.minDimension < 1f) return
     drawRect(
         Brush.radialGradient(
             listOf(Color(0xFFDDE6FF).copy(alpha = a), Color.Transparent),

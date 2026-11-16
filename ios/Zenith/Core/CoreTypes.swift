@@ -287,3 +287,15 @@ extension Snapshot {
         )
     }
 }
+
+/** The driver's limit rules (rain, licence), for the radar signs drawn on the maps. */
+struct LimitRules: Equatable {
+    let raining: Bool
+    let probationary: Bool
+
+    /** A radar's limit for this driver (the core's SpeedRules.radarLimit); nil without one. */
+    func limit(_ r: RadarInfo) -> Int? {
+        guard r.measuresSpeed, let l = r.limitKmh else { return nil }
+        return Int(Bridge.shared.effectiveLimit(limitKmh: Int32(l), raining: raining, probationary: probationary))
+    }
+}

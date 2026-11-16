@@ -20,9 +20,14 @@ object Weather {
      */
     private val WET_CODES = setOf(53, 55, 56, 57, 61, 63, 65, 66, 67, 71, 73, 75, 77, 80, 81, 82, 85, 86, 95, 96, 99)
 
-    /** Request for [p] rounded to 0.1° (~10 km): plenty for the weather, and little about where the car is. */
+    /**
+     * Request for [p] rounded to 0.1° (~10 km): plenty for the weather, and little about where the car is.
+     * Météo-France's models (AROME 1.3 km over France, ARPEGE elsewhere): the default blend often said
+     * dry under a real rain (16/11/2026).
+     */
     fun url(p: LatLon): String =
-        "https://api.open-meteo.com/v1/forecast?latitude=${oneDecimal(p.lat)}&longitude=${oneDecimal(p.lon)}&current=precipitation,weather_code"
+        "https://api.open-meteo.com/v1/forecast?latitude=${oneDecimal(p.lat)}&longitude=${oneDecimal(p.lon)}" +
+            "&current=precipitation,weather_code&models=meteofrance_seamless"
 
     /** [x] with one decimal, half away from zero ("%.1f" without java.util.Formatter, absent on iOS). */
     internal fun oneDecimal(x: Double): String {

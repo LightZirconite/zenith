@@ -42,7 +42,7 @@ class WeatherTest {
     @Test
     fun `request is rounded to about ten kilometers`() {
         assertEquals(
-            "https://api.open-meteo.com/v1/forecast?latitude=48.9&longitude=2.4&current=precipitation,weather_code",
+            "https://api.open-meteo.com/v1/forecast?latitude=48.9&longitude=2.4&current=precipitation,weather_code&models=meteofrance_seamless",
             Weather.url(LatLon(48.8566, 2.3522)),
         )
     }

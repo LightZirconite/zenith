@@ -350,8 +350,17 @@ class MainActivity : ComponentActivity() {
                 )
                 }
                 }
+                // The phone refused the update (Samsung's Auto Blocker): how to let it through, then again.
+                val blocked = update as? UpdateState.Blocked
+                UpdateBlockedWindow(
+                    visible = blocked != null && screen == Screen.DRIVE && !running,
+                    version = blocked?.version.orEmpty(),
+                    onSettings = { openSettings(securitySettings()) },
+                    onRetry = Updater::retry,
+                    onLater = { Updater.dismissBlocked(context) },
+                )
                 MusicInvite(
-                    visible = inviteOpen && musicMissing && screen == Screen.DRIVE && !running,
+                    visible = inviteOpen && musicMissing && screen == Screen.DRIVE && !running && blocked == null,
                     mediaStep = mediaStep,
                     spotifyAvailable = spotify.configured,
                     onAllowMedia = onMedia,
@@ -471,6 +480,9 @@ class MainActivity : ComponentActivity() {
             startActivity(Intent.createChooser(send, "Partager le trajet"))
         }.onFailure { Log.w("Zenith", "share trip", it) }
     }
+
+    /** Samsung puts its Auto Blocker under the security settings; elsewhere the same page is close. */
+    private fun securitySettings(): Intent = Intent(Settings.ACTION_SECURITY_SETTINGS)
 
     private fun openSettings(intent: Intent) {
         runCatching { startActivity(intent) }

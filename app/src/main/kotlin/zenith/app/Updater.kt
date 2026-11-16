@@ -33,6 +33,12 @@ sealed interface UpdateState {
     data class NeedsConfirmation(val version: String, val intent: Intent) : UpdateState
     data class Failed(val message: String) : UpdateState
 
+    /**
+     * The phone refused the install (Samsung's Auto Blocker, "Blocage automatique"): the APK is
+     * kept, a window explains how to let it through, then [Updater.retry] installs it.
+     */
+    data class Blocked(val version: String, val file: File) : UpdateState
+
     /** Checked: nothing newer than the installed [version]. */
     data class UpToDate(val version: String) : UpdateState
 }
@@ -145,6 +151,31 @@ object Updater {
         _state.value = UpdateState.NeedsConfirmation(version, intent)
     }
 
+    /** Refused by the phone itself: keep the APK and ask the driver to let it through. */
+    internal fun blocked(context: Context, message: String) {
+        val version = (_state.value as? UpdateState.Installing)?.version
+        val file = dir(context).listFiles()?.filter { it.name.endsWith(".apk") }?.maxByOrNull { it.lastModified() }
+        if (version == null || file == null) {
+            finished(context, message)
+            return
+        }
+        Log.w("Zenith", "update blocked: $message")
+        _state.value = UpdateState.Blocked(version, file)
+    }
+
+    /** After the blocker was turned off: install the kept APK again. */
+    fun retry() {
+        val blocked = _state.value as? UpdateState.Blocked ?: return
+        _state.value = if (blocked.file.exists()) UpdateState.Ready(blocked.version, blocked.file) else UpdateState.Idle
+    }
+
+    /** "Plus tard": the window goes; the next check downloads it again. */
+    fun dismissBlocked(context: Context) {
+        if (_state.value !is UpdateState.Blocked) return
+        cleanup(context)
+        _state.value = UpdateState.Idle
+    }
+
     internal fun finished(context: Context, message: String?) {
         cleanup(context)
         _state.value = if (message == null) UpdateState.Idle else UpdateState.Failed(message)
@@ -215,11 +246,19 @@ class UpdateReceiver : BroadcastReceiver() {
                 Updater.needsConfirmation(confirm)
             }
             PackageInstaller.STATUS_SUCCESS -> Updater.finished(context, null)
-            PackageInstaller.STATUS_FAILURE_ABORTED -> Updater.finished(context, "Mise à jour annulée, nouvel essai plus tard")
-            else -> Updater.finished(
-                context,
-                "Installation refusée ($status) : ${intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE).orEmpty()}",
-            )
+            else -> {
+                val message = "Installation refusée ($status) : ${intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE).orEmpty()}"
+                // Samsung's Auto Blocker refuses apps from outside the stores and answers "blocked",
+                // or simply "failed" / "aborted" after its own notice: the window explains the way out.
+                val samsung = Build.MANUFACTURER.equals("samsung", ignoreCase = true)
+                when {
+                    status == PackageInstaller.STATUS_FAILURE_BLOCKED -> Updater.blocked(context, message)
+                    samsung && (status == PackageInstaller.STATUS_FAILURE || status == PackageInstaller.STATUS_FAILURE_ABORTED) ->
+                        Updater.blocked(context, message)
+                    status == PackageInstaller.STATUS_FAILURE_ABORTED -> Updater.finished(context, "Mise à jour annulée, nouvel essai plus tard")
+                    else -> Updater.finished(context, message)
+                }
+            }
         }
     }
 }

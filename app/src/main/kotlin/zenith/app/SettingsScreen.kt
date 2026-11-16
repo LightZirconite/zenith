@@ -221,6 +221,7 @@ fun SettingsScreen(
                     is UpdateState.Ready -> "Version ${update.version} téléchargée, elle s'installe"
                     is UpdateState.Installing, is UpdateState.NeedsConfirmation -> "Installation en cours…"
                     is UpdateState.Failed -> update.message
+                    is UpdateState.Blocked -> "Version ${update.version} bloquée par le téléphone (Blocage automatique)"
                     UpdateState.Idle -> "Version $version, vérifiée à chaque ouverture"
                 },
                 done = update is UpdateState.UpToDate,

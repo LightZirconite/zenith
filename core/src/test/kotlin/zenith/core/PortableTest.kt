@@ -66,7 +66,7 @@ class PortableTest {
     fun `weather request rounds like %_1f`() {
         for (v in listOf(48.8566, 2.3522, -4.4861, -0.04, 43.25, 0.0, -0.0, -1.05, 45.95)) {
             val expected = "https://api.open-meteo.com/v1/forecast?latitude=${String.format(java.util.Locale.ROOT, "%.1f", v)}" +
-                "&longitude=${String.format(java.util.Locale.ROOT, "%.1f", 1.0)}&current=precipitation,weather_code"
+                "&longitude=${String.format(java.util.Locale.ROOT, "%.1f", 1.0)}&current=precipitation,weather_code&models=meteofrance_seamless"
             assertEquals(expected, Weather.url(LatLon(v, 1.0)), "v=$v")
         }
     }
