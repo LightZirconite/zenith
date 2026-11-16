@@ -81,9 +81,12 @@ struct WeatherCanvas: View {
         Canvas { ctx, size in
             guard strength > 0.01 else { return }
             switch kind {
-            case .rain: Self.rain(&ctx, size, time, strength, speedKmh, heavy: false)
+            case .rain:
+                Self.rain(&ctx, size, time, strength, speedKmh, heavy: false)
+                Self.drops(&ctx, size, time, strength, speedKmh)
             case .storm:
                 Self.rain(&ctx, size, time, strength, speedKmh, heavy: true)
+                Self.drops(&ctx, size, time, strength, speedKmh)
                 Self.lightning(&ctx, size, flashAge, strength)
             case .snow: Self.snow(&ctx, size, time, strength, speedKmh)
             case .fog: Self.fog(&ctx, size, time, strength)
@@ -127,20 +130,96 @@ struct WeatherCanvas: View {
         }
     }
 
-    private static func snow(_ ctx: inout GraphicsContext, _ size: CGSize, _ t: Double, _ strength: Double, _ speed: Double) {
+    /**
+     * Drops landing on the glass, as on a windscreen: each lands with a little splash, catches the
+     * light (a bright crescent on top, a darker rim below), stays a few seconds, sometimes slides
+     * down leaving a faint trail, then dries. At speed they slide more and live shorter.
+     */
+    private static func drops(_ ctx: inout GraphicsContext, _ size: CGSize, _ t: Double, _ strength: Double, _ speed: Double) {
+        guard min(size.width, size.height) >= 1 else { return }
         let k = strength.squareRoot()
         let w = size.width, h = size.height
         let unit = min(w, h) / 400
-        let count = max(14, Int(90 * k))
+        let fast = min(max(speed / 130, 0), 1)
+        let count = Int(14 + 46 * k)
+        for i in 0..<count {
+            let life = 2.2 + 3.8 * hash(i, 11) - 1.2 * fast
+            let shifted = t + hash(i, 12) * life
+            let cycle = Int(shifted / life)
+            let age = (shifted - Double(cycle) * life) / life
+            let seed = i &* 7919 &+ cycle
+            let r = (3.2 + 7.5 * hash(seed, 13) * hash(seed, 14)) * unit
+            let x0 = hash(seed, 15) * w
+            let y0 = hash(seed, 16) * h
+            let slides = hash(seed, 17) < 0.33 + 0.4 * fast
+            let slide = slides ? age * age * (50 + 110 * fast) * unit : 0
+            let y = y0 + slide
+            let alpha = (age < 0.12 ? age / 0.12 : age > 0.7 ? (1 - age) / 0.3 : 1) * k
+            let rr = r * (age < 0.12 ? 0.6 + 0.4 * (age / 0.12) : 1)
+            let c = CGPoint(x: x0, y: y)
+            if slides && slide > rr {
+                var trail = Path()
+                trail.move(to: CGPoint(x: x0, y: y0))
+                trail.addLine(to: CGPoint(x: x0, y: y - rr))
+                ctx.stroke(trail, with: .color(.white.opacity(0.10 * alpha)), style: StrokeStyle(lineWidth: rr * 0.45, lineCap: .round))
+            }
+            let body = Path(ellipseIn: CGRect(x: c.x - rr, y: c.y - rr, width: 2 * rr, height: 2 * rr))
+            let water = Color(red: 0.87, green: 0.92, blue: 1)
+            ctx.fill(body, with: .radialGradient(
+                Gradient(colors: [water.opacity(0.05 * alpha), water.opacity(0.22 * alpha)]),
+                center: CGPoint(x: c.x, y: c.y - rr * 0.3), startRadius: 0, endRadius: rr * 1.2
+            ))
+            var rim = Path()
+            rim.addArc(center: c, radius: rr, startAngle: .degrees(20), endAngle: .degrees(160), clockwise: false)
+            ctx.stroke(rim, with: .color(.black.opacity(0.35 * alpha)), lineWidth: rr * 0.22)
+            var shine = Path()
+            shine.addArc(center: c, radius: rr * 0.7, startAngle: .degrees(200), endAngle: .degrees(290), clockwise: false)
+            ctx.stroke(shine, with: .color(.white.opacity(0.75 * alpha)), style: StrokeStyle(lineWidth: rr * 0.2, lineCap: .round))
+            let dot = rr * 0.16
+            ctx.fill(Path(ellipseIn: CGRect(x: c.x - rr * 0.35 - dot, y: c.y - rr * 0.4 - dot, width: 2 * dot, height: 2 * dot)),
+                     with: .color(.white.opacity(0.85 * alpha)))
+            if age < 0.12 {
+                let q = age / 0.12
+                let rs = r * (1 + 1.2 * q)
+                ctx.stroke(Path(ellipseIn: CGRect(x: c.x - rs, y: c.y - rs, width: 2 * rs, height: 2 * rs)),
+                           with: .color(.white.opacity(0.4 * (1 - q) * k)), lineWidth: unit * 0.8)
+            }
+        }
+    }
+
+    private static func snow(_ ctx: inout GraphicsContext, _ size: CGSize, _ t: Double, _ strength: Double, _ speed: Double) {
+        guard min(size.width, size.height) >= 1 else { return }
+        let k = strength.squareRoot()
+        let w = size.width, h = size.height
+        let unit = min(w, h) / 400
+        let count = max(24, Int(110 * k))
         let fall = h * (0.08 + 0.35 * min(max(speed / 130, 0), 1))
         for i in 0..<count {
             let depth = 0.3 + 0.7 * hash(i, 1)
             let y = (hash(i, 2) + t * fall * (0.5 + depth) / h).truncatingRemainder(dividingBy: 1) * (h + 20) - 10
             let sway = sin(t * (0.5 + hash(i, 4)) + hash(i, 5) * 2 * .pi) * 14 * unit * depth
             let x = hash(i, 3) * w + sway
-            let r = (1.2 + 2.6 * depth) * unit
-            ctx.fill(Path(ellipseIn: CGRect(x: x - r, y: y - r, width: 2 * r, height: 2 * r)),
-                     with: .color(.white.opacity((0.35 + 0.5 * depth) * k)))
+            let r = (1.6 + 3.4 * depth * depth) * unit
+            let a = (0.45 + 0.5 * depth) * k
+            let glow = r * 2.6
+            // Soft glow, then the flake.
+            ctx.fill(Path(ellipseIn: CGRect(x: x - glow, y: y - glow, width: 2 * glow, height: 2 * glow)), with: .radialGradient(
+                Gradient(colors: [.white.opacity(0.35 * a), .clear]), center: CGPoint(x: x, y: y), startRadius: 0, endRadius: glow
+            ))
+            if depth > 0.85 {
+                // The nearest ones show their six arms, turning slowly.
+                let spin = t * (0.3 + hash(i, 6)) + hash(i, 7) * 6
+                for arm in 0..<3 {
+                    let ang = spin + Double(arm) * .pi / 3
+                    let dx = cos(ang) * r * 1.6, dy = sin(ang) * r * 1.6
+                    var line = Path()
+                    line.move(to: CGPoint(x: x - dx, y: y - dy))
+                    line.addLine(to: CGPoint(x: x + dx, y: y + dy))
+                    ctx.stroke(line, with: .color(.white.opacity(a)), style: StrokeStyle(lineWidth: r * 0.35, lineCap: .round))
+                }
+            } else {
+                ctx.fill(Path(ellipseIn: CGRect(x: x - r, y: y - r, width: 2 * r, height: 2 * r)), with: .color(.white.opacity(a)))
+            }
         }
     }
 

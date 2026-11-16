@@ -13,6 +13,7 @@ import zenith.core.DriveVolume
 import zenith.core.DriverProfile
 import zenith.core.DrivingSession
 import zenith.core.GpsFix
+import zenith.core.Glide
 import zenith.core.Gpx
 import zenith.core.HttpAnswer
 import zenith.core.LatLon
@@ -236,6 +237,28 @@ object Bridge {
     fun gaugeFill(speedKmh: Int, limitKmh: Int): Float = Gauge.fill(speedKmh.takeIf { it >= 0 }, limitKmh.takeIf { it >= 0 })
 
     /** -1 without a limit. */
+    // ---- Smooth car arrow between two fixes (Glide) ----
+
+    fun glide(): Glide = Glide()
+
+    /** [ahead] flat [lat, lon, …]; [speedKmh] -1 unknown; [headingDeg] -1 unknown. */
+    fun glideFix(g: Glide, lat: Double, lon: Double, speedKmh: Int, headingDeg: Double, ahead: List<Double>, nowMs: Long) {
+        runCatching {
+            val path = ArrayList<LatLon>(ahead.size / 2)
+            var i = 0
+            while (i + 1 < ahead.size) {
+                path.add(LatLon(ahead[i], ahead[i + 1]))
+                i += 2
+            }
+            g.fix(LatLon(lat, lon), speedKmh.takeIf { it >= 0 }, headingDeg.takeIf { it >= 0 }, path, nowMs)
+        }
+    }
+
+    /** The arrow now; null before the first fix. Heading -1 unknown. */
+    fun glideAt(g: Glide, nowMs: Long): CoreGlide? = runCatching {
+        g.at(nowMs)?.let { CoreGlide(it.position.lat, it.position.lon, it.headingDeg ?: -1.0) }
+    }.getOrNull()
+
     /** Limit after rain and licence rules. */
     fun effectiveLimit(limitKmh: Int, raining: Boolean, probationary: Boolean): Int =
         SpeedRules.effectiveLimit(limitKmh, raining, probationary)

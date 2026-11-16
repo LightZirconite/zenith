@@ -88,6 +88,11 @@ private final class DriveMapHolder: NSObject, MLNMapViewDelegate, UIGestureRecog
     private var zoom: Double?
     private var bearing: Double?
     private var placed = false
+    private let glide = CarGlide()
+    private var zoomTarget: Double?
+    private var speedZoomNow = 16.3
+    private var lastTick: TimeInterval = 0
+    private var link: CADisplayLink?
     private var last: Snapshot?
     private var radars: [RadarInfo] = []
     private var active: Set<String> = []
@@ -128,6 +133,8 @@ private final class DriveMapHolder: NSObject, MLNMapViewDelegate, UIGestureRecog
     }
 
     func release() {
+        link?.invalidate()
+        link = nil
         map?.delegate = nil
         map?.onResize = nil
         map = nil
@@ -138,7 +145,7 @@ private final class DriveMapHolder: NSObject, MLNMapViewDelegate, UIGestureRecog
     func frame(_ at: Double) {
         guard at != carAt else { return }
         carAt = at
-        if let last { follow(last) }
+        tick(force: true)
     }
 
     /** A new fix. */
@@ -167,29 +174,68 @@ private final class DriveMapHolder: NSObject, MLNMapViewDelegate, UIGestureRecog
      */
     private func follow(_ s: Snapshot) {
         last = s
-        let heading = s.headingDeg ?? bearing ?? 0
-        (style?.source(withIdentifier: Self.srcMe) as? MLNShapeSource)?.shape = Self.point(s.position, ["h": heading])
+        glide.fix(s, nowMs: Int64(now * 1000))
         (style?.source(withIdentifier: Self.srcAhead) as? MLNShapeSource)?.shape = (Self.line(s.ahead) as MLNShape?) ?? Self.empty()
-        guard let map, map.bounds.width > 0, map.bounds.height > 0, now >= freeUntil else { return }
-
-        let kmh = Double(s.speedKmh ?? 0)
-        let speedZoom = 16.3 - (min(max(kmh - 30, 0), 100) / 100) * 2.3
-        let height = Double(map.bounds.height)
-        // Car at [carAt] of the map height: the speed counter covers the faded part below.
-        let aheadPts = height * carAt
-        let framed = s.alerts.first?.distanceM ?? (s.upcoming?.roadName != nil ? s.upcoming?.distanceM : nil)
-        var fitZoom: Double?
-        if let d = framed, d >= 50, d <= 4_000 {
-            // Ground metres per point at zoom z: 40075016.686 cos(lat) / (512 · 2^z); the tilt
-            // stretches the far half of the view, roughly ×1.7 at 40°.
-            fitZoom = log2(40_075_016.686 * cos(s.position.lat * .pi / 180) * aheadPts * 1.7 / (512 * d * 1.25))
+        if let map, map.bounds.height > 0 {
+            let kmh = Double(s.speedKmh ?? 0)
+            let speedZoom = 16.3 - (min(max(kmh - 30, 0), 100) / 100) * 2.3
+            // Car at [carAt] of the map height: the speed counter covers the faded part below.
+            let aheadPts = Double(map.bounds.height) * carAt
+            let framed = s.alerts.first?.distanceM ?? (s.upcoming?.roadName != nil ? s.upcoming?.distanceM : nil)
+            var fitZoom: Double?
+            if let d = framed, d >= 50, d <= 4_000 {
+                // Ground metres per point at zoom z: 40075016.686 cos(lat) / (512 · 2^z); the tilt
+                // stretches the far half of the view, roughly ×1.7 at 40°.
+                fitZoom = log2(40_075_016.686 * cos(s.position.lat * .pi / 180) * aheadPts * 1.7 / (512 * d * 1.25))
+            }
+            zoomTarget = min(max(min(speedZoom, fitZoom ?? speedZoom), 12.5), 17)
+            speedZoomNow = speedZoom
         }
-        let target = min(max(min(speedZoom, fitZoom ?? speedZoom), 12.5), 17)
-        let z = zoom.map { $0 + (target - $0) * 0.3 } ?? target
+        startTicking()
+        tick(force: true)
+    }
+
+    /** About 30 frames a second while the map is shown: the car moves on between two fixes. */
+    private func startTicking() {
+        guard link == nil else { return }
+        let link = CADisplayLink(target: self, selector: #selector(frameTick))
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 20, maximum: 30, preferred: 30)
+        link.add(to: .main, forMode: .common)
+        self.link = link
+    }
+
+    @objc private func frameTick() { tick(force: false) }
+
+    /**
+     * One frame: the arrow and the camera where the car is now (core Glide: carried on at its speed
+     * between two fixes, the gap to the next fix melting away), zoom and heading eased.
+     */
+    private func tick(force: Bool) {
+        let t = now
+        guard let pose = glide.at(nowMs: Int64(t * 1000)) else { return }
+        let dt = lastTick == 0 ? 0.016 : min(max(t - lastTick, 0.001), 0.2)
+        lastTick = t
+        // Heading eased (about 0.25 s): corners of the road ahead turn the view, never snap it.
+        if let h = pose.headingDeg {
+            if let b = bearing {
+                var d = h - b
+                if d > 180 { d -= 360 }
+                if d < -180 { d += 360 }
+                bearing = (b + d * (1 - exp(-dt / 0.25))).truncatingRemainder(dividingBy: 360)
+                if bearing! < 0 { bearing! += 360 }
+            } else {
+                bearing = h
+            }
+        }
+        let heading = bearing ?? 0
+        (style?.source(withIdentifier: Self.srcMe) as? MLNShapeSource)?.shape = Self.point(pose.position, ["h": heading])
+        guard let map, map.bounds.width > 0, map.bounds.height > 0, now >= freeUntil, let target = zoomTarget else { return }
+        // Zoom eased over about a second, as the old per-fix animation did.
+        let z = zoom.map { $0 + (target - $0) * (1 - exp(-dt / 0.9)) } ?? target
         zoom = z
         // Zoomed out for a far radar: look more from above.
-        let tilt = 42 - (min(max(speedZoom - z, 0), 2) / 2) * 12
-        bearing = heading
+        let tilt = 42 - (min(max(speedZoomNow - z, 0), 2) / 2) * 12
+        let height = Double(map.bounds.height)
         // Padding at the bottom lifts the car above the middle, at the top lowers it below.
         let padding = UIEdgeInsets(
             top: CGFloat(height * max(0, 2 * carAt - 1)),
@@ -198,22 +244,14 @@ private final class DriveMapHolder: NSObject, MLNMapViewDelegate, UIGestureRecog
             right: 0
         )
         // The same size MapLibre converts the altitude back with.
-        let altitude = MLNAltitudeForZoomLevel(z, CGFloat(tilt), s.position.lat, map.frame.size)
-        let camera = MLNMapCamera(lookingAtCenter: s.position.coordinate, altitude: altitude, pitch: CGFloat(tilt), heading: heading)
-        // The first position lands at once: never a zoom from the whole world at start.
-        let first = !placed
+        let altitude = MLNAltitudeForZoomLevel(z, CGFloat(tilt), pose.position.lat, map.frame.size)
+        let camera = MLNMapCamera(lookingAtCenter: pose.position.coordinate, altitude: altitude, pitch: CGFloat(tilt), heading: heading)
         placed = true
-        map.setCamera(
-            camera,
-            withDuration: first ? 0 : 1,
-            animationTimingFunction: CAMediaTimingFunction(name: .linear),
-            edgePadding: padding,
-            completionHandler: nil
-        )
+        map.setCamera(camera, withDuration: 0, animationTimingFunction: nil, edgePadding: padding, completionHandler: nil)
     }
 
     private func resized() {
-        if let last { follow(last) }
+        tick(force: true)
     }
 
     // MARK: Looking around
@@ -223,7 +261,7 @@ private final class DriveMapHolder: NSObject, MLNMapViewDelegate, UIGestureRecog
         if gesture || now < freeUntil { UiSound.play(.recenter) }
         gesture = false
         freeUntil = 0
-        if let last { follow(last) }
+        tick(force: true)
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {

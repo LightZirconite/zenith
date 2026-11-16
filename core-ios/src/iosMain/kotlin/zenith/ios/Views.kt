@@ -193,3 +193,6 @@ class CoreSky(val kind: String, val intensity: Float) {
         fun of(l: SkyLook) = CoreSky(l.kind.name, l.intensity)
     }
 }
+
+/** The car arrow at one instant (Glide); [headingDeg] -1 unknown. */
+class CoreGlide(val lat: Double, val lon: Double, val headingDeg: Double)

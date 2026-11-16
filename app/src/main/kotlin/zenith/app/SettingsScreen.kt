@@ -114,7 +114,8 @@ fun SettingsScreen(
                 onChange { it.copy(autoRain = on) }
             }
             Divider()
-            ToggleRow("Météo à l'écran", "Pluie, neige, orage, brouillard, là où tu es", settings.weatherFx, icon = Glyphs.rain, tint = Color(0xFF5AC8FA)) { on ->
+            val skyStatus by SkyWatch.status.collectAsState()
+            ToggleRow("Météo à l'écran", if (settings.weatherFx) skyStatus else "Pluie, neige, orage, brouillard, là où tu es", settings.weatherFx, icon = Glyphs.rain, tint = Color(0xFF5AC8FA)) { on ->
                 onChange { it.copy(weatherFx = on) }
             }
         }

@@ -18,6 +18,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -42,10 +43,13 @@ import org.maplibre.android.style.layers.PropertyFactory
 import org.maplibre.android.style.layers.SymbolLayer
 import org.maplibre.android.style.sources.GeoJsonSource
 import zenith.core.ControlZone
+import zenith.core.Geo
+import zenith.core.Glide
 import zenith.core.DriveSnapshot
 import zenith.core.LatLon
 import zenith.core.Radar
 import kotlin.math.cos
+import kotlin.math.exp
 import kotlin.math.ln
 
 /**
@@ -106,6 +110,18 @@ fun DriveMap(
     // Before following: the first camera already puts the car at its place.
     LaunchedEffect(carAt) { holder.frame(carAt) }
     LaunchedEffect(snapshot) { snapshot?.let(holder::follow) }
+    // Between two fixes the car moves on smoothly (Glide), at about 30 frames a second.
+    LaunchedEffect(holder) {
+        var lastMs = 0L
+        while (true) {
+            withFrameMillis { }
+            val now = SystemClock.elapsedRealtime()
+            if (now - lastMs >= 32) {
+                lastMs = now
+                holder.tick(now)
+            }
+        }
+    }
     // The signs on the map show the driver's limit: 110 for a 130 radar in the rain, as the alerts say.
     val settings by UserSettings.state.collectAsState()
     LaunchedEffect(radars, snapshot?.alerts?.firstOrNull()?.radar?.id, settings.raining, settings.probationary) {
@@ -144,6 +160,11 @@ private class MapHolder {
     private var freeUntilMs = 0L
     private var gesture = false
     private var last: DriveSnapshot? = null
+    private val glide = Glide()
+    private var zoomTarget: Double? = null
+    private var speedZoomNow = 16.3
+    private var bearingNow: Double? = null
+    private var lastTickMs = 0L
 
     fun create(context: Context): View = runCatching {
         density = context.resources.displayMetrics.density
@@ -187,7 +208,7 @@ private class MapHolder {
                     if (gesture || SystemClock.elapsedRealtime() < freeUntilMs) UiSound.play(UiSound.Kind.RECENTER, this)
                     gesture = false
                     freeUntilMs = 0L
-                    last?.let(::follow)
+                    tick(SystemClock.elapsedRealtime(), force = true)
                     true
                 }
                 lastCamera?.let(m::setCameraPosition)
@@ -205,7 +226,7 @@ private class MapHolder {
     fun frame(at: Double) {
         if (at == carAt) return
         carAt = at
-        last?.let(::follow)
+        tick(SystemClock.elapsedRealtime(), force = true)
     }
 
     /**
@@ -214,13 +235,9 @@ private class MapHolder {
      */
     fun follow(s: DriveSnapshot) {
         last = s
-        runCatching {
-            style?.getSourceAs<GeoJsonSource>(SRC_ME)?.setGeoJson(point(s.position, """{"h":${s.headingDeg ?: lastCamera?.bearing ?: 0.0}}"""))
-            style?.getSourceAs<GeoJsonSource>(SRC_AHEAD)?.setGeoJson(line(s.ahead))
-        }
+        glide.fix(s, SystemClock.elapsedRealtime())
+        runCatching { style?.getSourceAs<GeoJsonSource>(SRC_AHEAD)?.setGeoJson(line(s.ahead)) }
         val m = map ?: return
-        if (SystemClock.elapsedRealtime() < freeUntilMs) return
-
         val kmh = (s.speedKmh ?: 0).toDouble()
         val speedZoom = 16.3 - ((kmh - 30).coerceIn(0.0, 100.0) / 100.0) * 2.3
         val heightPx = m.height.toDouble().takeIf { it > 0 } ?: (300.0 * density)
@@ -232,26 +249,53 @@ private class MapHolder {
             // tilt stretches the far half of the view, roughly ×1.7 at 40°.
             log2(40_075_016.686 * cos(Math.toRadians(s.position.lat)) * aheadPx * 1.7 / (512 * d * 1.25))
         }
-        val target = minOf(speedZoom, fitZoom ?: speedZoom).coerceIn(12.5, 17.0)
-        val z = zoom?.let { it + (target - it) * 0.3 } ?: target
+        zoomTarget = minOf(speedZoom, fitZoom ?: speedZoom).coerceIn(12.5, 17.0)
+        speedZoomNow = speedZoom
+        tick(SystemClock.elapsedRealtime(), force = true)
+    }
+
+    /**
+     * One frame: the arrow and the camera where the car is now ([Glide]: carried on at its speed
+     * between two fixes, the gap to the next fix melting away), zoom and heading eased.
+     */
+    fun tick(nowMs: Long, force: Boolean = false) {
+        val pose = glide.at(nowMs) ?: return
+        val dtMs = if (lastTickMs == 0L) 16L else (nowMs - lastTickMs).coerceIn(1L, 200L)
+        lastTickMs = nowMs
+        val heading = pose.headingDeg ?: bearingNow
+        // Heading eased (about 0.25 s): corners of the road ahead turn the view, never snap it.
+        bearingNow = when {
+            bearingNow == null || heading == null -> heading
+            else -> {
+                var d = heading - bearingNow!!
+                if (d > 180) d -= 360
+                if (d < -180) d += 360
+                Geo.normalizeDeg(bearingNow!! + d * (1 - exp(-dtMs / 250.0)))
+            }
+        }
+        runCatching {
+            style?.getSourceAs<GeoJsonSource>(SRC_ME)?.setGeoJson(point(pose.position, """{"h":${bearingNow ?: 0.0}}"""))
+        }
+        val m = map ?: return
+        if (SystemClock.elapsedRealtime() < freeUntilMs) return
+        val target = zoomTarget ?: return
+        // Zoom eased over about a second, as the old per-fix ease did.
+        val z = zoom?.let { it + (target - it) * (1 - exp(-dtMs / 900.0)) } ?: target
         zoom = z
+        val heightPx = m.height.toDouble().takeIf { it > 0 } ?: (300.0 * density)
         // Zoomed out for a far radar: look more from above.
-        val tilt = 42.0 - ((speedZoom - z).coerceIn(0.0, 2.0) / 2.0) * 12.0
+        val tilt = 42.0 - ((speedZoomNow - z).coerceIn(0.0, 2.0) / 2.0) * 12.0
         val camera = CameraPosition.Builder()
-            .target(LatLng(s.position.lat, s.position.lon))
-            .bearing(s.headingDeg ?: lastCamera?.bearing ?: 0.0)
+            .target(LatLng(pose.position.lat, pose.position.lon))
+            .bearing(bearingNow ?: lastCamera?.bearing ?: 0.0)
             .tilt(tilt)
             .zoom(z)
             // Padding at the bottom lifts the car above the middle, at the top lowers it below.
             .padding(0.0, heightPx * (2 * carAt - 1).coerceAtLeast(0.0), 0.0, heightPx * (1 - 2 * carAt).coerceAtLeast(0.0))
             .build()
-        val first = lastCamera == null
+        if (!force && lastCamera == camera) return
         lastCamera = camera
-        // The first position lands at once: never a zoom from the whole world at start.
-        runCatching {
-            if (first) m.moveCamera(CameraUpdateFactory.newCameraPosition(camera))
-            else m.easeCamera(CameraUpdateFactory.newCameraPosition(camera), 1_000, false)
-        }
+        runCatching { m.moveCamera(CameraUpdateFactory.newCameraPosition(camera)) }
     }
 
     fun showRadars(radars: List<Radar>, active: Set<String>, raining: Boolean, probationary: Boolean) {

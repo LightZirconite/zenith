@@ -164,7 +164,7 @@ struct SettingsView: View {
             SettingsToggleRow(
                 icon: .rain,
                 title: "Météo à l'écran",
-                text: "Pluie, neige, orage, brouillard, là où tu es",
+                text: settings.weatherFx ? SkyWatch.shared.status : "Pluie, neige, orage, brouillard, là où tu es",
                 on: settings.weatherFx
             ) { settings.weatherFx = $0 }
         }

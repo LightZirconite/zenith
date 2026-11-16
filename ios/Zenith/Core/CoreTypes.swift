@@ -299,3 +299,25 @@ struct LimitRules: Equatable {
         return Int(Bridge.shared.effectiveLimit(limitKmh: Int32(l), raining: raining, probationary: probationary))
     }
 }
+
+/** Smooth car arrow between two GPS fixes (the core's Glide). Main thread. */
+final class CarGlide {
+    private let core = Bridge.shared.glide()
+
+    func fix(_ s: Snapshot, nowMs: Int64) {
+        var flat: [KotlinDouble] = []
+        flat.reserveCapacity(s.ahead.count * 2)
+        for p in s.ahead {
+            flat.append(KotlinDouble(value: p.lat))
+            flat.append(KotlinDouble(value: p.lon))
+        }
+        Bridge.shared.glideFix(g: core, lat: s.position.lat, lon: s.position.lon, speedKmh: Int32(s.speedKmh ?? -1),
+                               headingDeg: s.headingDeg ?? -1, ahead: flat, nowMs: nowMs)
+    }
+
+    /** The arrow now: position and heading (nil unknown); nil before the first fix. */
+    func at(nowMs: Int64) -> (position: GeoPoint, headingDeg: Double?)? {
+        guard let g = Bridge.shared.glideAt(g: core, nowMs: nowMs) else { return nil }
+        return (GeoPoint(lat: g.lat, lon: g.lon), g.headingDeg >= 0 ? g.headingDeg : nil)
+    }
+}

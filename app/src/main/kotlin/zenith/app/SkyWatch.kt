@@ -33,10 +33,29 @@ object SkyWatch {
 
     val look: StateFlow<SkyLook> = _look
 
+    /** What the settings say: the last reading and when, or why there is none ("Météo à l'écran"). */
+    private val _status = MutableStateFlow("Pas encore de relevé")
+    val status: StateFlow<String> = _status
+
+    private fun said(look: SkyLook, atMs: Long) {
+        val c = java.util.Calendar.getInstance().apply { timeInMillis = atMs }
+        val hhmm = "%02d:%02d".format(c.get(java.util.Calendar.HOUR_OF_DAY), c.get(java.util.Calendar.MINUTE))
+        _status.value = "${name(look)} · relevé à $hhmm"
+    }
+
+    private fun name(l: SkyLook): String = when (l.kind) {
+        SkyKind.CLEAR -> "Pas de pluie"
+        SkyKind.RAIN -> if (l.intensity >= 0.65f) "Forte pluie" else "Pluie"
+        SkyKind.SNOW -> "Neige"
+        SkyKind.STORM -> "Orage"
+        SkyKind.FOG -> "Brouillard"
+    }
+
     /** A drive's weather report: the screen follows it. */
     fun report(now: WeatherNow) {
         readAtMs = System.currentTimeMillis()
         _look.value = Sky.of(now)
+        said(_look.value, readAtMs)
     }
 
     /** The hidden demo drives in a light rain, so the effect has its place there too. */
@@ -53,12 +72,19 @@ object SkyWatch {
         reading = true
         scope.launch {
             try {
-                val p = lastKnown(app) ?: return@launch
-                val now = Weather.parse(httpGet(Weather.url(p))) ?: return@launch
+                val p = lastKnown(app) ?: run {
+                    _status.value = "Position inconnue pour l'instant"
+                    return@launch
+                }
+                val now = Weather.parse(httpGet(Weather.url(p))) ?: run {
+                    _status.value = "Réponse météo illisible"
+                    return@launch
+                }
                 // A drive started meanwhile reads its own.
                 if (!DriveState.running.value) report(now)
             } catch (e: Exception) {
                 Log.w("Zenith", "home weather", e)
+                _status.value = "Relevé impossible (réseau)"
             } finally {
                 reading = false
             }
