@@ -76,17 +76,16 @@ struct WeatherCanvas: View {
     let speedKmh: Double
     let time: Double
     var flashAge: Double = -1
+    /** Drawn a few times a second (the small window): drops resting on the glass, nothing falling fast. */
+    var still = false
 
     var body: some View {
         Canvas { ctx, size in
             guard strength > 0.01 else { return }
             switch kind {
-            case .rain:
-                Self.rain(&ctx, size, time, strength, speedKmh, heavy: false)
-                Self.drops(&ctx, size, time, strength, speedKmh)
-            case .storm:
-                Self.rain(&ctx, size, time, strength, speedKmh, heavy: true)
-                Self.drops(&ctx, size, time, strength, speedKmh)
+            case .rain, .storm:
+                if !still { Self.rain(&ctx, size, time, strength, speedKmh, heavy: kind == .storm) }
+                Self.drops(&ctx, size, time, strength, still ? 0 : speedKmh, slide: !still)
                 Self.lightning(&ctx, size, flashAge, strength)
             case .snow: Self.snow(&ctx, size, time, strength, speedKmh)
             case .fog: Self.fog(&ctx, size, time, strength)
@@ -96,8 +95,6 @@ struct WeatherCanvas: View {
         .allowsHitTesting(false)
     }
 
-    private static let rainTint = Color(red: 0.75, green: 0.85, blue: 1)
-
     /** Stable pseudo-random 0..1 for particle [i], channel [c] (the Android hash, bit for bit). */
     static func hash(_ i: Int, _ c: Int) -> Double {
         var x = Int32(truncatingIfNeeded: i) &* 374_761_393 &+ Int32(truncatingIfNeeded: c) &* 668_265_263
@@ -106,119 +103,196 @@ struct WeatherCanvas: View {
         return Double(y & 0xFFFFFF) / 16_777_216
     }
 
+    private static func rgba(_ r: Double, _ g: Double, _ b: Double, _ a: Double) -> Color {
+        Color(red: r / 255, green: g / 255, blue: b / 255).opacity(min(max(a, 0), 1))
+    }
+
+    /** Fewer particles in a small window (the picture-in-picture) than on a whole phone screen. */
+    private static func areaShare(_ size: CGSize) -> Double {
+        min(max(Double(size.width * size.height) / (390 * 690), 0.3), 1)
+    }
+
+    private static func dot(_ ctx: inout GraphicsContext, _ c: CGPoint, _ r: Double, _ color: Color) {
+        guard r > 0.05 else { return }
+        ctx.fill(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r)), with: .color(color))
+    }
+
+    private static func segment(_ ctx: inout GraphicsContext, _ a: CGPoint, _ b: CGPoint, _ color: Color, _ width: Double) {
+        var p = Path()
+        p.move(to: a)
+        p.addLine(to: b)
+        ctx.stroke(p, with: .color(color), style: StrokeStyle(lineWidth: width, lineCap: .round))
+    }
+
+    /**
+     * Rain falling: thin streaks in depth (far ones short and faint, near ones long and bright), each
+     * fading toward its tail, leaning and quickening with the speed.
+     */
     private static func rain(_ ctx: inout GraphicsContext, _ size: CGSize, _ t: Double, _ strength: Double, _ speed: Double, heavy: Bool) {
+        guard min(size.width, size.height) >= 1 else { return }
         // A light rain (0.35) must still be seen at a glance: density and light follow the square root.
         let k = strength.squareRoot()
         let w = size.width, h = size.height
         let unit = min(w, h) / 400
-        let count = max(20, Int(Double(heavy ? 170 : 130) * k))
-        // Faster car: the streaks lean more and fall faster, as on a windscreen.
         let fast = min(max(speed / 130, 0), 1)
-        let lean = 0.12 + 0.38 * fast
-        let fall = h * (1.1 + 0.9 * fast) * (heavy ? 1.25 : 1)
+        let lean = 0.10 + 0.40 * fast
+        let count = max(12, Int(Double(max(30, Int(Double(heavy ? 220 : 170) * k))) * areaShare(size)))
         for i in 0..<count {
-            let depth = 0.35 + 0.65 * hash(i, 1)
-            let len = (14 + 26 * depth) * unit * (heavy ? 1.2 : 1)
-            let y = (hash(i, 2) + t * fall * depth / h).truncatingRemainder(dividingBy: 1) * (h + len) - len
-            let x0 = hash(i, 3) * (w * (1 + lean)) - w * lean * 0.5
-            let x = x0 - lean * (y + len)
-            var path = Path()
-            path.move(to: CGPoint(x: x, y: y))
-            path.addLine(to: CGPoint(x: x - lean * len, y: y + len))
-            ctx.stroke(path, with: .color(rainTint.opacity((0.22 + 0.38 * depth) * k)),
-                       style: StrokeStyle(lineWidth: (1.0 + 1.1 * depth) * unit, lineCap: .round))
+            let d = hash(i, 1)
+            let len = (10 + 44 * d * d) * unit * (heavy ? 1.15 : 1)
+            let width = (0.5 + 1.5 * d) * unit
+            let a = (0.10 + 0.42 * d) * k
+            let ln = lean + (hash(i, 8) - 0.5) * 0.06
+            let fall = h * (1.2 + 1.4 * d) * (1 + 0.8 * fast) * (heavy ? 1.2 : 1)
+            let y = (hash(i, 2) + t * fall / h).truncatingRemainder(dividingBy: 1) * (h + len) - len
+            let x = hash(i, 3) * (w * (1 + ln)) - w * ln * 0.5 - ln * (y + len)
+            let mid = CGPoint(x: x - ln * len * 0.5, y: y + len * 0.5)
+            segment(&ctx, CGPoint(x: x, y: y), mid, rgba(200, 220, 255, a * 0.35), width)
+            segment(&ctx, mid, CGPoint(x: x - ln * len, y: y + len), rgba(215, 230, 255, a), width)
         }
     }
 
     /**
-     * Drops landing on the glass, as on a windscreen: each lands with a little splash, catches the
-     * light (a bright crescent on top, a darker rim below), stays a few seconds, sometimes slides
-     * down leaving a faint trail, then dries. At speed they slide more and live shorter.
+     * One drop of water on the glass, read as a lens: lighter where it gathers the light below, a
+     * dark rim, a bright crescent at the bottom, a sharp highlight at the top left.
      */
-    private static func drops(_ ctx: inout GraphicsContext, _ size: CGSize, _ t: Double, _ strength: Double, _ speed: Double) {
+    private static func waterDrop(_ ctx: inout GraphicsContext, _ c: CGPoint, _ r: Double, _ ry: Double, _ a: Double) {
+        guard r >= 0.3 else { return }
+        let oval = Path(ellipseIn: CGRect(x: c.x - r, y: c.y - ry, width: 2 * r, height: 2 * ry))
+        ctx.fill(oval, with: .radialGradient(
+            Gradient(stops: [
+                .init(color: rgba(235, 243, 255, 0.26 * a), location: 0),
+                .init(color: rgba(160, 180, 210, 0.08 * a), location: 0.7),
+                .init(color: rgba(0, 0, 0, 0.28 * a), location: 1),
+            ]),
+            center: CGPoint(x: c.x, y: c.y + ry * 0.35), startRadius: 0, endRadius: max(r, ry) * 1.05
+        ))
+        ctx.stroke(oval, with: .color(rgba(0, 0, 0, 0.30 * a)), lineWidth: max(r * 0.09, 0.6))
+        var crescent = Path()
+        crescent.addArc(center: .zero, radius: 1, startAngle: .degrees(20), endAngle: .degrees(160), clockwise: false)
+        let arc = crescent.applying(CGAffineTransform(a: r * 0.72, b: 0, c: 0, d: ry * 0.72, tx: c.x, ty: c.y))
+        ctx.stroke(arc, with: .color(rgba(255, 255, 255, 0.38 * a)), style: StrokeStyle(lineWidth: r * 0.2, lineCap: .round))
+        dot(&ctx, CGPoint(x: c.x - r * 0.38, y: c.y - ry * 0.42), r * 0.17, rgba(255, 255, 255, 0.92 * a))
+        dot(&ctx, CGPoint(x: c.x + r * 0.3, y: c.y + ry * 0.38), r * 0.07, rgba(255, 255, 255, 0.5 * a))
+    }
+
+    /**
+     * Water on the glass, as on a windscreen: a fine mist of tiny droplets, and drops that land with
+     * a little splash, stay, sometimes run down leaving a trail of beads, then dry. At speed they run
+     * more and live shorter. [slide] false (drawn a few times a second): they stay put.
+     */
+    private static func drops(_ ctx: inout GraphicsContext, _ size: CGSize, _ t: Double, _ strength: Double, _ speed: Double, slide: Bool) {
         guard min(size.width, size.height) >= 1 else { return }
         let k = strength.squareRoot()
         let w = size.width, h = size.height
         let unit = min(w, h) / 400
         let fast = min(max(speed / 130, 0), 1)
-        let count = Int(14 + 46 * k)
+        let share = areaShare(size)
+        let mist = Int((40 + 90 * k) * share)
+        for i in 0..<mist {
+            let life = 4 + 6 * hash(i, 21)
+            let shifted = t + hash(i, 22) * life
+            let cycle = Int(shifted / life)
+            let age = (shifted - Double(cycle) * life) / life
+            let seed = i &* 104_729 &+ cycle
+            let a = (age < 0.1 ? age / 0.1 : age > 0.75 ? (1 - age) / 0.25 : 1) * k
+            let r = (0.8 + 1.6 * hash(seed, 23)) * unit
+            let c = CGPoint(x: hash(seed, 24) * w, y: hash(seed, 25) * h)
+            dot(&ctx, c, r, rgba(220, 232, 255, 0.18 * a))
+            dot(&ctx, CGPoint(x: c.x - r * 0.35, y: c.y - r * 0.35), r * 0.35, rgba(255, 255, 255, 0.7 * a))
+        }
+        let count = max(6, Int((16 + 44 * k) * share))
         for i in 0..<count {
-            let life = 2.2 + 3.8 * hash(i, 11) - 1.2 * fast
+            let life = 2.4 + 3.8 * hash(i, 11) - 1.2 * fast
             let shifted = t + hash(i, 12) * life
             let cycle = Int(shifted / life)
             let age = (shifted - Double(cycle) * life) / life
             let seed = i &* 7919 &+ cycle
-            let r = (3.2 + 7.5 * hash(seed, 13) * hash(seed, 14)) * unit
+            let r0 = (3 + 8 * hash(seed, 13) * hash(seed, 14)) * unit
             let x0 = hash(seed, 15) * w
             let y0 = hash(seed, 16) * h
-            let slides = hash(seed, 17) < 0.33 + 0.4 * fast
-            let slide = slides ? age * age * (50 + 110 * fast) * unit : 0
-            let y = y0 + slide
-            let alpha = (age < 0.12 ? age / 0.12 : age > 0.7 ? (1 - age) / 0.3 : 1) * k
-            let rr = r * (age < 0.12 ? 0.6 + 0.4 * (age / 0.12) : 1)
-            let c = CGPoint(x: x0, y: y)
-            if slides && slide > rr {
-                var trail = Path()
-                trail.move(to: CGPoint(x: x0, y: y0))
-                trail.addLine(to: CGPoint(x: x0, y: y - rr))
-                ctx.stroke(trail, with: .color(.white.opacity(0.10 * alpha)), style: StrokeStyle(lineWidth: rr * 0.45, lineCap: .round))
+            let slides = slide && r0 > 5 * unit && hash(seed, 17) < 0.4 + 0.4 * fast
+            let run = slides ? max(0, age - 0.2) / 0.8 : 0
+            let slid = run * run * (60 + 140 * fast) * unit
+            let y = y0 + slid
+            let a = (age < 0.1 ? age / 0.1 : age > 0.72 ? (1 - age) / 0.28 : 1) * k
+            let pop = age < 0.1 ? 0.55 + 0.45 * age / 0.1 : 1
+            let r = r0 * pop * (slides ? 0.92 : 1)
+            let ry = r * (0.88 + 0.1 * hash(seed, 18)) * (slides && slid > 0 ? 1.25 : 1)
+            if slides && slid > r {
+                // The trail: tiny beads left behind, fainter the older.
+                let step = r * 1.6
+                var s = y0
+                while s < y - ry {
+                    let f = (s - y0) / (y - y0)
+                    let bead = Int(s)
+                    let br = r * (0.18 + 0.12 * hash(seed &+ bead, 19))
+                    let bx = x0 + (hash(seed &+ bead, 20) - 0.5) * r * 0.4
+                    dot(&ctx, CGPoint(x: bx, y: s), br, rgba(220, 232, 255, 0.22 * a * (0.4 + 0.6 * f)))
+                    dot(&ctx, CGPoint(x: bx - br * 0.3, y: s - br * 0.3), br * 0.35, rgba(255, 255, 255, 0.6 * a * (0.4 + 0.6 * f)))
+                    s += step
+                }
             }
-            let body = Path(ellipseIn: CGRect(x: c.x - rr, y: c.y - rr, width: 2 * rr, height: 2 * rr))
-            let water = Color(red: 0.87, green: 0.92, blue: 1)
-            ctx.fill(body, with: .radialGradient(
-                Gradient(colors: [water.opacity(0.05 * alpha), water.opacity(0.22 * alpha)]),
-                center: CGPoint(x: c.x, y: c.y - rr * 0.3), startRadius: 0, endRadius: rr * 1.2
-            ))
-            var rim = Path()
-            rim.addArc(center: c, radius: rr, startAngle: .degrees(20), endAngle: .degrees(160), clockwise: false)
-            ctx.stroke(rim, with: .color(.black.opacity(0.35 * alpha)), lineWidth: rr * 0.22)
-            var shine = Path()
-            shine.addArc(center: c, radius: rr * 0.7, startAngle: .degrees(200), endAngle: .degrees(290), clockwise: false)
-            ctx.stroke(shine, with: .color(.white.opacity(0.75 * alpha)), style: StrokeStyle(lineWidth: rr * 0.2, lineCap: .round))
-            let dot = rr * 0.16
-            ctx.fill(Path(ellipseIn: CGRect(x: c.x - rr * 0.35 - dot, y: c.y - rr * 0.4 - dot, width: 2 * dot, height: 2 * dot)),
-                     with: .color(.white.opacity(0.85 * alpha)))
-            if age < 0.12 {
-                let q = age / 0.12
-                let rs = r * (1 + 1.2 * q)
-                ctx.stroke(Path(ellipseIn: CGRect(x: c.x - rs, y: c.y - rs, width: 2 * rs, height: 2 * rs)),
-                           with: .color(.white.opacity(0.4 * (1 - q) * k)), lineWidth: unit * 0.8)
+            waterDrop(&ctx, CGPoint(x: x0, y: y), r, ry, a)
+            if age < 0.1 {
+                let q = age / 0.1
+                let rs = r0 * (1 + 1.3 * q)
+                ctx.stroke(Path(ellipseIn: CGRect(x: x0 - rs, y: y - rs, width: 2 * rs, height: 2 * rs)),
+                           with: .color(rgba(255, 255, 255, 0.4 * (1 - q) * k)), lineWidth: unit * 0.8)
             }
         }
     }
 
+    /**
+     * Snow in depth: far flakes tiny and sharp, mid ones glowing, the nearest few large and out of
+     * focus (bokeh), some with six arms turning; they drift with the wind and fall faster at speed.
+     */
     private static func snow(_ ctx: inout GraphicsContext, _ size: CGSize, _ t: Double, _ strength: Double, _ speed: Double) {
         guard min(size.width, size.height) >= 1 else { return }
         let k = strength.squareRoot()
         let w = size.width, h = size.height
         let unit = min(w, h) / 400
-        let count = max(24, Int(110 * k))
-        let fall = h * (0.08 + 0.35 * min(max(speed / 130, 0), 1))
+        let fast = min(max(speed / 130, 0), 1)
+        let count = max(20, Int(170 * k * areaShare(size)))
         for i in 0..<count {
-            let depth = 0.3 + 0.7 * hash(i, 1)
-            let y = (hash(i, 2) + t * fall * (0.5 + depth) / h).truncatingRemainder(dividingBy: 1) * (h + 20) - 10
-            let sway = sin(t * (0.5 + hash(i, 4)) + hash(i, 5) * 2 * .pi) * 14 * unit * depth
-            let x = hash(i, 3) * w + sway
-            let r = (1.6 + 3.4 * depth * depth) * unit
-            let a = (0.45 + 0.5 * depth) * k
-            let glow = r * 2.6
-            // Soft glow, then the flake.
+            let d = hash(i, 1)
+            let fall = h * (0.06 + 0.10 * d + 0.45 * fast * d)
+            let wind = (0.04 + 0.10 * fast) * w * d
+            let y = (hash(i, 2) + t * fall / h).truncatingRemainder(dividingBy: 1) * (h + 40) - 20
+            let sway = sin(t * (0.4 + 0.8 * hash(i, 4)) + hash(i, 5) * 2 * .pi) * (10 + 18 * d) * unit
+            var x = (hash(i, 3) * w + t * wind + sway).truncatingRemainder(dividingBy: w + 40)
+            if x < -20 { x += w + 40 }
+            x -= 20
+            let c = CGPoint(x: x, y: y)
+            if d > 0.9 {
+                let r = (9 + 10 * hash(i, 9)) * unit
+                let a = 0.16 * k
+                ctx.fill(Path(ellipseIn: CGRect(x: x - r, y: y - r, width: 2 * r, height: 2 * r)), with: .radialGradient(
+                    Gradient(stops: [
+                        .init(color: rgba(255, 255, 255, a), location: 0),
+                        .init(color: rgba(255, 255, 255, a * 0.8), location: 0.75),
+                        .init(color: .clear, location: 1),
+                    ]),
+                    center: c, startRadius: 0, endRadius: r
+                ))
+                continue
+            }
+            let r = (1 + 3.2 * d * d) * unit
+            let a = (0.35 + 0.55 * d) * k
+            let glow = r * 2.4
             ctx.fill(Path(ellipseIn: CGRect(x: x - glow, y: y - glow, width: 2 * glow, height: 2 * glow)), with: .radialGradient(
-                Gradient(colors: [.white.opacity(0.35 * a), .clear]), center: CGPoint(x: x, y: y), startRadius: 0, endRadius: glow
+                Gradient(colors: [rgba(255, 255, 255, a * 0.45), .clear]), center: c, startRadius: 0, endRadius: glow
             ))
-            if depth > 0.85 {
-                // The nearest ones show their six arms, turning slowly.
-                let spin = t * (0.3 + hash(i, 6)) + hash(i, 7) * 6
+            if d > 0.7 {
+                let spin = t * (0.4 + hash(i, 6)) + hash(i, 7) * 6
                 for arm in 0..<3 {
                     let ang = spin + Double(arm) * .pi / 3
-                    let dx = cos(ang) * r * 1.6, dy = sin(ang) * r * 1.6
-                    var line = Path()
-                    line.move(to: CGPoint(x: x - dx, y: y - dy))
-                    line.addLine(to: CGPoint(x: x + dx, y: y + dy))
-                    ctx.stroke(line, with: .color(.white.opacity(a)), style: StrokeStyle(lineWidth: r * 0.35, lineCap: .round))
+                    let dx = cos(ang) * r * 1.5, dy = sin(ang) * r * 1.5
+                    segment(&ctx, CGPoint(x: x - dx, y: y - dy), CGPoint(x: x + dx, y: y + dy), rgba(255, 255, 255, a), r * 0.28)
                 }
+                dot(&ctx, c, r * 0.35, rgba(255, 255, 255, a))
             } else {
-                ctx.fill(Path(ellipseIn: CGRect(x: x - r, y: y - r, width: 2 * r, height: 2 * r)), with: .color(.white.opacity(a)))
+                dot(&ctx, c, r, rgba(255, 255, 255, a))
             }
         }
     }

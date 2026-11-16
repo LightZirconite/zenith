@@ -116,7 +116,9 @@ final class PipController: NSObject {
             center.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
                 self?.leaving()
             },
+            // Back in Zenith (by its icon, not the window's button): the small window closes, as on Android.
             center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+                if let pip = self?.pip, pip.isPictureInPictureActive { pip.stopPictureInPicture() }
                 self?.schedule(after: 0)
             },
         ]
@@ -195,8 +197,8 @@ final class PipController: NSObject {
         let danger = DriveModel.shared.snapshot?.alerts.first?.overLimit == true
         let interval: TimeInterval
         if isActive {
-            // Rain or snow falling: frames often enough for it to fall, not to jump.
-            let falling = SettingsStore.shared.weatherFx && SkyWatch.shared.look.kind != .clear
+            // Snow falling: frames often enough for it to fall, not to jump (the rain here is drops on the glass).
+            let falling = SettingsStore.shared.weatherFx && SkyWatch.shared.look.kind == .snow
             interval = danger ? 0.1 : canvasPlayer.showing || falling ? 0.125 : 0.25
         } else {
             interval = wantStart != nil ? 0.2 : 1

@@ -5,6 +5,8 @@ import android.location.LocationManager
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -58,10 +60,28 @@ object SkyWatch {
         said(_look.value, readAtMs)
     }
 
-    /** The hidden demo drives in a light rain, so the effect has its place there too. */
+    private var demoJob: Job? = null
+
+    /**
+     * The hidden demo shows every weather in turn ([DEMO_SKIES], [DEMO_EACH_MS] each): rain, snow,
+     * storm, fog. On screen only: the demo's limits and announcements stay those of a dry road.
+     */
     fun demo(on: Boolean) {
-        _look.value = if (on) SkyLook(SkyKind.RAIN, 0.55f) else SkyLook.CLEAR
+        demoJob?.cancel()
+        demoJob = null
         readAtMs = if (on) System.currentTimeMillis() else 0L
+        if (!on) {
+            _look.value = SkyLook.CLEAR
+            return
+        }
+        demoJob = scope.launch {
+            var i = 0
+            while (true) {
+                _look.value = DEMO_SKIES[i % DEMO_SKIES.size]
+                i++
+                delay(DEMO_EACH_MS)
+            }
+        }
     }
 
     /** At home: the sky where the phone last was, at most every [EVERY_MS]. */
@@ -112,4 +132,11 @@ object SkyWatch {
     }
 
     private const val EVERY_MS = 10 * 60_000L
+    private const val DEMO_EACH_MS = 45_000L
+    private val DEMO_SKIES = listOf(
+        SkyLook(SkyKind.RAIN, 0.55f),
+        SkyLook(SkyKind.SNOW, 0.7f),
+        SkyLook(SkyKind.STORM, 1f),
+        SkyLook(SkyKind.FOG, 0.8f),
+    )
 }

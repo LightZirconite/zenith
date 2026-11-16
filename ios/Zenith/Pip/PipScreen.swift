@@ -101,7 +101,9 @@ struct PipScreen: View {
                     kind: weather.kind,
                     strength: weather.strength(alerting: alert != nil, musicFocus: pose?.music ?? share),
                     speedKmh: Double(min(max(speed ?? 0, 0), 150)),
-                    time: now.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 600)
+                    time: now.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 600),
+                    // A few frames a second only: no falling streaks (they jumped), drops resting on the glass.
+                    still: true
                 )
                 .mask {
                     LinearGradient(stops: melt.map { Gradient.Stop(color: .black.opacity($0.opacity), location: $0.at) }, startPoint: .top, endPoint: .bottom)

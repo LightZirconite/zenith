@@ -42,10 +42,34 @@ final class SkyWatch {
         }
     }
 
-    /** The hidden demo drives in a light rain, so the effect has its place there too. */
+    @ObservationIgnored private var demoTask: Task<Void, Never>?
+    private static let demoSkies = [
+        SkyLook(kind: .rain, intensity: 0.55),
+        SkyLook(kind: .snow, intensity: 0.7),
+        SkyLook(kind: .storm, intensity: 1),
+        SkyLook(kind: .fog, intensity: 0.8),
+    ]
+
+    /**
+     * The hidden demo shows every weather in turn (45 s each): rain, snow, storm, fog. On screen
+     * only: the demo's limits and announcements stay those of a dry road.
+     */
     func demo(_ on: Bool) {
-        look = on ? SkyLook(kind: .rain, intensity: 0.55) : .clear
+        demoTask?.cancel()
+        demoTask = nil
         readAt = on ? Date() : nil
+        guard on else {
+            look = .clear
+            return
+        }
+        demoTask = Task { @MainActor [weak self] in
+            var i = 0
+            while !Task.isCancelled {
+                self?.look = Self.demoSkies[i % Self.demoSkies.count]
+                i += 1
+                try? await Task.sleep(nanoseconds: 45_000_000_000)
+            }
+        }
     }
 
     /** At home: the sky where the phone last was, at most every 10 minutes. */
