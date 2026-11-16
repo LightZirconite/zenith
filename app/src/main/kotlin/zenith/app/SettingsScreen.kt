@@ -113,6 +113,10 @@ fun SettingsScreen(
             ToggleRow("Pluie automatique", "Limites de pluie, sans rien toucher", settings.autoRain, icon = Glyphs.rain, tint = Color(0xFF0A84FF)) { on ->
                 onChange { it.copy(autoRain = on) }
             }
+            Divider()
+            ToggleRow("Météo à l'écran", "Pluie, neige, orage, brouillard, là où tu es", settings.weatherFx, icon = Glyphs.rain, tint = Color(0xFF5AC8FA)) { on ->
+                onChange { it.copy(weatherFx = on) }
+            }
         }
         Section(
             "Ce qui est annoncé",

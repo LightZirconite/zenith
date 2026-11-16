@@ -209,7 +209,8 @@ struct DriveScreen: View {
                     zones: model.nearbyZones,
                     media: music.media,
                     canvas: settings.spotifyCanvas,
-                    dim: night ? Cockpit.nightDim : 1
+                    dim: night ? Cockpit.nightDim : 1,
+                    weather: settings.weatherFx ? SkyWatch.shared.look : .clear
                 )
                 .animation(Moves.spring(1, 50), value: focusTarget)
                 .animation(Moves.tween(900), value: music.media == nil)
@@ -218,6 +219,13 @@ struct DriveScreen: View {
                         .frame(width: size.width, height: size.height)
                         .allowsHitTesting(false)
                 }
+            }
+            // At home the weather falls over the stars, fading out before the buttons; not in the tunnel.
+            if settings.weatherFx && !model.running && !f.comingHome {
+                let look = SkyWatch.shared.look
+                WeatherLayer(look: look, strength: look.strength(alerting: false, musicFocus: 0), speedKmh: nil, alerting: false)
+                    .frame(width: size.width, height: size.height)
+                    .mask { LinearGradient(stops: Fades.mask(Fades.homeWeather), startPoint: .top, endPoint: .bottom) }
             }
             // The flight's words, under the globe at the tunnel's heart; "Position verrouillée" a
             // beat, then they rush past the viewer as the jump begins.
@@ -837,6 +845,8 @@ extension DriveScreen {
         static let mapInMusicMode: [FadeStop] = [(0, 1), (0.15, 1), (0.25, 0.6), (0.33, 0.35), (0.42, 0.18), (0.52, 0.08), (0.65, 0.02), (1, 0)]
         /** No mask across the width (portrait). */
         static let across: [FadeStop] = [(0, 1), (1, 1)]
+        /** At home the weather fades out before the Start button and the credits. */
+        static let homeWeather: [FadeStop] = [(0, 1), (0.5, 0.85), (0.75, 0.35), (0.9, 0), (1, 0)]
         /** Landscape, the map's opacity across its width: alone, it fades into the black under the speed. */
         static let landMapAlone: [FadeStop] = [(0, 1), (0.62, 1), (0.78, 0.65), (0.9, 0.25), (1, 0)]
         /** Landscape with music: the crossfade with the Canvas starts a little earlier. */
@@ -981,6 +991,8 @@ extension DriveScreen {
         let canvas: Bool
         /** 1 by day; at night the map and the Canvas dim a little (core Daylight). */
         let dim: Double
+        /** The weather over the map (SkyWatch); clear when the setting is off. */
+        let weather: SkyLook
 
         var animatableData: AnimatablePair<AnimatablePair<Double, Double>, Double> {
             get { AnimatablePair(AnimatablePair(focus, withMusic), portal) }
@@ -1028,6 +1040,17 @@ extension DriveScreen {
                     )
                     .opacity(dim)
                     .animation(Moves.tween(2_000), value: dim)
+                // The weather falls on the map only, masked like it: never over the Canvas, the speed
+                // or the buttons; an alert or music mode pushes it back (core Sky.strength).
+                let alerting = !(snapshot?.alerts.isEmpty ?? true) || snapshot?.section != nil
+                // In steps of 5 %: music mode animates every frame, the weather needs not follow each one.
+                let strength = (weather.strength(alerting: alerting, musicFocus: focus) * 20).rounded() / 20
+                WeatherLayer(look: weather, strength: strength, speedKmh: snapshot?.speedKmh, alerting: alerting)
+                    .mask { weatherMask }
+                    .frame(
+                        width: landscape ? size.width * Fades.landMapWidth : size.width,
+                        height: landscape ? size.height : size.height * Fades.mapHeight
+                    )
             }
             .frame(width: size.width, height: size.height, alignment: .topLeading)
             .scaleEffect(CGFloat(scale))
@@ -1047,6 +1070,16 @@ extension DriveScreen {
             let across = landscape
                 ? blendStops(Fades.landMapAlone, blendStops(Fades.landMapOverCanvas, Fades.landMapInMusicMode, focus), withMusic)
                 : Fades.across
+            return LinearGradient(stops: Fades.mask(down), startPoint: .top, endPoint: .bottom)
+                .mask {
+                    LinearGradient(stops: Fades.mask(across), startPoint: .leading, endPoint: .trailing)
+                }
+        }
+
+        /** The weather's fade: the map's over the Canvas, so it is gone before the speed and the music. */
+        private var weatherMask: some View {
+            let down = landscape ? Fades.mapWhole : blendStops(Fades.mapOverCanvas, Fades.mapInMusicMode, focus)
+            let across = landscape ? blendStops(Fades.landMapOverCanvas, Fades.landMapInMusicMode, focus) : Fades.across
             return LinearGradient(stops: Fades.mask(down), startPoint: .top, endPoint: .bottom)
                 .mask {
                     LinearGradient(stops: Fades.mask(across), startPoint: .leading, endPoint: .trailing)
@@ -1507,7 +1540,7 @@ extension DriveScreen {
                     .frame(width: ring * 0.8)
                     .position(x: ring / 2, y: ring * 0.45)
                     if let limit {
-                        LimitSign(limit: limit, uncertain: snapshot?.limitSource?.isGuess == true, size: 60 * k)
+                        LimitSign(limit: limit, uncertain: snapshot?.limitSource?.isGuess == true, size: 60 * k, rain: RainBadge.kind(snapshot))
                             .shadow(color: .black.opacity(0.5), radius: 12, y: 8)
                             .position(x: ring / 2, y: ring * 0.885)
                             .transition(Moves.fade(Moves.spring(1, 400)))
@@ -1592,7 +1625,10 @@ extension DriveScreen {
         let limit: Int
         let uncertain: Bool
         let size: CGFloat
+        /** Lowered by the rain rule: a drop (a flake in snow) on the sign's shoulder says why. */
+        var rain: SkyKind? = nil
         @State private var pops = 0
+        @State private var lastRain: SkyKind = .rain
 
         var body: some View {
             let edge = uncertain ? Ink.dim : Ink.red
@@ -1625,8 +1661,20 @@ extension DriveScreen {
                     LinearKeyframe(1.0, duration: 0.9, timingCurve: Moves.linearOutSlowInCurve)
                 }
             }
-            .onAppear { pops += 1 }
+            .overlay(alignment: .topTrailing) {
+                if rain != nil {
+                    PrecipBadge(kind: lastRain, size: size * 0.4)
+                        .offset(x: size * 0.12, y: -size * 0.08)
+                        .transition(.scale(scale: 0.3).combined(with: .opacity))
+                }
+            }
+            .animation(.spring(response: 0.55, dampingFraction: 0.45), value: rain != nil)
+            .onAppear {
+                pops += 1
+                if let rain { lastRain = rain }
+            }
             .onChange(of: limit) { pops += 1 }
+            .onChange(of: rain) { _, r in if let r { lastRain = r } }
         }
     }
 
@@ -1634,5 +1682,54 @@ extension DriveScreen {
     struct SignMotion {
         var pop = 1.0
         var ring = 1.0
+    }
+}
+
+/** The drop on the limit sign: the rain rule lowered this limit; a flake when it snows. */
+enum RainBadge {
+    static func kind(_ s: Snapshot?) -> SkyKind? {
+        guard s?.rainLowered == true else { return nil }
+        return SkyWatch.shared.look.kind == .snow ? .snow : .rain
+    }
+}
+
+/** Blue disc with a white raindrop, or a snowflake in snow. */
+struct PrecipBadge: View {
+    let kind: SkyKind
+    let size: CGFloat
+
+    var body: some View {
+        Canvas { ctx, box in
+            let r = min(box.width, box.height) / 2
+            let c = CGPoint(x: box.width / 2, y: box.height / 2)
+            let disc = Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r))
+            ctx.fill(disc, with: .color(Color(red: 0.04, green: 0.52, blue: 1)))
+            ctx.stroke(disc.strokedPath(StrokeStyle(lineWidth: r * 0.12)), with: .color(.white))
+            if kind == .snow {
+                let arm = r * 0.55
+                for k in 0..<3 {
+                    let a = (90.0 + 60.0 * Double(k)) * .pi / 180
+                    var line = Path()
+                    line.move(to: CGPoint(x: c.x - cos(a) * arm, y: c.y - sin(a) * arm))
+                    line.addLine(to: CGPoint(x: c.x + cos(a) * arm, y: c.y + sin(a) * arm))
+                    ctx.stroke(line, with: .color(.white), style: StrokeStyle(lineWidth: r * 0.16, lineCap: .round))
+                }
+            } else {
+                var drop = Path()
+                drop.move(to: CGPoint(x: c.x, y: c.y - r * 0.58))
+                drop.addCurve(to: CGPoint(x: c.x + r * 0.42, y: c.y + r * 0.2),
+                              control1: CGPoint(x: c.x + r * 0.18, y: c.y - r * 0.25), control2: CGPoint(x: c.x + r * 0.42, y: c.y + r * 0.02))
+                drop.addCurve(to: CGPoint(x: c.x, y: c.y + r * 0.6),
+                              control1: CGPoint(x: c.x + r * 0.42, y: c.y + r * 0.45), control2: CGPoint(x: c.x + r * 0.22, y: c.y + r * 0.6))
+                drop.addCurve(to: CGPoint(x: c.x - r * 0.42, y: c.y + r * 0.2),
+                              control1: CGPoint(x: c.x - r * 0.22, y: c.y + r * 0.6), control2: CGPoint(x: c.x - r * 0.42, y: c.y + r * 0.45))
+                drop.addCurve(to: CGPoint(x: c.x, y: c.y - r * 0.58),
+                              control1: CGPoint(x: c.x - r * 0.42, y: c.y + r * 0.02), control2: CGPoint(x: c.x - r * 0.18, y: c.y - r * 0.25))
+                drop.closeSubpath()
+                ctx.fill(drop, with: .color(.white))
+            }
+        }
+        .frame(width: size, height: size)
+        .allowsHitTesting(false)
     }
 }

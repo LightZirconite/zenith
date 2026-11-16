@@ -75,7 +75,7 @@ Waze est fait pour te guider ; Zenith est fait pour te prévenir. Les deux tourn
 - Petite fenêtre par-dessus Waze ou Maps ; sur iPhone aussi l'Activité en direct (écran verrouillé, Dynamic Island)
 - Musique à l'écran (Android : Spotify, YouTube, Deezer… ; iPhone : Spotify et Apple Music), avec le Canvas Spotify qui prend plus de place à l'arrêt ; glisse pour changer de titre
 - Démarre seul quand tu roules (et sur Android quand l'une de tes voitures se connecte), s'arrête seul une fois garé
-- Mode pluie automatique
+- Mode pluie automatique, et la météo à l'écran (pluie, neige, orage, brouillard) dès l'ouverture, avec une goutte sur le panneau quand la pluie baisse la limite
 - Mises à jour automatiques
 
 ## Autorisations (Android)

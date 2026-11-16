@@ -388,6 +388,8 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         inFront = true
         resumes.value++
+        // The sky over the home screen, from where the phone last was.
+        SkyWatch.refreshAtHome(this)
         // Opened by an automatic start: straight into the small window, over what was in front.
         if (openingSmall.value) {
             if (!DriveState.running.value || isInPictureInPictureMode) {

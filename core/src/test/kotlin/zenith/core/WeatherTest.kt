@@ -46,4 +46,27 @@ class WeatherTest {
             Weather.url(LatLon(48.8566, 2.3522)),
         )
     }
+
+    @Test
+    fun `the sky on screen follows the weather code and the water`() {
+        assertEquals(SkyLook.CLEAR, Sky.of(WeatherNow(0.0, 2)))
+        assertEquals(SkyLook.CLEAR, Sky.of(WeatherNow(0.0, 51)))
+        assertEquals(SkyKind.RAIN, Sky.of(WeatherNow(0.0, 61)).kind)
+        assertEquals(SkyKind.RAIN, Sky.of(WeatherNow(0.3, 3)).kind)
+        assertEquals(SkyKind.SNOW, Sky.of(WeatherNow(0.1, 73)).kind)
+        assertEquals(SkyKind.STORM, Sky.of(WeatherNow(1.0, 95)).kind)
+        assertEquals(SkyKind.FOG, Sky.of(WeatherNow(0.0, 45)).kind)
+        // A downpour is stronger than a light rain, whatever the code says.
+        assertTrue(Sky.of(WeatherNow(0.1, 61)).intensity < Sky.of(WeatherNow(0.1, 65)).intensity)
+        assertEquals(1f, Sky.of(WeatherNow(3.0, 61)).intensity)
+    }
+
+    @Test
+    fun `alerts and the music push the effect back`() {
+        val rain = SkyLook(SkyKind.RAIN, 1f)
+        assertEquals(1f, Sky.strength(rain, alerting = false, musicFocus = 0f))
+        assertTrue(Sky.strength(rain, alerting = true, musicFocus = 0f) < 0.5f)
+        assertTrue(Sky.strength(rain, alerting = false, musicFocus = 1f) < 0.5f)
+        assertEquals(0f, Sky.strength(SkyLook.CLEAR, alerting = false, musicFocus = 0f))
+    }
 }

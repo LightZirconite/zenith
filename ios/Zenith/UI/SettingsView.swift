@@ -160,6 +160,13 @@ struct SettingsView: View {
                 text: "Limites de pluie, sans rien toucher",
                 on: settings.autoRain
             ) { settings.autoRain = $0 }
+            SettingsSeparator()
+            SettingsToggleRow(
+                icon: .rain,
+                title: "Météo à l'écran",
+                text: "Pluie, neige, orage, brouillard, là où tu es",
+                on: settings.weatherFx
+            ) { settings.weatherFx = $0 }
         }
     }
 

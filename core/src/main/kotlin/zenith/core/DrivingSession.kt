@@ -27,6 +27,8 @@ data class DriveSnapshot(
     val estimated: Boolean = false,
     /** Control itinerary being driven, if any. */
     val zone: ZoneStatus? = null,
+    /** The rain rule lowered [limitKmh] (130 → 110…): the sign shows a raindrop. */
+    val rainLowered: Boolean = false,
 )
 
 /**
@@ -131,6 +133,8 @@ class DrivingSession(
             events = out.events + zone.events,
             estimated = estimated,
             zone = zone.status,
+            rainLowered = roadLimit != null && profile.raining && SpeedRules.rainLimit(roadLimit) < roadLimit &&
+                (!profile.probationary || SpeedRules.rainLimit(roadLimit) < SpeedRules.probationaryLimit(roadLimit)),
         ).also { last = it }
     }
 

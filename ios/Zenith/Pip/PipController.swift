@@ -195,7 +195,9 @@ final class PipController: NSObject {
         let danger = DriveModel.shared.snapshot?.alerts.first?.overLimit == true
         let interval: TimeInterval
         if isActive {
-            interval = danger ? 0.1 : canvasPlayer.showing ? 0.125 : 0.25
+            // Rain or snow falling: frames often enough for it to fall, not to jump.
+            let falling = SettingsStore.shared.weatherFx && SkyWatch.shared.look.kind != .clear
+            interval = danger ? 0.1 : canvasPlayer.showing || falling ? 0.125 : 0.25
         } else {
             interval = wantStart != nil ? 0.2 : 1
         }
@@ -219,7 +221,8 @@ final class PipController: NSObject {
             speedKmh: model.shownSpeed,
             roads: model.nearbyRoads,
             canvasFrame: isActive ? canvasPlayer.frame() : nil,
-            now: Date()
+            now: Date(),
+            weather: settings.weatherFx ? SkyWatch.shared.look : .clear
         )
         let content = PipFrame(screen: screen, size: size)
         let renderer: ImageRenderer<PipFrame>

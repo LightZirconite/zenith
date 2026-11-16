@@ -144,6 +144,7 @@ final class DriveEngine: NSObject, CLLocationManagerDelegate {
         LiveActivityManager.shared.end()
         // The next drive starts from the weather again, not from this drive's rain.
         if !demo { settings.raining = false }
+        if demo { SkyWatch.shared.demo(false) }
         UIApplication.shared.isIdleTimerDisabled = false
         // The summary of the drive, read before it goes: home shows it a moment (nil when too short).
         let recap: TripRecap? = trip.flatMap { t in
@@ -447,7 +448,9 @@ final class DriveEngine: NSObject, CLLocationManagerDelegate {
                 let (autoRain, raining, position) = await MainActor.run { (self.settings.autoRain, self.settings.raining, self.model.snapshot?.position) }
                 // Setting turned off while it rained: the limits come back at once.
                 if !autoRain && raining { await MainActor.run { self.settings.raining = false } }
-                guard autoRain, let position else {
+                // The same report draws the sky on screen (SkyWatch), even with the rain limits off.
+                let weatherFx = await MainActor.run { self.settings.weatherFx }
+                guard autoRain || weatherFx, let position else {
                     try? await Task.sleep(nanoseconds: 20_000_000_000)
                     continue
                 }
@@ -456,7 +459,11 @@ final class DriveEngine: NSObject, CLLocationManagerDelegate {
                    let answer = try? await URLSession.shared.data(from: url),
                    (answer.1 as? HTTPURLResponse)?.statusCode == 200,
                    let text = String(data: answer.0, encoding: .utf8) {
-                    let r = Bridge.shared.weatherReport(rain: rain, text: text)
+                    if let sky = Bridge.shared.weatherSky(text: text) {
+                        read = true
+                        await MainActor.run { SkyWatch.shared.report(sky) }
+                    }
+                    let r = autoRain ? Bridge.shared.weatherReport(rain: rain, text: text) : -1
                     if r >= 0 {
                         read = true
                         let now = r == 1
@@ -485,6 +492,7 @@ final class DriveEngine: NSObject, CLLocationManagerDelegate {
 
     /** Hidden demo: replays the core's DemoDrive in real time through the same pipeline, then stops. */
     private func startDemo(_ gen: Int) {
+        SkyWatch.shared.demo(true)
         guard let url = Bundle.main.url(forResource: "roads_85_19", withExtension: "json"),
               let text = try? String(contentsOf: url, encoding: .utf8),
               let scenario = Bridge.shared.demo(tileText: text) else {

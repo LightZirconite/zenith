@@ -24,6 +24,9 @@ import zenith.core.RadarData
 import zenith.core.RadarIndex
 import zenith.core.RadarPack
 import zenith.core.RainDetector
+import zenith.core.Sky
+import zenith.core.SkyKind
+import zenith.core.SkyLook
 import zenith.core.RoadNetwork
 import zenith.core.RoadSegment
 import zenith.core.RoadTiles
@@ -166,6 +169,19 @@ object Bridge {
         val now = Weather.parse(text) ?: return -1
         return if (rain.report(now)) 1 else 0
     }
+
+    /** The sky on screen after this Open-Meteo answer; null when unreadable (unchanged). */
+    fun weatherSky(text: String): CoreSky? = runCatching {
+        Weather.parse(text)?.let { CoreSky.of(Sky.of(it)) }
+    }.getOrNull()
+
+    /** [kind] a SkyKind name (CLEAR, RAIN, SNOW, STORM, FOG); [musicFocus] 0..1. */
+    fun skyStrength(kind: String, intensity: Float, alerting: Boolean, musicFocus: Float): Float = runCatching {
+        Sky.strength(SkyLook(SkyKind.valueOf(kind), intensity), alerting, musicFocus)
+    }.getOrDefault(0f)
+
+    val skyFlashMinMs: Long get() = Sky.FLASH_MIN_MS
+    val skyFlashMaxMs: Long get() = Sky.FLASH_MAX_MS
 
     fun gpxHeader(name: String): String = Gpx.header(name)
 

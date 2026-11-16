@@ -67,6 +67,8 @@ struct RootView: View {
             permissions.refresh()
             MotionStarter.shared.sync()
             Updater.shared.checkIfDue()
+            // The sky over the home screen, from where the phone last was.
+            SkyWatch.shared.refreshAtHome()
         }
         .task(id: scenePhase) {
             // While in front: a new version never waits.

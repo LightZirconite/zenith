@@ -38,6 +38,8 @@ final class SettingsStore {
     var motionStart: Bool { didSet { defaults.set(motionStart, forKey: "motion_start") } }
     /** Rain mode from the weather (Open-Meteo) while driving. */
     var autoRain: Bool { didSet { defaults.set(autoRain, forKey: "auto_rain") } }
+    /** Rain, snow, storm, fog drawn over the screen from the weather where the phone is (SkyWatch). */
+    var weatherFx: Bool { didSet { defaults.set(weatherFx, forKey: "weather_fx") } }
     /** Spotify Canvas behind the music card and in the small window. */
     var spotifyCanvas: Bool { didSet { defaults.set(spotifyCanvas, forKey: "spotify_canvas") } }
     /** Square small window, larger; else a 16:9 strip that leaves Waze visible. */
@@ -77,6 +79,7 @@ final class SettingsStore {
         autoPauseSince = (d.object(forKey: "auto_pause_since") as? NSNumber)?.int64Value ?? 0
         motionStart = bool("motion_start", true)
         autoRain = bool("auto_rain", true)
+        weatherFx = bool("weather_fx", true)
         spotifyCanvas = bool("spotify_canvas", true)
         pipLarge = bool("pip_large", false)
         uiSounds = bool("ui_sounds", true)

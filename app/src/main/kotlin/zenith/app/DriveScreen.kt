@@ -1,5 +1,11 @@
 package zenith.app
 
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.foundation.layout.offset
+import kotlin.math.cos
+import kotlin.math.sin
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
@@ -101,6 +107,8 @@ import kotlinx.coroutines.launch
 import zenith.core.AlertEvent
 import zenith.core.Cockpit
 import zenith.core.Daylight
+import zenith.core.Sky
+import zenith.core.SkyKind
 import zenith.core.ControlZone
 import zenith.core.DriveSnapshot
 import zenith.core.LatLon
@@ -222,6 +230,9 @@ private val LandMapOverCanvas = listOf(0f to 1f, 0.52f to 1f, 0.7f to 0.55f, 0.8
 
 /** Landscape music mode: the map keeps the left, the Canvas comes in from the right. */
 private val LandMapInMusicMode = listOf(0f to 1f, 0.32f to 1f, 0.52f to 0.45f, 0.72f to 0.12f, 1f to 0f)
+
+/** At home the weather fades out before the Start button and the credits. */
+private val HomeWeather = listOf(0f to 1f, 0.5f to 0.85f, 0.75f to 0.35f, 0.9f to 0f, 1f to 0f)
 
 /** Landscape: a darker band only under the chips at the top. */
 private val LandMapShade = Brush.verticalGradient(
@@ -460,6 +471,8 @@ fun DriveScreen(
     }
     val nightDim by animateFloatAsState(if (night) Daylight.NIGHT_DIM else 1f, tween(2_000), label = "night")
     val lastTrip by DriveState.lastTrip.collectAsState()
+    val weatherLook by SkyWatch.look.collectAsState()
+    val weatherFx = UserSettings.state.collectAsState().value.weatherFx
     Box(Modifier.fillMaxSize().background(Bg)) {
         AnimatedVisibility(
             visible = !flightOver,
@@ -538,8 +551,35 @@ fun DriveScreen(
                         else -> MapAlone
                     },
                 )
+                // The weather falls on the map only, masked like it: never over the Canvas, the
+                // speed or the buttons; an alert or music mode pushes it back ([Sky.strength]).
+                if (weatherFx) {
+                    WeatherLayer(
+                        weatherLook,
+                        Sky.strength(weatherLook, alerting, focus),
+                        snapshot?.speedKmh,
+                        alerting,
+                        if (landscape) {
+                            Modifier.fillMaxHeight().fillMaxWidth(LAND_MAP_WIDTH)
+                                .horizontalFade(blendStops(LandMapOverCanvas, LandMapInMusicMode, focus))
+                        } else {
+                            Modifier.fillMaxWidth().fillMaxHeight(MAP_HEIGHT)
+                                .verticalFade(blendStops(MapOverCanvas, MapInMusicMode, focus))
+                        },
+                    )
+                }
             }
             if (running) ShockRing(portal.value, modifier = Modifier.fillMaxSize())
+        }
+        // At home the weather falls over the stars, fading out before the buttons; not in the tunnel.
+        if (weatherFx && !running && !comingHome) {
+            WeatherLayer(
+                weatherLook,
+                Sky.strength(weatherLook, alerting = false, musicFocus = 0f),
+                null,
+                alerting = false,
+                Modifier.fillMaxSize().verticalFade(HomeWeather),
+            )
         }
         // The flight's words, under the globe at the tunnel's heart; "Position verrouillée" a beat,
         // then they rush past the viewer as the jump begins.
@@ -1022,7 +1062,7 @@ private fun Dashboard(s: DriveSnapshot?, modifier: Modifier = Modifier, compact:
             limit,
             color,
             ring,
-            sign = { LimitSign(limit ?: 0, uncertain = s?.limitSource.isGuess(), size = ring * (60f / 260f)) },
+            sign = { LimitSign(limit ?: 0, uncertain = s?.limitSource.isGuess(), size = ring * (60f / 260f), rain = rainBadge(s)) },
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
@@ -1051,7 +1091,7 @@ private fun Dashboard(s: DriveSnapshot?, modifier: Modifier = Modifier, compact:
 
 /** Round limit sign; gray ring when the limit is only inferred (road type, built-up area or not). */
 @Composable
-internal fun LimitSign(limitKmh: Int, uncertain: Boolean, size: Dp = 104.dp) {
+internal fun LimitSign(limitKmh: Int, uncertain: Boolean, size: Dp = 104.dp, rain: SkyKind? = null) {
     // A new limit pops in and sends out a ring, so the eye catches the change.
     val pop = remember { Animatable(1f) }
     val ring = remember { Animatable(1f) }
@@ -1082,6 +1122,47 @@ internal fun LimitSign(limitKmh: Int, uncertain: Boolean, size: Dp = 104.dp) {
             fontSize = (size.value * if (limitKmh >= 100) 0.327f else 0.385f).sp,
             fontWeight = FontWeight.Bold,
         )
+        // Lowered by the rain rule: a drop (a flake in snow) on the sign's shoulder says why.
+        AnimatedVisibility(
+            visible = rain != null,
+            modifier = Modifier.align(Alignment.TopEnd).offset(x = size * 0.12f, y = -size * 0.08f),
+            enter = fadeIn() + scaleIn(spring(dampingRatio = 0.45f, stiffness = Spring.StiffnessLow), initialScale = 0.3f),
+            exit = fadeOut() + scaleOut(targetScale = 0.3f),
+        ) {
+            var last by remember { mutableStateOf(rain ?: SkyKind.RAIN) }
+            LaunchedEffect(rain) { rain?.let { last = it } }
+            PrecipBadge(last, size * 0.4f)
+        }
+    }
+}
+
+/** Blue disc with a white raindrop, or a snowflake in snow. */
+@Composable
+private fun PrecipBadge(kind: SkyKind, size: Dp) {
+    Canvas(Modifier.size(size)) {
+        val r = this.size.minDimension / 2
+        val c = center
+        drawCircle(Color(0xFF0A84FF), r)
+        drawCircle(Color.White, r, style = Stroke(r * 0.12f))
+        if (kind == SkyKind.SNOW) {
+            val arm = r * 0.55f
+            for (k in 0 until 3) {
+                val a = Math.toRadians(90.0 + 60.0 * k)
+                val dx = (cos(a) * arm).toFloat()
+                val dy = (sin(a) * arm).toFloat()
+                drawLine(Color.White, Offset(c.x - dx, c.y - dy), Offset(c.x + dx, c.y + dy), strokeWidth = r * 0.16f, cap = StrokeCap.Round)
+            }
+        } else {
+            val drop = Path().apply {
+                moveTo(c.x, c.y - r * 0.58f)
+                cubicTo(c.x + r * 0.18f, c.y - r * 0.25f, c.x + r * 0.42f, c.y + r * 0.02f, c.x + r * 0.42f, c.y + r * 0.2f)
+                cubicTo(c.x + r * 0.42f, c.y + r * 0.45f, c.x + r * 0.22f, c.y + r * 0.6f, c.x, c.y + r * 0.6f)
+                cubicTo(c.x - r * 0.22f, c.y + r * 0.6f, c.x - r * 0.42f, c.y + r * 0.45f, c.x - r * 0.42f, c.y + r * 0.2f)
+                cubicTo(c.x - r * 0.42f, c.y + r * 0.02f, c.x - r * 0.18f, c.y - r * 0.25f, c.x, c.y - r * 0.58f)
+                close()
+            }
+            drawPath(drop, Color.White)
+        }
     }
 }
 
@@ -1157,6 +1238,14 @@ internal fun speedColor(speedKmh: Int?, limitKmh: Int?): Color = when {
 }
 
 /** Limit inferred rather than signposted: shown with a gray ring. */
+/** The drop on the limit sign: the rain rule lowered this limit; a flake when it snows. */
+@Composable
+internal fun rainBadge(s: DriveSnapshot?): SkyKind? {
+    if (s?.rainLowered != true) return null
+    val look by SkyWatch.look.collectAsState()
+    return if (look.kind == SkyKind.SNOW) SkyKind.SNOW else SkyKind.RAIN
+}
+
 fun LimitSource?.isGuess() = this == LimitSource.INFERRED || this == LimitSource.AREA
 
 private fun thousands(n: Int) = "%,d".format(n).replace(',', ' ')

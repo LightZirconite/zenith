@@ -1,5 +1,6 @@
 package zenith.app
 
+import zenith.core.Sky
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.RepeatMode
@@ -119,6 +120,17 @@ fun PipScreen(
             overlay = PipMapShade,
         )
         Box(Modifier.fillMaxSize().background(PipBottomShade))
+        // The weather on the map, faded out before the speed at the bottom.
+        val weatherLook by SkyWatch.look.collectAsState()
+        if (UserSettings.state.collectAsState().value.weatherFx) {
+            WeatherLayer(
+                weatherLook,
+                Sky.strength(weatherLook, alert != null, focus),
+                speed,
+                alert != null,
+                Modifier.fillMaxSize().verticalFade(blendStops(MeltStops, MeltStopsSlow, focus)),
+            )
+        }
 
         // Next radar: pill at the top, red while too fast for it.
         val next = alert?.let { Triple(it.radar, it.limitKmh, it.distanceM) }
@@ -169,7 +181,7 @@ fun PipScreen(
             }
             if (limit != null) {
                 Box(Modifier.padding(bottom = (unit * 3).dp)) {
-                    LimitSign(limit, uncertain = s.limitSource.isGuess(), size = (unit * 26).dp)
+                    LimitSign(limit, uncertain = s.limitSource.isGuess(), size = (unit * 26).dp, rain = rainBadge(s))
                 }
             }
         }

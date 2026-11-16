@@ -8,6 +8,7 @@ import zenith.core.ControlZone
 import zenith.core.DriveSnapshot
 import zenith.core.OverspeedLevel
 import zenith.core.Radar
+import zenith.core.SkyLook
 
 // What Swift reads from a drive: plain classes with simple fields, so the Swift side never deals
 // with Kotlin's boxed optionals or sealed types. A missing number is -1 (counts, limits, speeds,
@@ -157,6 +158,8 @@ class CoreSnapshot(
     val events: List<CoreEvent>,
     val estimated: Boolean,
     val drivenZone: CoreZone?,
+    /** The rain rule lowered limitKmh: a drop on the sign. */
+    val rainLowered: Boolean,
 ) {
     internal companion object {
         fun of(s: DriveSnapshot, prefs: AnnouncePrefs) = CoreSnapshot(
@@ -179,6 +182,14 @@ class CoreSnapshot(
             events = s.events.map { CoreEvent.of(it, prefs) },
             estimated = s.estimated,
             drivenZone = s.zone?.let { CoreZone.of(it.zone, it.remainingM) },
+            rainLowered = s.rainLowered,
         )
+    }
+}
+
+/** Weather on screen: [kind] CLEAR, RAIN, SNOW, STORM or FOG; [intensity] 0..1. */
+class CoreSky(val kind: String, val intensity: Float) {
+    internal companion object {
+        fun of(l: SkyLook) = CoreSky(l.kind.name, l.intensity)
     }
 }

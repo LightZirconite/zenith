@@ -41,6 +41,8 @@ data class SettingsState(
     val motionStart: Boolean = true,
     /** Rain mode from the weather (Open-Meteo) while driving. */
     val autoRain: Boolean = true,
+    /** Rain, snow, storm, fog drawn over the screen from the weather where the phone is ([SkyWatch]). */
+    val weatherFx: Boolean = true,
     /** Cars paired for the automatic start: any of them connecting starts the drive. */
     val cars: List<Car> = emptyList(),
     /** Spotify Canvas behind the music card and in picture-in-picture (unofficial free services). */
@@ -85,6 +87,7 @@ object UserSettings {
             autoStop = p.getBoolean("auto_stop", true),
             raiseVolume = p.getBoolean("raise_volume", true),
             autoRain = p.getBoolean("auto_rain", true),
+            weatherFx = p.getBoolean("weather_fx", true),
             autoStart = p.getBoolean("auto_start", true),
             motionStart = p.getBoolean("motion_start", true),
             cars = readCars(p.getString("cars", null))
@@ -114,6 +117,7 @@ object UserSettings {
             putBoolean("auto_stop", next.autoStop)
             putBoolean("raise_volume", next.raiseVolume)
             putBoolean("auto_rain", next.autoRain)
+            putBoolean("weather_fx", next.weatherFx)
             putBoolean("auto_start", next.autoStart)
             putBoolean("motion_start", next.motionStart)
             putString("cars", JSONArray(next.cars.map { JSONObject().put("id", it.associationId).put("name", it.name) }).toString())

@@ -157,6 +157,37 @@ struct Snapshot: Equatable {
     let estimated: Bool
     /** Control itinerary being driven. */
     let zone: ZoneInfo?
+    /** The rain rule lowered limitKmh (130 → 110…): the sign shows a raindrop. */
+    var rainLowered = false
+}
+
+/** What the sky looks like on screen (the core's SkyKind). */
+enum SkyKind: String {
+    case clear = "CLEAR", rain = "RAIN", snow = "SNOW", storm = "STORM", fog = "FOG"
+}
+
+/** The weather drawn over the screen: intensity from 0 (none) to 1 (downpour, thick fog). */
+struct SkyLook: Equatable {
+    var kind: SkyKind
+    var intensity: Double
+    static let clear = SkyLook(kind: .clear, intensity: 0)
+
+    init(kind: SkyKind, intensity: Double) {
+        self.kind = kind
+        self.intensity = intensity
+    }
+
+    init(_ s: CoreSky) {
+        self.init(kind: SkyKind(rawValue: s.kind) ?? .clear, intensity: Double(s.intensity))
+    }
+
+    /** How strongly the effect shows (the core's Sky.strength): an alert and music mode push it back. */
+    func strength(alerting: Bool, musicFocus: Double) -> Double {
+        Double(Bridge.shared.skyStrength(kind: kind.rawValue, intensity: Float(intensity), alerting: alerting, musicFocus: Float(musicFocus)))
+    }
+
+    static var flashMinMs: Int64 { Bridge.shared.skyFlashMinMs }
+    static var flashMaxMs: Int64 { Bridge.shared.skyFlashMaxMs }
 }
 
 // MARK: - From the Kotlin views
@@ -251,7 +282,8 @@ extension Snapshot {
             ahead: geoPoints(s.ahead),
             events: s.events.map(DriveEvent.init),
             estimated: s.estimated,
-            zone: s.drivenZone.map(ZoneInfo.init)
+            zone: s.drivenZone.map(ZoneInfo.init),
+            rainLowered: s.rainLowered
         )
     }
 }

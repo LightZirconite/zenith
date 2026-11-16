@@ -44,6 +44,71 @@ object Weather {
     fun isWet(w: WeatherNow): Boolean = w.precipitationMm >= 0.1 || w.weatherCode in WET_CODES
 }
 
+/** What the sky looks like on screen. */
+enum class SkyKind { CLEAR, RAIN, SNOW, STORM, FOG }
+
+/** The weather drawn over the screen: [intensity] from 0 (none) to 1 (downpour, thick fog). */
+data class SkyLook(val kind: SkyKind, val intensity: Float) {
+    companion object {
+        val CLEAR = SkyLook(SkyKind.CLEAR, 0f)
+    }
+}
+
+/**
+ * Weather effects on screen (rain, snow, storm, fog), the same rules at home, on the drive screen
+ * and in the small window. They show the driver why the limits went down; they never hide the road,
+ * the speed, an alert or the music's Canvas.
+ */
+object Sky {
+    private val STORM = setOf(95, 96, 99)
+    private val SNOW = setOf(71, 73, 75, 77, 85, 86)
+    private val FOG = setOf(45, 48)
+    private val LIGHT = setOf(51, 53, 56, 61, 66, 71, 77, 80, 85)
+    private val MODERATE = setOf(55, 57, 63, 73, 81)
+    private val HEAVY = setOf(65, 67, 75, 82, 86, 95, 96, 99)
+
+    /** Look of [w]: kind from the WMO code, strength from the code and the water measured. */
+    fun of(w: WeatherNow): SkyLook {
+        val code = w.weatherCode
+        val kind = when {
+            code in STORM -> SkyKind.STORM
+            code in SNOW -> SkyKind.SNOW
+            Weather.isWet(w) -> SkyKind.RAIN
+            code in FOG -> SkyKind.FOG
+            else -> return SkyLook.CLEAR
+        }
+        if (kind == SkyKind.FOG) return SkyLook(kind, if (code == 48) 0.9f else 0.7f)
+        val byCode = when (code) {
+            in HEAVY -> 1f
+            in MODERATE -> 0.65f
+            in LIGHT -> 0.35f
+            else -> 0.3f
+        }
+        // Precipitation of the last 15 minutes: 2 mm (8 mm/h) is a downpour.
+        val byWater = (w.precipitationMm / 2.0).toFloat().coerceIn(0f, 1f)
+        return SkyLook(kind, maxOf(byCode, byWater).coerceIn(0.3f, 1f))
+    }
+
+    /**
+     * How strongly the effect shows: whole at home or cruising; an alert or an average-speed section
+     * on screen pushes it back (the alert is the hero), and in music mode it gives way to the Canvas.
+     * [musicFocus] 0 (the map has the screen) to 1 (the Canvas has it).
+     */
+    fun strength(look: SkyLook, alerting: Boolean, musicFocus: Float): Float {
+        if (look.kind == SkyKind.CLEAR) return 0f
+        val alert = if (alerting) ALERT_SHARE else 1f
+        val music = 1f - (1f - MUSIC_SHARE) * musicFocus.coerceIn(0f, 1f)
+        return (look.intensity * alert * music).coerceIn(0f, 1f)
+    }
+
+    /** Lightning now and then in a storm (never during an alert): the next one in [minMs]..[maxMs]. */
+    const val FLASH_MIN_MS = 7_000L
+    const val FLASH_MAX_MS = 18_000L
+
+    private const val ALERT_SHARE = 0.35f
+    private const val MUSIC_SHARE = 0.4f
+}
+
 /**
  * Rain mode from the weather, for the French rain limits ("par temps de pluie ou d'autres
  * précipitations"). On at the first wet report, off after [dryReports] dry ones in a row, so a gap

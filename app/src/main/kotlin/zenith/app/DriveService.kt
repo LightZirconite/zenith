@@ -229,13 +229,15 @@ class DriveService : Service(), LocationListener {
                 val p = DriveState.snapshot.value?.position
                 // Setting turned off while it rained: the limits come back at once, not at the next drive.
                 if (!s.autoRain && s.raining) UserSettings.update(this@DriveService) { it.copy(raining = false) }
-                if (p == null || !s.autoRain) {
+                // The same report draws the sky on screen ([SkyWatch]), even with the rain limits off.
+                if (p == null || (!s.autoRain && !s.weatherFx)) {
                     delay(20_000)
                     continue
                 }
                 val now = runCatching { Weather.parse(httpGet(Weather.url(p))) }
                     .onFailure { Log.w("Zenith", "weather", it) }.getOrNull()
-                if (now != null) {
+                now?.let(SkyWatch::report)
+                if (now != null && s.autoRain) {
                     val raining = rain.report(now)
                     if (raining != s.raining) {
                         UserSettings.update(this@DriveService) { it.copy(raining = raining) }
@@ -293,6 +295,7 @@ class DriveService : Service(), LocationListener {
     /** Hidden demo: replays [DemoDrive] in real time through the same pipeline, then stops. */
     private fun startDemo() {
         val scenario = DemoDrive.load()
+        SkyWatch.demo(true)
         session = DrivingSession(scenario.network, scenario.radars, zones = scenario.zones)
         radarIndex = RadarIndex(scenario.radars)
         zoneBoxes = scenario.zones.map { it to BBox.of(it.points) }
@@ -433,6 +436,7 @@ class DriveService : Service(), LocationListener {
         driveExecutor.shutdown()
         // The next drive starts from the weather again, not from this drive's rain.
         if (started && !demo) UserSettings.update(this) { it.copy(raining = false) }
+        if (demo) SkyWatch.demo(false)
         DriveState.stopped()
         super.onDestroy()
     }

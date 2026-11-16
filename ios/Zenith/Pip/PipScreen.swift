@@ -30,6 +30,8 @@ struct PipScreen: View {
     var canvasFrame: CGImage? = nil
     /** Time of the frame: the pulse, the car carried on between two fixes, the eased camera. */
     var now: Date = Date()
+    /** The weather over the map (SkyWatch); clear when the setting is off. */
+    var weather: SkyLook = .clear
 
     var body: some View {
         GeometryReader { geo in
@@ -92,6 +94,18 @@ struct PipScreen: View {
                     startPoint: .top,
                     endPoint: .bottom
                 )
+            }
+            // The weather on the map, faded out before the speed at the bottom; drawn frame by frame.
+            if weather.kind != .clear {
+                WeatherCanvas(
+                    kind: weather.kind,
+                    strength: weather.strength(alerting: alert != nil, musicFocus: pose?.music ?? share),
+                    speedKmh: Double(min(max(speed ?? 0, 0), 150)),
+                    time: now.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 600)
+                )
+                .mask {
+                    LinearGradient(stops: melt.map { Gradient.Stop(color: .black.opacity($0.opacity), location: $0.at) }, startPoint: .top, endPoint: .bottom)
+                }
             }
             // Over the map and the cover alike: the speed and the limit stay readable.
             LinearGradient(
@@ -157,6 +171,11 @@ struct PipScreen: View {
                 Spacer(minLength: unit * 4)
                 if let limit {
                     PipLimitSign(limit: limit, guess: snapshot?.limitSource?.isGuess == true, size: unit * 26)
+                        .overlay(alignment: .topTrailing) {
+                            if let rain = RainBadge.kind(snapshot) {
+                                PrecipBadge(kind: rain, size: unit * 26 * 0.4).offset(x: unit * 26 * 0.12, y: -unit * 26 * 0.08)
+                            }
+                        }
                         .padding(.bottom, unit * 3)
                 }
             }
